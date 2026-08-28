@@ -37,7 +37,12 @@ public sealed class FfxiAuthClient : IDisposable
     {
         await _tcp.ConnectAsync(host, port, ct);
         _ssl = new SslStream(_tcp.GetStream(), leaveInnerStreamOpen: false, (_, _, _, _) => true);
-        await _ssl.AuthenticateAsClientAsync(host);
+
+        // The single-string-argument AuthenticateAsClientAsync overload has
+        // no CancellationToken parameter at all - a hung/slow handshake
+        // would ignore a caller's timeout entirely. Use the options-based
+        // overload instead so ConnectAsync's ct actually has teeth here.
+        await _ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = host }, ct);
     }
 
     public Task<FfxiLoginResponse> LoginAsync(string username, string password, string? otp = null, string? trustToken = null, bool trustThisComputer = false, CancellationToken ct = default)

@@ -53,9 +53,31 @@ namespace PortJeuno.Core.Ffxi;
 public sealed class FfxiRosterClient : IDisposable
 {
     private const byte ViewOpcodeAcquirePlayerData = 0x1F;
+    private const byte ViewOpcodeSelectCharacter = 0x07;
     private const byte DataOpcodeCharacterListRequest = 0xA1;
+    private const byte DataOpcodeConfirmSelection = 0xA2;
     private const byte DataOpcodeKeepAlive = 0xFE;
     private const byte DataOpcodePush = 0x01;
+    private const byte DataOpcodeSelectPush = 0x02;
+
+    private const int PacketNameLength = 16; // "15 characters + null terminator" per data_session.cpp's own comment.
+    private const int OffsetSelectCharId = 28;
+    private const int OffsetSelectCharName = 36;
+    private const int ViewSelectRequestSize = OffsetSelectCharName + PacketNameLength; // 52
+
+    // lpkt_next_login (login_packets.h): packet_t header(28) + ffxi_id(4) +
+    // ffxi_id_world(4) + character_name(16) + server_id(4) + server_ip(4) +
+    // server_port(4) + cache_ip(4) + cache_port(4) = 0x48 (72), matching the
+    // server's own characterSelectionResponse.packet_size assignment.
+    private const int ZoneHandoffSize = 72;
+    private const int OffsetHandoffContentId = 28;
+    private const int OffsetHandoffCharIdWorld = 32;
+    private const int OffsetHandoffCharacterName = 36;
+    private const int OffsetHandoffServerId = 52;
+    private const int OffsetHandoffServerIp = 56;
+    private const int OffsetHandoffServerPort = 60;
+    private const int OffsetHandoffCacheIp = 64;
+    private const int OffsetHandoffCachePort = 68;
 
     // TC_OPERATION_MAKE offsets, relative to the start of one character record.
     private const int RecordSize = 140;
@@ -116,6 +138,51 @@ public sealed class FfxiRosterClient : IDisposable
         return ParseCharacters(viewBuffer.AsSpan(0, viewRead));
     }
 
+    /// <summary>
+    /// Selects a character from the roster FetchCharactersAsync already
+    /// returned, reusing the same still-open data/view sockets (the real
+    /// protocol runs both steps over one continuous session, not separate
+    /// connections). Sequence (view_session.cpp/data_session.cpp, case
+    /// 0x07/0xA2): client sends 0x07 on the view socket (char id + name) ->
+    /// server pushes a bare 0x02 on the data socket -> client confirms with
+    /// 0xA2 on the data socket -> server sends the lpkt_next_login handoff
+    /// on the view socket and then closes it ("Client waits for us to close
+    /// the socket" per the server's own comment) - this class doesn't try
+    /// to read anything from the view socket afterward.
+    ///
+    /// 0xA2's request carries a 20-byte `key3` field at offset 1 ("some
+    /// kind of magic regarding the blowfish keys" per the server's own
+    /// comment) that deliberately overlaps bytes 12-20 of the mandatory
+    /// session-hash region every data-socket packet needs (getHashFromPacket
+    /// always reads offset 12 regardless of opcode) - the login server only
+    /// stores this blob for a *later* zone-server handshake this project
+    /// hasn't implemented, so its content doesn't matter yet; left zeroed
+    /// beyond the session hash it's forced to contain.
+    ///
+    /// NOT live-tested - the roster fetch above is confirmed against a real
+    /// server, this next step isn't yet.
+    /// </summary>
+    public async Task<FfxiZoneHandoff> SelectCharacterAsync(FfxiCharacter character, byte[] sessionHash, CancellationToken ct = default)
+    {
+        NetworkStream dataStream = _data.GetStream();
+        NetworkStream viewStream = _view.GetStream();
+
+        await viewStream.WriteAsync(BuildViewSelectCharacterRequest(character.ContentId, character.Name, sessionHash), ct);
+
+        var pushBuffer = new byte[16];
+        int pushRead = await dataStream.ReadAsync(pushBuffer, ct);
+        if (pushRead < 1 || pushBuffer[0] != DataOpcodeSelectPush)
+        {
+            throw new InvalidOperationException($"Expected a 0x{DataOpcodeSelectPush:X2} push from the data session, got {(pushRead < 1 ? "nothing" : $"0x{pushBuffer[0]:X2}")}.");
+        }
+
+        await dataStream.WriteAsync(BuildDataConfirmSelectionRequest(sessionHash), ct);
+
+        var viewBuffer = new byte[ZoneHandoffSize];
+        int viewRead = await viewStream.ReadAsync(viewBuffer, ct);
+        return ParseZoneHandoff(viewBuffer.AsSpan(0, viewRead));
+    }
+
     internal static byte[] BuildViewAcquirePlayerDataRequest(ReadOnlySpan<byte> sessionHash)
     {
         var packet = new byte[FfxiConstants.PacketHeaderSize];
@@ -144,6 +211,35 @@ public sealed class FfxiRosterClient : IDisposable
         packet[0] = DataOpcodeCharacterListRequest;
         BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(1, 4), accountId);
         BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(5, 4), serverIp);
+        sessionHash.CopyTo(packet.AsSpan(FfxiConstants.PacketIdentifierOffset, FfxiConstants.PacketIdentifierLength));
+        return packet;
+    }
+
+    /// <summary>view_session.cpp case 0x07: charId at offset 28, name (up to 15 chars + NUL) at offset 36.</summary>
+    internal static byte[] BuildViewSelectCharacterRequest(uint contentId, string characterName, ReadOnlySpan<byte> sessionHash)
+    {
+        var packet = new byte[ViewSelectRequestSize];
+        packet[8] = ViewOpcodeSelectCharacter;
+        sessionHash.CopyTo(packet.AsSpan(FfxiConstants.PacketIdentifierOffset, FfxiConstants.PacketIdentifierLength));
+        BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(OffsetSelectCharId, 4), contentId);
+
+        Span<byte> nameField = packet.AsSpan(OffsetSelectCharName, PacketNameLength - 1);
+        int nameBytes = Encoding.ASCII.GetBytes(characterName.AsSpan(0, Math.Min(characterName.Length, PacketNameLength - 1)), nameField);
+        _ = nameBytes; // remaining bytes stay zero-padded, matching a NUL-terminated fixed field.
+
+        return packet;
+    }
+
+    /// <summary>
+    /// data_session.cpp case 0xA2: a 20-byte `key3` at offset 1, which
+    /// overlaps the mandatory session-hash region (offset 12-27, read by
+    /// getHashFromPacket regardless of opcode) - see SelectCharacterAsync's
+    /// remarks for why the overlap is left as-is rather than avoided.
+    /// </summary>
+    internal static byte[] BuildDataConfirmSelectionRequest(ReadOnlySpan<byte> sessionHash)
+    {
+        var packet = new byte[FfxiConstants.PacketHeaderSize];
+        packet[0] = DataOpcodeConfirmSelection;
         sessionHash.CopyTo(packet.AsSpan(FfxiConstants.PacketIdentifierOffset, FfxiConstants.PacketIdentifierLength));
         return packet;
     }
@@ -195,6 +291,55 @@ public sealed class FfxiRosterClient : IDisposable
 
         return characters;
     }
+
+    /// <summary>
+    /// Decodes an lpkt_next_login packet (see login_packets.h) - the
+    /// zone-server handoff sent right after a successful character select.
+    /// NOT live-tested. The IP fields are read big-endian, unlike every
+    /// other integer field in this protocol (all little-endian): the
+    /// server populates them via str2ip() from a dotted-quad DB string, and
+    /// every other in-memory `in_addr`-style representation on real systems
+    /// stores octets in wire/dotted order (first byte = first octet) - so a
+    /// big-endian read here gives back the correct dotted address, while a
+    /// little-endian one would reverse it. server_port/cache_port are
+    /// plain little-endian integers (assigned by value from a uint16 DB
+    /// column into a uint32 field, not copied from any network struct).
+    /// </summary>
+    private const uint ExpectedZoneHandoffCommand = 0x0B; // S2C_0x000B_ResponseNextLogin
+
+    internal static FfxiZoneHandoff ParseZoneHandoff(ReadOnlySpan<byte> packet)
+    {
+        if (packet.Length < ZoneHandoffSize)
+        {
+            throw new ArgumentException($"Zone handoff packet too short: got {packet.Length} bytes, need {ZoneHandoffSize}. Raw: {Convert.ToHexString(packet)}", nameof(packet));
+        }
+
+        // packet_t's command field (offset 8) should be 0x0B for a real
+        // handoff. If the login server instead sent an error packet (e.g.
+        // "unable to connect to world server" - see data_session.cpp's
+        // several `viewSession->do_write(0x24)` error paths), the command
+        // and payload will differ from what this method assumes - fail
+        // loudly with the raw bytes rather than silently returning zeros.
+        uint command = BinaryPrimitives.ReadUInt32LittleEndian(packet.Slice(8, 4));
+        if (command != ExpectedZoneHandoffCommand)
+        {
+            throw new InvalidOperationException($"Expected command 0x{ExpectedZoneHandoffCommand:X}, got 0x{command:X} - likely a server-side error packet, not a real handoff. Raw: {Convert.ToHexString(packet)}");
+        }
+
+        return new FfxiZoneHandoff(
+            ContentId: BinaryPrimitives.ReadUInt32LittleEndian(packet.Slice(OffsetHandoffContentId, 4)),
+            CharIdMain: BinaryPrimitives.ReadUInt32LittleEndian(packet.Slice(OffsetHandoffCharIdWorld, 4)),
+            CharacterName: ReadFixedString(packet.Slice(OffsetHandoffCharacterName, PacketNameLength)),
+            ServerId: BinaryPrimitives.ReadUInt32LittleEndian(packet.Slice(OffsetHandoffServerId, 4)),
+            ZoneServerIp: BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(OffsetHandoffServerIp, 4)),
+            ZoneServerPort: BinaryPrimitives.ReadUInt32LittleEndian(packet.Slice(OffsetHandoffServerPort, 4)),
+            SearchServerIp: BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(OffsetHandoffCacheIp, 4)),
+            SearchServerPort: BinaryPrimitives.ReadUInt32LittleEndian(packet.Slice(OffsetHandoffCachePort, 4)));
+    }
+
+    /// <summary>Formats a ZoneServerIp/SearchServerIp value (big-endian octets - see ParseZoneHandoff) as a dotted-quad string.</summary>
+    public static string FormatIpAddress(uint value) =>
+        $"{(value >> 24) & 0xFF}.{(value >> 16) & 0xFF}.{(value >> 8) & 0xFF}.{value & 0xFF}";
 
     private static string ReadFixedString(ReadOnlySpan<byte> field)
     {

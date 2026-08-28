@@ -1,11 +1,29 @@
 using System.Text.Json;
 using PortJeuno.Core.Ffxi;
 
-Dictionary<string, string> ParseFlags(string[] args) =>
-    args.Skip(1)
-        .Select((value, index) => (value, index))
-        .Where(t => t.index % 2 == 0 && t.value.StartsWith("--"))
-        .ToDictionary(t => t.value[2..], t => args.Skip(1).ElementAtOrDefault(t.index + 1) ?? "");
+// A flag's value is the next token, unless that token is itself another
+// "--flag" - this lets valueless flags like --save sit anywhere in the
+// list without desyncing the ones after it (a strict --flag/value pairing
+// scheme breaks the instant one flag in the middle has no value).
+Dictionary<string, string> ParseFlags(string[] args)
+{
+    var flags = new Dictionary<string, string>();
+    string[] rest = args.Skip(1).ToArray();
+
+    for (int i = 0; i < rest.Length; i++)
+    {
+        if (!rest[i].StartsWith("--"))
+        {
+            continue;
+        }
+
+        string name = rest[i][2..];
+        bool hasValue = i + 1 < rest.Length && !rest[i + 1].StartsWith("--");
+        flags[name] = hasValue ? rest[++i] : "";
+    }
+
+    return flags;
+}
 
 if (args.Length == 0)
 {
@@ -41,6 +59,10 @@ static void PrintUsage()
           login --credentials-file <path.json> [--save]
             (file shape: {"host":"...","username":"...","password":"...","name":"...","otp":"..."} -
              avoids the password ever appearing in the command line/shell history)
+
+        Add --select-character <name> to any login to also select a
+        character after listing the roster and print the zone-server
+        handoff (not the real game protocol - just the login/lobby steps).
 
         Ports default to the standard 54231/54230/54001 - override with
         --auth-port/--data-port/--view-port if your server differs.
@@ -151,44 +173,72 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
     try
     {
         var client = new FfxiLoginClient();
-        (FfxiLoginResponse login, IReadOnlyList<FfxiCharacter> characters) = await client.LoginAsync(profile, otp, ct: timeout.Token);
-
-        Console.WriteLine($"Result: {login.Result}");
-        if (login.ErrorMessage is not null)
+        (FfxiLoginResponse login, IReadOnlyList<FfxiCharacter> characters, FfxiRosterClient? roster) = await client.LoginAsync(profile, otp, ct: timeout.Token);
+        using (roster)
         {
-            Console.WriteLine($"Server message: {login.ErrorMessage}");
-        }
-
-        if (login.Result != FfxiLoginResult.Success)
-        {
-            return 1;
-        }
-
-        Console.WriteLine($"account_id={login.AccountId}  session_hash={Convert.ToHexString(login.SessionHash!)}");
-
-        if (login.TrustToken is not null)
-        {
-            profile.TrustToken = login.TrustToken;
-            if (FfxiServerProfileStore.Profiles.Contains(profile))
+            Console.WriteLine($"Result: {login.Result}");
+            if (login.ErrorMessage is not null)
             {
-                FfxiServerProfileStore.Save();
+                Console.WriteLine($"Server message: {login.ErrorMessage}");
             }
-            Console.WriteLine("Received and saved a new trust_token.");
-        }
 
-        // The server always sends a full slot array, padded up to the
-        // account's content-id limit if character creation is enabled - an
-        // empty slot's name is a single space (data_session.cpp sets only
-        // byte[0] = 0x20 so the real client shows a blank slot instead of
-        // a "hume" placeholder for an all-zero name), not literally empty.
-        List<FfxiCharacter> occupied = characters.Where(c => !string.IsNullOrWhiteSpace(c.Name)).ToList();
-        Console.WriteLine($"Characters ({occupied.Count} of {characters.Count} slots occupied):");
-        foreach (FfxiCharacter c in occupied)
-        {
-            Console.WriteLine($"  {c.Name,-16} world={c.WorldName,-10} race={c.Race} job={c.MainJob}/{c.MainJobLevel} sub={c.SubJob} zone={c.Zone} contentId={c.ContentId}");
-        }
+            if (login.Result != FfxiLoginResult.Success)
+            {
+                return 1;
+            }
 
-        return 0;
+            Console.WriteLine($"account_id={login.AccountId}  session_hash={Convert.ToHexString(login.SessionHash!)}");
+
+            if (login.TrustToken is not null)
+            {
+                profile.TrustToken = login.TrustToken;
+                if (FfxiServerProfileStore.Profiles.Contains(profile))
+                {
+                    FfxiServerProfileStore.Save();
+                }
+                Console.WriteLine("Received and saved a new trust_token.");
+            }
+
+            // The server always sends a full slot array, padded up to the
+            // account's content-id limit if character creation is enabled - an
+            // empty slot's name is a single space (data_session.cpp sets only
+            // byte[0] = 0x20 so the real client shows a blank slot instead of
+            // a "hume" placeholder for an all-zero name), not literally empty.
+            List<FfxiCharacter> occupied = characters.Where(c => !string.IsNullOrWhiteSpace(c.Name)).ToList();
+            Console.WriteLine($"Characters ({occupied.Count} of {characters.Count} slots occupied):");
+            foreach (FfxiCharacter c in occupied)
+            {
+                Console.WriteLine($"  {c.Name,-16} world={c.WorldName,-10} race={c.Race} job={c.MainJob}/{c.MainJobLevel} sub={c.SubJob} zone={c.Zone} contentId={c.ContentId}");
+            }
+
+            if (!flags.TryGetValue("select-character", out string? selectName))
+            {
+                return 0;
+            }
+
+            FfxiCharacter? selected = occupied.FirstOrDefault(c => c.Name.Equals(selectName, StringComparison.OrdinalIgnoreCase));
+            if (selected is null)
+            {
+                Console.WriteLine($"No character named '{selectName}' in the roster.");
+                return 1;
+            }
+
+            if (roster is null)
+            {
+                Console.WriteLine("Roster session unavailable - cannot select a character.");
+                return 1;
+            }
+
+            Console.WriteLine($"Selecting '{selected.Name}'...");
+            FfxiZoneHandoff handoff = await roster.SelectCharacterAsync(selected, login.SessionHash!, timeout.Token);
+
+            Console.WriteLine($"Zone handoff: character={handoff.CharacterName} serverId={handoff.ServerId}");
+            Console.WriteLine($"  Zone server:   {FfxiRosterClient.FormatIpAddress(handoff.ZoneServerIp)}:{handoff.ZoneServerPort}");
+            Console.WriteLine($"  Search server: {FfxiRosterClient.FormatIpAddress(handoff.SearchServerIp)}:{handoff.SearchServerPort}");
+            Console.WriteLine("(Actually connecting to the zone server is a separate, Blowfish-encrypted protocol - not implemented yet.)");
+
+            return 0;
+        }
     }
     catch (Exception ex)
     {

@@ -129,4 +129,69 @@ public class FfxiRosterClientTests
         Assert.Equal(0x1F, request[8]);
         Assert.Equal(hash, request.AsSpan(FfxiConstants.PacketIdentifierOffset, 16).ToArray());
     }
+
+    [Fact]
+    public void BuildViewSelectCharacterRequest_PlacesFieldsAtServerExpectedOffsets()
+    {
+        byte[] hash = Enumerable.Range(0, 16).Select(i => (byte)(i + 3)).ToArray();
+        byte[] request = FfxiRosterClient.BuildViewSelectCharacterRequest(0xAABBCCDD, "Tagban", hash);
+
+        Assert.Equal(0x07, request[8]);
+        Assert.Equal(0xAABBCCDDu, BinaryPrimitives.ReadUInt32LittleEndian(request.AsSpan(28, 4)));
+        Assert.Equal("Tagban", Encoding.ASCII.GetString(request.AsSpan(36, 6)));
+        Assert.Equal(0, request[36 + 6]); // NUL-terminated within the 15-usable-byte field
+        Assert.Equal(hash, request.AsSpan(FfxiConstants.PacketIdentifierOffset, 16).ToArray());
+    }
+
+    [Fact]
+    public void BuildDataConfirmSelectionRequest_PlacesOpcodeAndHashAtServerExpectedOffsets()
+    {
+        byte[] hash = Enumerable.Range(0, 16).Select(i => (byte)(i + 4)).ToArray();
+        byte[] request = FfxiRosterClient.BuildDataConfirmSelectionRequest(hash);
+
+        Assert.Equal(0xA2, request[0]);
+        Assert.Equal(hash, request.AsSpan(FfxiConstants.PacketIdentifierOffset, 16).ToArray());
+    }
+
+    [Fact]
+    public void ParseZoneHandoff_DecodesAllFields()
+    {
+        var packet = new byte[72];
+        BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(8, 4), 0x0B); // command
+        BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(28, 4), 12345u); // contentId
+        BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(32, 4), 42u);    // charIdWorld
+        Encoding.ASCII.GetBytes("Tagban").CopyTo(packet, 36);
+        BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(52, 4), 7u); // serverId
+        BinaryPrimitives.WriteUInt32BigEndian(packet.AsSpan(56, 4), 0xC0A80001);  // 192.168.0.1
+        BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(60, 4), 54230u);   // zone port
+        BinaryPrimitives.WriteUInt32BigEndian(packet.AsSpan(64, 4), 0xC0A80002);  // 192.168.0.2
+        BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(68, 4), 54001u);   // search port
+
+        FfxiZoneHandoff handoff = FfxiRosterClient.ParseZoneHandoff(packet);
+
+        Assert.Equal(12345u, handoff.ContentId);
+        Assert.Equal(42u, handoff.CharIdMain);
+        Assert.Equal("Tagban", handoff.CharacterName);
+        Assert.Equal(7u, handoff.ServerId);
+        Assert.Equal("192.168.0.1", FfxiRosterClient.FormatIpAddress(handoff.ZoneServerIp));
+        Assert.Equal(54230u, handoff.ZoneServerPort);
+        Assert.Equal("192.168.0.2", FfxiRosterClient.FormatIpAddress(handoff.SearchServerIp));
+        Assert.Equal(54001u, handoff.SearchServerPort);
+    }
+
+    [Fact]
+    public void ParseZoneHandoff_TooShort_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => FfxiRosterClient.ParseZoneHandoff(new byte[10]));
+    }
+
+    [Fact]
+    public void ParseZoneHandoff_WrongCommand_ThrowsWithRawBytes()
+    {
+        var packet = new byte[72];
+        BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(8, 4), 0x24); // an error packet's command, not 0x0B
+
+        var ex = Assert.Throws<InvalidOperationException>(() => FfxiRosterClient.ParseZoneHandoff(packet));
+        Assert.Contains("0x24", ex.Message);
+    }
 }
