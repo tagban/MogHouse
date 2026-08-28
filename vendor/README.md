@@ -131,6 +131,14 @@ different MSVC toolset version or avoiding `import std` project-wide (which
 would mean converting away from `import std;` everywhere it's used - a much
 bigger undertaking, not attempted). Stopped here.
 
+Also tried a `Debug` config build (`configure-debug.bat`/`build-debug.bat`) in
+case different optimization/inlining sidesteps whatever compiler state
+triggers this - identical failure, same file and line (`stop_token(248)`),
+confirming it's a genuine compiler-internal bug rather than something
+config-specific. Checked GitHub for a known/reported issue matching this
+exact error (`microsoft/STL` search for `_Stop_callback_base`, and for
+`"import std"` + `stop_token`) - nothing found publicly as of tonight.
+
 ## Putting it all together
 
 See `ffxi-engine/configure.bat` and `ffxi-engine/build.bat` for the full,
