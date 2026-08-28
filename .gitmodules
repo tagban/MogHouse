@@ -1,0 +1,6 @@
+[submodule "engine"]
+	path = engine
+	url = https://github.com/teschnei/lotus-engine.git
+[submodule "ffxi-engine"]
+	path = ffxi-engine
+	url = https://github.com/teschnei/lotus-ffxi.git
