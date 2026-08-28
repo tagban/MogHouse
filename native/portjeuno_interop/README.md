@@ -47,6 +47,13 @@ reference usage is safer to copy than inventing a different lifecycle.
    in this directory's `CMakeLists.txt` refers to a target that doesn't
    exist yet.
 
+   The same hardcoding also shows up in `ffxi/entity/CMakeLists.txt` (plus its
+   own nested `component/` and `loader/` subdirectories, not yet read) and in
+   `ffxi/shaders/CMakeLists.txt`'s `add_dependencies(ffxi ...)` - the actual
+   surface to patch is larger than just `audio/`+`dat/`, and wasn't fully
+   catalogued before stopping for the night given there's no local toolchain
+   to test any of it against anyway.
+
    Recommended fix: a small, maintained patch to `ffxi-engine`'s CMake files
    (not a hand-edit inside the submodule's working tree, which would just be
    lost on the next submodule update) that either renames the target to a
