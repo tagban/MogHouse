@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/PortJeuno.Core.Tests/PortJeuno.Core.Tests.csproj" />
     <Project Path="src/PortJeuno.Core/PortJeuno.Core.csproj" />
   </Folder>
 </Solution>
