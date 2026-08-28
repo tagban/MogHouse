@@ -54,15 +54,15 @@ public sealed class FfxiRosterClient : IDisposable
     private readonly TcpClient _data = new();
     private readonly TcpClient _view = new();
 
-    public async Task<IReadOnlyList<FfxiCharacter>> FetchCharactersAsync(string host, uint accountId, byte[] sessionHash, CancellationToken ct = default)
+    public async Task<IReadOnlyList<FfxiCharacter>> FetchCharactersAsync(string host, uint accountId, byte[] sessionHash, int dataPort = FfxiConstants.DataPort, int viewPort = FfxiConstants.ViewPort, CancellationToken ct = default)
     {
         if (sessionHash.Length != FfxiConstants.PacketIdentifierLength)
         {
             throw new ArgumentException($"Session hash must be {FfxiConstants.PacketIdentifierLength} bytes.", nameof(sessionHash));
         }
 
-        await _data.ConnectAsync(host, FfxiConstants.DataPort, ct);
-        await _view.ConnectAsync(host, FfxiConstants.ViewPort, ct);
+        await _data.ConnectAsync(host, dataPort, ct);
+        await _view.ConnectAsync(host, viewPort, ct);
 
         NetworkStream dataStream = _data.GetStream();
         NetworkStream viewStream = _view.GetStream();
