@@ -40,6 +40,9 @@ switch (args[0])
     case "login":
         return await LoginAsync(ParseFlags(args));
 
+    case "create-account":
+        return await CreateAccountAsync(ParseFlags(args));
+
     default:
         PrintUsage();
         return 1;
@@ -59,6 +62,8 @@ static void PrintUsage()
           login --credentials-file <path.json> [--save]
             (file shape: {"host":"...","username":"...","password":"...","name":"...","otp":"..."} -
              avoids the password ever appearing in the command line/shell history)
+          create-account --host <host> --username <user> --password <pass> [--auth-port <port>]
+          create-account --credentials-file <path.json>
 
         Add --select-character <name> to any login to also select a
         character after listing the roster and print the zone-server
@@ -83,32 +88,81 @@ static void ListProfiles()
     }
 }
 
+/// <summary>Merges --credentials-file's JSON into flags (only filling keys not already set). Returns false (with a message printed) if the file was requested but missing.</summary>
+static bool TryMergeCredentialsFile(Dictionary<string, string> flags)
+{
+    if (!flags.TryGetValue("credentials-file", out string? credentialsPath))
+    {
+        return true;
+    }
+
+    if (!File.Exists(credentialsPath))
+    {
+        Console.WriteLine($"Credentials file not found: {credentialsPath}");
+        return false;
+    }
+
+    using JsonDocument doc = JsonDocument.Parse(File.ReadAllText(credentialsPath));
+    JsonElement root = doc.RootElement;
+
+    void CopyIfPresent(string jsonName, string flagName)
+    {
+        if (root.TryGetProperty(jsonName, out JsonElement el) && el.ValueKind == JsonValueKind.String && !flags.ContainsKey(flagName))
+        {
+            flags[flagName] = el.GetString() ?? "";
+        }
+    }
+
+    CopyIfPresent("host", "host");
+    CopyIfPresent("username", "username");
+    CopyIfPresent("password", "password");
+    CopyIfPresent("name", "name");
+    CopyIfPresent("otp", "otp");
+    return true;
+}
+
+static async Task<int> CreateAccountAsync(Dictionary<string, string> flags)
+{
+    if (!TryMergeCredentialsFile(flags))
+    {
+        return 1;
+    }
+
+    if (!flags.TryGetValue("host", out string? host) || !flags.TryGetValue("username", out string? username) || !flags.TryGetValue("password", out string? password))
+    {
+        Console.WriteLine("create-account requires --host, --username, and --password (or --credentials-file).");
+        return 1;
+    }
+
+    int authPort = flags.TryGetValue("auth-port", out string? authPortStr) ? int.Parse(authPortStr) : FfxiConstants.AuthPort;
+
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+    try
+    {
+        using var auth = new FfxiAuthClient();
+        await auth.ConnectAsync(host, authPort, timeout.Token);
+        FfxiLoginResponse response = await auth.CreateAccountAsync(username, password, timeout.Token);
+
+        Console.WriteLine($"Result: {response.Result}");
+        if (response.ErrorMessage is not null)
+        {
+            Console.WriteLine($"Server message: {response.ErrorMessage}");
+        }
+
+        return response.Result == FfxiLoginResult.SuccessCreate ? 0 : 1;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Account creation failed: {ex}");
+        return 1;
+    }
+}
+
 static async Task<int> LoginAsync(Dictionary<string, string> flags)
 {
-    if (flags.TryGetValue("credentials-file", out string? credentialsPath))
+    if (!TryMergeCredentialsFile(flags))
     {
-        if (!File.Exists(credentialsPath))
-        {
-            Console.WriteLine($"Credentials file not found: {credentialsPath}");
-            return 1;
-        }
-
-        using JsonDocument doc = JsonDocument.Parse(File.ReadAllText(credentialsPath));
-        JsonElement root = doc.RootElement;
-
-        void CopyIfPresent(string jsonName, string flagName)
-        {
-            if (root.TryGetProperty(jsonName, out JsonElement el) && el.ValueKind == JsonValueKind.String && !flags.ContainsKey(flagName))
-            {
-                flags[flagName] = el.GetString() ?? "";
-            }
-        }
-
-        CopyIfPresent("host", "host");
-        CopyIfPresent("username", "username");
-        CopyIfPresent("password", "password");
-        CopyIfPresent("name", "name");
-        CopyIfPresent("otp", "otp");
+        return 1;
     }
 
     FfxiServerProfile? profile = null;

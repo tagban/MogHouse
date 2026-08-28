@@ -13,3 +13,12 @@ out/
 
 # Local-only test credentials - never commit real server logins
 local.credentials.json
+
+# Retail FFXI game assets (copyrighted, gigabytes) - never committed, path is
+# user-configured, this is just a safety net if it ever lands in-tree
+Playonline Assets/
+
+# Vendored SDL3 devel zip extraction + our local VMA install prefix -
+# regenerable via vendor/README.md, not committed (large binary/generated content)
+/vendor/SDL3-*/
+/vendor/vma-install/

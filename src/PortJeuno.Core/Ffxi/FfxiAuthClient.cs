@@ -45,11 +45,24 @@ public sealed class FfxiAuthClient : IDisposable
         await _ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = host }, ct);
     }
 
-    public Task<FfxiLoginResponse> LoginAsync(string username, string password, string? otp = null, string? trustToken = null, bool trustThisComputer = false, CancellationToken ct = default)
-    {
-        var request = new JsonObject
+    public Task<FfxiLoginResponse> LoginAsync(string username, string password, string? otp = null, string? trustToken = null, bool trustThisComputer = false, CancellationToken ct = default) =>
+        SendAsync(BuildRequest(FfxiLoginCommand.Attempt, username, password, otp, trustToken, trustThisComputer), ct);
+
+    /// <summary>
+    /// LOGIN_CREATE (auth_session.cpp): same request shape as a login
+    /// attempt, gated on settings/login.lua's ACCOUNT_CREATION. Success
+    /// only returns {"result": SuccessCreate} - no account_id/session_hash
+    /// (see sendLoginResult vs. the richer hand-built JSON on the
+    /// LOGIN_ATTEMPT success path) - call LoginAsync separately afterward
+    /// to actually get a session.
+    /// </summary>
+    public Task<FfxiLoginResponse> CreateAccountAsync(string username, string password, CancellationToken ct = default) =>
+        SendAsync(BuildRequest(FfxiLoginCommand.Create, username, password), ct);
+
+    private static JsonObject BuildRequest(FfxiLoginCommand command, string username, string password, string? otp = null, string? trustToken = null, bool trustThisComputer = false) =>
+        new()
         {
-            ["command"] = (int)FfxiLoginCommand.Attempt,
+            ["command"] = (int)command,
             ["username"] = username,
             ["password"] = password,
             ["otp"] = otp ?? string.Empty,
@@ -57,9 +70,6 @@ public sealed class FfxiAuthClient : IDisposable
             ["trust_this_computer"] = trustThisComputer,
             ["version"] = new JsonArray(FfxiConstants.SupportedXiloaderVersion[0], FfxiConstants.SupportedXiloaderVersion[1], FfxiConstants.SupportedXiloaderVersion[2]),
         };
-
-        return SendAsync(request, ct);
-    }
 
     private async Task<FfxiLoginResponse> SendAsync(JsonObject request, CancellationToken ct)
     {
