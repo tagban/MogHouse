@@ -10,6 +10,20 @@ namespace PortJeuno.Core.Ffxi;
 /// src/login/data_session.cpp and view_session.cpp (branch `base`,
 /// 2026-08-28):
 ///
+///  0. Both data_session and view_session only register themselves into
+///     the shared session_t (session.data_session / session.view_session)
+///     the *first* time each socket's read_func runs - it happens
+///     unconditionally at the top of read_func, before the opcode switch.
+///     Until data_session has registered, view_session's own 0x1F handler
+///     finds session.data_session null and silently bails (sends an error
+///     packet back on the VIEW socket instead - which nothing here reads -
+///     rather than ever pushing to the data socket). So the client must
+///     put *something* on the DATA socket first, before touching the view
+///     socket at all. Opcode 0xFE ("Reply with nothing to keep xiloader
+///     spinning" per data_session.cpp's own comment) is used for this - it
+///     does nothing server-side beyond the registration every opcode
+///     causes, and its comment strongly suggests it's exactly what real
+///     xiloader sends as an early no-op/keepalive.
 ///  1. Client sends an "acquire player data" request (view opcode 0x1F) on
 ///     the VIEW socket.
 ///  2. Server pushes a bare 5-byte `{0x01,0,0,0,0}` on the DATA socket
@@ -22,18 +36,25 @@ namespace PortJeuno.Core.Ffxi;
 ///     separately, on the still-open VIEW socket - the full lpkt_chr_info2
 ///     packet this class actually parses (data_session.cpp lines ~280-304).
 ///
-/// Steps 1 and 3's exact request byte-layout beyond the fields the server
-/// actually reads (view opcode at offset 8, data opcode at offset 0,
-/// session hash at FfxiConstants.PacketIdentifierOffset on both) is
-/// inferred, not confirmed against real xiloader source - this class was
-/// not live-tested against a real server. lpkt_chr_info2 parsing (ParseCharacters)
-/// is the well-grounded, testable-without-a-server part; see the tests
-/// project for byte-offset verification against a hand-built packet.
+/// Step 0 was added 2026-08-28 after a live test against a real server
+/// (ffxi.cc) hung forever waiting for step 2's push - login itself
+/// succeeded, confirming the auth layer, but the roster dance never got a
+/// response. Cross-checked atom0s's XiPackets docs (the real retail
+/// protocol LandSandBoat's own packet structs were adapted from) for
+/// RequestGetChr (C2S 0x001F): the real client's version of this packet is
+/// 44 bytes, with an extra 16-byte `passwd` field this class doesn't send -
+/// but view_session.cpp's actual 0x1F handler never reads anything past
+/// the opcode and the session-hash identifier, so that field appears to be
+/// retail-protocol-only baggage LandSandBoat's own server doesn't check,
+/// not the missing piece. The data_session-not-yet-registered theory is a
+/// still-unverified best guess for the real hang cause - this fix has not
+/// yet been re-tested against a real server.
 /// </summary>
 public sealed class FfxiRosterClient : IDisposable
 {
     private const byte ViewOpcodeAcquirePlayerData = 0x1F;
     private const byte DataOpcodeCharacterListRequest = 0xA1;
+    private const byte DataOpcodeKeepAlive = 0xFE;
     private const byte DataOpcodePush = 0x01;
 
     // TC_OPERATION_MAKE offsets, relative to the start of one character record.
@@ -67,6 +88,11 @@ public sealed class FfxiRosterClient : IDisposable
         NetworkStream dataStream = _data.GetStream();
         NetworkStream viewStream = _view.GetStream();
 
+        // Registers session.data_session server-side before we ask the view
+        // socket for anything that depends on it existing - see the class
+        // remarks (step 0).
+        await dataStream.WriteAsync(BuildDataKeepAliveRequest(sessionHash), ct);
+
         await viewStream.WriteAsync(BuildViewAcquirePlayerDataRequest(sessionHash), ct);
 
         var pushBuffer = new byte[16];
@@ -94,6 +120,20 @@ public sealed class FfxiRosterClient : IDisposable
     {
         var packet = new byte[FfxiConstants.PacketHeaderSize];
         packet[8] = ViewOpcodeAcquirePlayerData;
+        sessionHash.CopyTo(packet.AsSpan(FfxiConstants.PacketIdentifierOffset, FfxiConstants.PacketIdentifierLength));
+        return packet;
+    }
+
+    /// <summary>
+    /// Opcode 0xFE - data_session.cpp's own comment calls this "Reply with
+    /// nothing to keep xiloader spinning". Used here purely to make the
+    /// server register session.data_session before the view socket needs
+    /// it to exist; the server's handler for this opcode does nothing else.
+    /// </summary>
+    internal static byte[] BuildDataKeepAliveRequest(ReadOnlySpan<byte> sessionHash)
+    {
+        var packet = new byte[FfxiConstants.PacketHeaderSize];
+        packet[0] = DataOpcodeKeepAlive;
         sessionHash.CopyTo(packet.AsSpan(FfxiConstants.PacketIdentifierOffset, FfxiConstants.PacketIdentifierLength));
         return packet;
     }

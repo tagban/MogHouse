@@ -3,8 +3,12 @@ using System.Text.Json;
 namespace PortJeuno.Core.Ffxi;
 
 /// <summary>
-/// The saved list of FFXI server profiles - persisted at
-/// %AppData%/PortJeuno/ffxi-server-profiles.json. Same shape as
+/// The saved list of FFXI server profiles - persisted as
+/// ffxi-server-profiles.json right next to the running executable, not
+/// %AppData% or the registry. Deliberate: the long-term goal is a portable
+/// app (self-contained exe or a plain zip folder with its config alongside
+/// it, plus a sibling "Playonline Assets" folder for game data) - nothing
+/// should depend on a per-user profile directory. Same profile shape as
 /// Invigoration's HotlineServerProfileStore (a sibling project by the same
 /// author), reimplemented here rather than referenced since PortJeuno has
 /// no dependency on Invigoration.Core.
@@ -35,11 +39,8 @@ public static class FfxiServerProfileStore
 
     public static event Action? ProfilesChanged;
 
-    public static string DefaultConfigDirectory()
-    {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        return Path.Combine(appData, "PortJeuno");
-    }
+    /// <summary>Next to the running executable - AppContext.BaseDirectory, not %AppData%. Portable: works unpacked from a zip, no installer, no registry.</summary>
+    public static string DefaultConfigDirectory() => AppContext.BaseDirectory;
 
     public static FfxiServerProfile? Find(string id) =>
         string.IsNullOrEmpty(id) ? null : Profiles.FirstOrDefault(p => p.Id == id);

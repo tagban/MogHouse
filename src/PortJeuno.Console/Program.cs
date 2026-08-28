@@ -1,3 +1,4 @@
+using System.Text.Json;
 using PortJeuno.Core.Ffxi;
 
 Dictionary<string, string> ParseFlags(string[] args) =>
@@ -37,6 +38,9 @@ static void PrintUsage()
           list
           login --host <host> --username <user> --password <pass> [--name <profileName>] [--otp <code>] [--save]
           login --profile <idOrName> [--otp <code>] [--password <pass>]
+          login --credentials-file <path.json> [--save]
+            (file shape: {"host":"...","username":"...","password":"...","name":"...","otp":"..."} -
+             avoids the password ever appearing in the command line/shell history)
 
         Ports default to the standard 54231/54230/54001 - override with
         --auth-port/--data-port/--view-port if your server differs.
@@ -59,6 +63,32 @@ static void ListProfiles()
 
 static async Task<int> LoginAsync(Dictionary<string, string> flags)
 {
+    if (flags.TryGetValue("credentials-file", out string? credentialsPath))
+    {
+        if (!File.Exists(credentialsPath))
+        {
+            Console.WriteLine($"Credentials file not found: {credentialsPath}");
+            return 1;
+        }
+
+        using JsonDocument doc = JsonDocument.Parse(File.ReadAllText(credentialsPath));
+        JsonElement root = doc.RootElement;
+
+        void CopyIfPresent(string jsonName, string flagName)
+        {
+            if (root.TryGetProperty(jsonName, out JsonElement el) && el.ValueKind == JsonValueKind.String && !flags.ContainsKey(flagName))
+            {
+                flags[flagName] = el.GetString() ?? "";
+            }
+        }
+
+        CopyIfPresent("host", "host");
+        CopyIfPresent("username", "username");
+        CopyIfPresent("password", "password");
+        CopyIfPresent("name", "name");
+        CopyIfPresent("otp", "otp");
+    }
+
     FfxiServerProfile? profile = null;
 
     if (flags.TryGetValue("profile", out string? idOrName))
@@ -116,10 +146,12 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
 
     Console.WriteLine($"Connecting to {profile.Host}:{profile.AuthPort} as '{profile.Username}'...");
 
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
     try
     {
         var client = new FfxiLoginClient();
-        (FfxiLoginResponse login, IReadOnlyList<FfxiCharacter> characters) = await client.LoginAsync(profile, otp);
+        (FfxiLoginResponse login, IReadOnlyList<FfxiCharacter> characters) = await client.LoginAsync(profile, otp, ct: timeout.Token);
 
         Console.WriteLine($"Result: {login.Result}");
         if (login.ErrorMessage is not null)
@@ -144,8 +176,14 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
             Console.WriteLine("Received and saved a new trust_token.");
         }
 
-        Console.WriteLine($"Characters ({characters.Count}):");
-        foreach (FfxiCharacter c in characters)
+        // The server always sends a full slot array, padded up to the
+        // account's content-id limit if character creation is enabled - an
+        // empty slot's name is a single space (data_session.cpp sets only
+        // byte[0] = 0x20 so the real client shows a blank slot instead of
+        // a "hume" placeholder for an all-zero name), not literally empty.
+        List<FfxiCharacter> occupied = characters.Where(c => !string.IsNullOrWhiteSpace(c.Name)).ToList();
+        Console.WriteLine($"Characters ({occupied.Count} of {characters.Count} slots occupied):");
+        foreach (FfxiCharacter c in occupied)
         {
             Console.WriteLine($"  {c.Name,-16} world={c.WorldName,-10} race={c.Race} job={c.MainJob}/{c.MainJobLevel} sub={c.SubJob} zone={c.Zone} contentId={c.ContentId}");
         }

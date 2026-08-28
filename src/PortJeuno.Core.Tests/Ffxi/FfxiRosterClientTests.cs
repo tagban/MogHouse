@@ -99,6 +99,16 @@ public class FfxiRosterClientTests
     }
 
     [Fact]
+    public void BuildDataKeepAliveRequest_PlacesOpcodeAndHashAtServerExpectedOffsets()
+    {
+        byte[] hash = Enumerable.Range(0, 16).Select(i => (byte)(i + 2)).ToArray();
+        byte[] request = FfxiRosterClient.BuildDataKeepAliveRequest(hash);
+
+        Assert.Equal(0xFE, request[0]);
+        Assert.Equal(hash, request.AsSpan(FfxiConstants.PacketIdentifierOffset, 16).ToArray());
+    }
+
+    [Fact]
     public void BuildDataCharacterListRequest_PlacesFieldsAtServerExpectedOffsets()
     {
         byte[] hash = Enumerable.Range(0, 16).Select(i => (byte)i).ToArray();
