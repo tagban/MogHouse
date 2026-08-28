@@ -10,3 +10,6 @@ out/
 .vs/
 .vscode/
 .DS_Store
+
+# Local-only test credentials - never commit real server logins
+local.credentials.json
