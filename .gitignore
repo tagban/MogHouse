@@ -1,24 +1,21 @@
+
 # .NET
-bin/
-obj/
-
 # CMake
-build/
-out/
-
-# OS / editor
-.vs/
-.vscode/
-.DS_Store
-
 # Local-only test credentials - never commit real server logins
-local.credentials.json
-
+# OS / editor
 # Retail FFXI game assets (copyrighted, gigabytes) - never committed, path is
-# user-configured, this is just a safety net if it ever lands in-tree
-Playonline Assets/
-
 # Vendored SDL3 devel zip extraction + our local VMA install prefix -
 # regenerable via vendor/README.md, not committed (large binary/generated content)
+# user-configured, this is just a safety net if it ever lands in-tree
+.DS_Store
+.vs/
+.vscode/
 /vendor/SDL3-*/
 /vendor/vma-install/
+Playonline Assets/
+bin/
+build-engine/
+build/
+local.credentials.json
+obj/
+out/
