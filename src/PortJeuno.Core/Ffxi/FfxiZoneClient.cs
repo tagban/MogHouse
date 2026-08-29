@@ -133,6 +133,30 @@ public sealed class FfxiZoneClient : IDisposable
     /// Bounded to a few steps so a genuinely corrupt packet costs a little
     /// wasted work rather than an unbounded search.
     /// </summary>
+    /// <summary>
+    /// Rotates to the next session key, as the server does immediately after
+    /// sending a 0x00B. Used when we have actually seen that packet, rather
+    /// than inferring the rotation from a decrypt failure.
+    /// </summary>
+    public void AdvanceKey()
+    {
+        _sessionKey = FfxiBlowfish.NextSessionKey(_sessionKey);
+        _blowfish = FfxiBlowfish.FromSessionKey(_sessionKey);
+        KeyRotations++;
+    }
+
+    /// <summary>
+    /// Resets the packet counters for a new zone server. They are per-session
+    /// on the server side and it zeroes them when it accepts a fresh 0x00A, so
+    /// ours have to restart too - otherwise every sub-packet we send looks
+    /// stale and is silently skipped.
+    /// </summary>
+    public void ResetCountersForNewZone()
+    {
+        _ownCounter = 0;
+        _lastServerCounter = 0;
+    }
+
     private bool TryAdvanceKey(byte[] datagram, int maxSteps = 4)
     {
         uint[] candidateKey = _sessionKey;
@@ -401,6 +425,24 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
     /// step of zoning in. Must follow a successful 0x00A: it travels encrypted
     /// like all steady-state traffic, so it needs the codec.
     /// </summary>
+    /// <summary>
+    /// Sends a chat message with a correct sync number.
+    ///
+    /// The sync matters and is easy to get wrong: the server's parse loop
+    /// silently skips any sub-packet whose sync is at or below the session's
+    /// last client counter. A hardcoded value works for the first packet of a
+    /// session and then never again - the message goes out, is accepted by the
+    /// transport, and is dropped without a word. Only this class knows the
+    /// current counter, so building chat packets belongs here rather than in
+    /// a caller.
+    /// </summary>
+    public async Task SendChatAsync(IPEndPoint zoneServer, FfxiChatKind kind, string message, CancellationToken ct = default) =>
+        await SendEncryptedAsync(zoneServer, FfxiChatPacket.Build(kind, message, (ushort)(_ownCounter + 1)), ct);
+
+    /// <summary>Sends a tell, with the same sync caveat as <see cref="SendChatAsync"/>.</summary>
+    public async Task SendTellAsync(IPEndPoint zoneServer, string recipient, string message, CancellationToken ct = default) =>
+        await SendEncryptedAsync(zoneServer, FfxiTellPacket.Build(recipient, message, (ushort)(_ownCounter + 1)), ct);
+
     public async Task SendGameOkAsync(IPEndPoint zoneServer, CancellationToken ct = default) =>
         await SendEncryptedAsync(zoneServer, FfxiGameOkPacket.Build((ushort)(_ownCounter + 1)), ct);
 

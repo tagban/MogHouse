@@ -199,19 +199,168 @@ public sealed class FfxiGameSession : IDisposable
         Facing = ZoneState.Direction;
 
         _holdCts = new CancellationTokenSource();
-        _holdTask = _zone.HoldWithPositionAsync(
-            _zoneEndpoint,
-            x: ZoneState.X,
-            vertical: ZoneState.Vertical,
-            depth: ZoneState.Depth,
-            direction: ZoneState.Direction,
-            duration: TimeSpan.FromHours(12),
-            interval: TimeSpan.FromMilliseconds(400),
-            onReply: OnReply,
-            positionProvider: () => (PosX, PosVertical, PosDepth, Facing),
-            ct: _holdCts.Token);
-
+        _holdTask = RunSessionAsync(_holdCts.Token);
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Keeps the heartbeat running, and carries the session across zone
+    /// changes. A zone change ends one heartbeat and starts another against a
+    /// different server, so the loop is the natural shape: hold until
+    /// something interrupts, and if what interrupted was a handoff, follow it.
+    /// </summary>
+    private async Task RunSessionAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested && _zone is not null && _zoneEndpoint is not null)
+        {
+            _zoneCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
+            await _zone.HoldWithPositionAsync(
+                _zoneEndpoint,
+                x: PosX,
+                vertical: PosVertical,
+                depth: PosDepth,
+                direction: Facing,
+                duration: TimeSpan.FromHours(12),
+                interval: TimeSpan.FromMilliseconds(400),
+                onReply: OnReply,
+                positionProvider: () => (PosX, PosVertical, PosDepth, Facing),
+                ct: _zoneCts.Token);
+
+            IPEndPoint? destination = _pendingZone;
+            _pendingZone = null;
+
+            if (destination is null || ct.IsCancellationRequested)
+            {
+                break;
+            }
+
+            try
+            {
+                await CompleteZoneChangeAsync(destination);
+            }
+            catch (Exception ex)
+            {
+                Status?.Invoke($"Zone change failed: {ex.Message}");
+                break;
+            }
+        }
+    }
+
+    private CancellationTokenSource? _zoneCts;
+
+    /// <summary>
+    /// How far the server's idea of our position may differ from ours before we
+    /// treat it as a teleport rather than ordinary lag. Comfortably larger than
+    /// a movement step, comfortably smaller than any real warp.
+    /// </summary>
+    private const float TeleportThreshold = 5.0f;
+
+    private void AdoptServerPosition(FfxiEntityUpdate self)
+    {
+        float dx = self.X - PosX;
+        float dz = self.Depth - PosDepth;
+
+        if ((dx * dx) + (dz * dz) < TeleportThreshold * TeleportThreshold)
+        {
+            return;
+        }
+
+        PosX = self.X;
+        PosVertical = self.Vertical;
+        PosDepth = self.Depth;
+        Facing = self.Direction;
+
+        Status?.Invoke($"Moved by the server to x {PosX:F1}  y {PosVertical:F1}  z {PosDepth:F1}.");
+        Moved?.Invoke();
+    }
+
+    /// <summary>Raised when the server moves us to a different zone.</summary>
+    public event Action<uint>? ZoneChanged;
+
+    /// <summary>
+    /// Handles GP_SERV_COMMAND_LOGOUT. Despite the name, state 2 is an
+    /// ordinary zone change - walking a zone line, or a GM teleporting us
+    /// somewhere else. The server rotates its Blowfish key straight after
+    /// sending this, so ignoring it means talking to the wrong address with
+    /// the wrong key, which from the outside looks like being logged off for
+    /// no reason.
+    /// </summary>
+    private void HandleZoneTransition(FfxiZoneTransition transition)
+    {
+        if (_zone is null)
+        {
+            return;
+        }
+
+        if (!transition.IsZoneChange)
+        {
+            Status?.Invoke($"Server ended the session: {transition.State}.");
+            _holdCts?.Cancel();
+            return;
+        }
+
+        string ip = FfxiRosterClient.FormatIpAddress(transition.ZoneServerIp);
+        if (ip == "0.0.0.0" && _zoneEndpoint is not null)
+        {
+            ip = _zoneEndpoint.Address.ToString();
+        }
+
+        _pendingZone = new IPEndPoint(IPAddress.Parse(ip), (int)transition.ZoneServerPort);
+        Status?.Invoke($"Zoning to {_pendingZone}...");
+
+        // Ends the current heartbeat so RunSessionAsync can pick the handoff up.
+        _zoneCts?.Cancel();
+    }
+
+    private IPEndPoint? _pendingZone;
+
+    /// <summary>
+    /// Completes a zone change: rotate the key the way the server just did,
+    /// restart the counters, and introduce ourselves to the new zone server
+    /// with a fresh 0x00A and GAMEOK.
+    /// </summary>
+    private async Task CompleteZoneChangeAsync(IPEndPoint destination)
+    {
+        if (_zone is null || Handoff is null)
+        {
+            return;
+        }
+
+        _zone.AdvanceKey();
+        _zone.ResetCountersForNewZone();
+        _zoneEndpoint = destination;
+
+        FfxiZoneReply? reply = await _zone.LoginAsync(
+            destination, Handoff.ContentId, Handoff.CharacterName, "", clientVersion: 99, clientLanguage: 2);
+
+        if (reply?.Plaintext is null)
+        {
+            Status?.Invoke("New zone server did not answer.");
+            return;
+        }
+
+        foreach ((ushort id, int offset, int size) in FfxiZonePacket.EnumerateSubPackets(reply.Plaintext))
+        {
+            if (id == FfxiZoneLoginReply.PacketId && size == FfxiZoneLoginReply.PacketSize)
+            {
+                ZoneState = FfxiZoneLoginReply.Parse(reply.Plaintext.AsSpan(offset, size));
+            }
+        }
+
+        await _zone.SendGameOkAsync(destination);
+
+        if (ZoneState is not null)
+        {
+            PosX = ZoneState.X;
+            PosVertical = ZoneState.Vertical;
+            PosDepth = ZoneState.Depth;
+            Facing = ZoneState.Direction;
+            NavMesh = null;
+            TryLoadNavMesh();
+            ZoneChanged?.Invoke(ZoneState.ZoneNo);
+            Status?.Invoke($"Now in zone {ZoneState.ZoneNo}.");
+        }
     }
 
     private void TryLoadNavMesh()
@@ -258,9 +407,26 @@ public sealed class FfxiGameSession : IDisposable
                 ChatReceived?.Invoke(new FfxiChatLine(DateTimeOffset.Now, chat.Kind, chat.Sender, chat.Text));
             }
 
+            FfxiZoneTransition? transition = FfxiZoneTransition.TryParse(reply.Plaintext.AsSpan(offset, size));
+            if (transition is not null)
+            {
+                HandleZoneTransition(transition);
+            }
+
             if (FfxiEntityUpdate.IsEntityUpdate(id))
             {
                 sawEntity = true;
+
+                // The server is authoritative for anything that moves us
+                // without us asking - a GM !bring, a warp, a knockback. If it
+                // places us somewhere far from where we have been claiming to
+                // be, adopt its answer; otherwise our next heartbeat would
+                // simply assert the old position and undo the teleport.
+                FfxiEntityUpdate? self = FfxiEntityUpdate.TryParse(reply.Plaintext.AsSpan(offset, size));
+                if (self is not null && self.UniqueNo == OwnCharId)
+                {
+                    AdoptServerPosition(self);
+                }
             }
         }
 
@@ -277,7 +443,7 @@ public sealed class FfxiGameSession : IDisposable
             return;
         }
 
-        await _zone.SendEncryptedAsync(_zoneEndpoint, FfxiChatPacket.Build(kind, message, 1));
+        await _zone.SendChatAsync(_zoneEndpoint, kind, message);
     }
 
     public async Task TellAsync(string recipient, string message)
@@ -287,7 +453,7 @@ public sealed class FfxiGameSession : IDisposable
             return;
         }
 
-        await _zone.SendEncryptedAsync(_zoneEndpoint, FfxiTellPacket.Build(recipient, message, 1));
+        await _zone.SendTellAsync(_zoneEndpoint, recipient, message);
     }
 
     /// <summary>Asks the server to log out, then stops the heartbeat.</summary>
