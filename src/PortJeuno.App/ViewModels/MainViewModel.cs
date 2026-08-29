@@ -1,3 +1,4 @@
+using System;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using PortJeuno.Core.Ffxi;
@@ -26,10 +27,19 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     public FfxiHuffmanTables? Tables { get; }
 
+    /// <summary>Where the zone navmeshes live, if the user has pointed us at them.</summary>
+    public string? NavMeshDirectory { get; }
+
     public MainViewModel()
     {
         Tables = FfxiHuffmanTables.TryLoadDefault();
-        Session = new FfxiGameSession(Tables is null ? null : new FfxiHuffman(Tables));
+        // Navmeshes come from the same place as the compression tables by
+        // default, since both are server-side data the project does not ship.
+        NavMeshDirectory = Environment.GetEnvironmentVariable("PORTJEUNO_FFXI_NAVMESHES");
+
+        Session = new FfxiGameSession(
+            Tables is null ? null : new FfxiHuffman(Tables),
+            NavMeshDirectory);
 
         Session.Status += message => Dispatcher.UIThread.Post(() => Status = message);
 

@@ -24,7 +24,18 @@ public sealed class FfxiGameSession : IDisposable
     private CancellationTokenSource? _holdCts;
     private Task? _holdTask;
 
-    public FfxiGameSession(FfxiHuffman? codec = null) => _codec = codec;
+    private readonly string? _navMeshDirectory;
+
+    /// <param name="navMeshDirectory">
+    /// Where the server's `.nav` files live. Optional: without it the character
+    /// can still move, but at a fixed height and with nothing stopping it
+    /// walking off a ledge.
+    /// </param>
+    public FfxiGameSession(FfxiHuffman? codec = null, string? navMeshDirectory = null)
+    {
+        _codec = codec;
+        _navMeshDirectory = navMeshDirectory;
+    }
 
     /// <summary>Raised for every chat message received.</summary>
     public event Action<FfxiChatLine>? ChatReceived;
@@ -54,6 +65,17 @@ public sealed class FfxiGameSession : IDisposable
     /// <summary>Raised after the position changes, so a UI can redraw.</summary>
     public event Action? Moved;
 
+    /// <summary>
+    /// The zone's navmesh, when one was found. With it, movement follows the
+    /// ground and refuses to leave walkable surfaces - which is collision, for
+    /// free, since walls and ledges are simply absent from the mesh. Without
+    /// it, movement is horizontal-only at a fixed height.
+    /// </summary>
+    public FfxiNavMesh? NavMesh { get; private set; }
+
+    /// <summary>True when the last move was refused because the destination was off the navmesh.</summary>
+    public bool LastMoveBlocked { get; private set; }
+
     /// <summary>Steps the character horizontally and turns it to face the direction of travel.</summary>
     public void Move(float dx, float dz)
     {
@@ -62,8 +84,26 @@ public sealed class FfxiGameSession : IDisposable
             return;
         }
 
-        PosX += dx;
-        PosDepth += dz;
+        float targetX = PosX + dx;
+        float targetZ = PosDepth + dz;
+        LastMoveBlocked = false;
+
+        if (NavMesh is not null)
+        {
+            if (!NavMesh.TryGetGroundHeight(targetX, PosVertical, targetZ, out float ground))
+            {
+                // Off the walkable surface - a wall, a ledge, or thin air.
+                // Refusing beats walking into it and being written to the
+                // character record somewhere invalid.
+                LastMoveBlocked = true;
+                return;
+            }
+
+            PosVertical = ground;
+        }
+
+        PosX = targetX;
+        PosDepth = targetZ;
 
         // FFXI packs a full turn into one signed byte, so a heading is
         // atan2 scaled by 256/2pi rather than by 360.
@@ -136,6 +176,8 @@ public sealed class FfxiGameSession : IDisposable
         // Without this the server never sends the initialization batch, so the
         // character arrives knowing nothing about itself.
         await _zone.SendGameOkAsync(_zoneEndpoint, ct);
+
+        TryLoadNavMesh();
         Status?.Invoke($"In {(ZoneState is null ? "zone" : $"zone {ZoneState.ZoneNo}")} as {Handoff.CharacterName}.");
     }
 
@@ -170,6 +212,33 @@ public sealed class FfxiGameSession : IDisposable
             ct: _holdCts.Token);
 
         return Task.CompletedTask;
+    }
+
+    private void TryLoadNavMesh()
+    {
+        if (_navMeshDirectory is null || ZoneState is null)
+        {
+            return;
+        }
+
+        string? zoneName = FfxiZoneNames.Get(ZoneState.ZoneNo);
+        if (zoneName is null)
+        {
+            Status?.Invoke($"No name known for zone {ZoneState.ZoneNo} - movement will not follow terrain.");
+            return;
+        }
+
+        try
+        {
+            NavMesh = FfxiNavMesh.TryLoadZone(_navMeshDirectory, zoneName);
+            Status?.Invoke(NavMesh is null
+                ? $"No navmesh for {zoneName} - movement will not follow terrain."
+                : $"Navmesh loaded for {zoneName} - movement follows the ground.");
+        }
+        catch (Exception ex)
+        {
+            Status?.Invoke($"Navmesh for {zoneName} could not be read: {ex.Message}");
+        }
     }
 
     private void OnReply(FfxiZoneReply reply)

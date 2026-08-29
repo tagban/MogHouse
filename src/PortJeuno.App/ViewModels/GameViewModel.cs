@@ -177,6 +177,11 @@ public partial class GameViewModel : ViewModelBase
 
         _shell.Session.Move(dx, dz);
         RefreshPosition();
+
+        if (_shell.Session.LastMoveBlocked)
+        {
+            _shell.Status = "Blocked - that way is off the walkable surface.";
+        }
     }
 
     private void RefreshPosition()
