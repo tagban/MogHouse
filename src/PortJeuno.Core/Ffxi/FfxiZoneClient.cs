@@ -8,12 +8,28 @@ namespace PortJeuno.Core.Ffxi;
 /// checking. <see cref="Payload"/> is still compressed - see
 /// <see cref="FfxiZoneClient"/>'s remarks.
 /// </summary>
+/// <param name="Payload">
+/// The decrypted body, still compressed, with its trailing MD5 stripped. Its
+/// last four bytes are the declared bit count - see <see cref="DeclaredBits"/>.
+/// </param>
+/// <param name="DeclaredBits">
+/// The compressed size the server stamped into the packet, in bits and
+/// including the compression marker's 8 bits. Null when the payload is too
+/// short to hold one.
+/// </param>
+/// <param name="Plaintext">
+/// The decompressed body, when a Huffman codec was supplied and decoding
+/// succeeded - otherwise null. This is the sequence of sub-packets the game
+/// actually runs on.
+/// </param>
 public sealed record FfxiZoneReply(
     byte[] Datagram,
     byte[] Payload,
     bool ChecksumValid,
     ushort ServerCounter,
-    ushort AcknowledgedClientCounter);
+    ushort AcknowledgedClientCounter,
+    uint? DeclaredBits,
+    byte[]? Plaintext);
 
 /// <summary>
 /// The UDP zone/map connection (the address and port come from
@@ -48,13 +64,21 @@ public sealed class FfxiZoneClient : IDisposable
 {
     private readonly UdpClient _udp = new();
     private readonly FfxiBlowfish _blowfish;
+    private readonly FfxiHuffman? _codec;
 
     /// <summary>Our own outgoing packet counter (header offset 0).</summary>
     private ushort _ownCounter;
 
-    public FfxiZoneClient(FfxiZoneHandoff handoff)
+    /// <param name="codec">
+    /// Optional. Without it, replies still decrypt and verify but their bodies
+    /// stay compressed - useful because the compression tables aren't bundled
+    /// (see <see cref="FfxiHuffmanTables"/>), so the transport is testable
+    /// without them.
+    /// </param>
+    public FfxiZoneClient(FfxiZoneHandoff handoff, FfxiHuffman? codec = null)
     {
         _blowfish = FfxiBlowfish.FromSessionKey(handoff.SessionKey);
+        _codec = codec;
     }
 
     /// <summary>
@@ -163,7 +187,7 @@ public sealed class FfxiZoneClient : IDisposable
             return null;
         }
 
-        return Decode(result.Buffer, _blowfish);
+        return Decode(result.Buffer, _blowfish, _codec);
     }
 
     /// <summary>
@@ -226,7 +250,7 @@ public sealed class FfxiZoneClient : IDisposable
     /// <see cref="ReceiveAsync"/> so it can be tested against captured bytes
     /// without a socket.
     /// </summary>
-    internal static FfxiZoneReply Decode(byte[] datagram, FfxiBlowfish blowfish)
+    internal static FfxiZoneReply Decode(byte[] datagram, FfxiBlowfish blowfish, FfxiHuffman? codec = null)
     {
         var working = (byte[])datagram.Clone();
 
@@ -263,12 +287,66 @@ public sealed class FfxiZoneClient : IDisposable
             checksumValid = working.AsSpan(working.Length - FfxiZonePacket.ChecksumSize).SequenceEqual(expected);
         }
 
+        // The server stamps the compressed size, in bits, into the four bytes
+        // immediately before the MD5 - so within `payload` (which excludes the
+        // hash) it's the last word. See `compressPacket`, which writes it at
+        // `zlib_compressed_size(packetSize)`, i.e. right past the compressed
+        // bytes.
+        uint? declaredBits = null;
+        byte[]? plaintext = null;
+
+        if (payload.Length >= 4)
+        {
+            declaredBits = BitConverter.ToUInt32(payload, payload.Length - 4);
+
+            if (codec is not null && checksumValid)
+            {
+                plaintext = TryDecompress(payload, declaredBits.Value, codec);
+            }
+        }
+
         return new FfxiZoneReply(
             Datagram: working,
             Payload: payload,
             ChecksumValid: checksumValid,
             ServerCounter: BitConverter.ToUInt16(working, FfxiZonePacket.OffsetOwnCounter),
-            AcknowledgedClientCounter: BitConverter.ToUInt16(working, FfxiZonePacket.OffsetPeerCounter));
+            AcknowledgedClientCounter: BitConverter.ToUInt16(working, FfxiZonePacket.OffsetPeerCounter),
+            DeclaredBits: declaredBits,
+            Plaintext: plaintext);
+    }
+
+    /// <summary>
+    /// The declared size counts the compression marker's 8 bits, so the actual
+    /// bitstream is eight bits shorter.
+    ///
+    /// The server passes the declared value to its own decompressor *unadjusted*,
+    /// even though that function measures bits from after the marker - so it
+    /// walks eight bits past the real end and decodes a stray trailing symbol
+    /// or two. Harmless there, because sub-packet iteration is bounded by each
+    /// sub-packet's own size field and stops before reaching the garbage. This
+    /// subtracts the 8 instead, to produce exactly the bytes the server
+    /// compressed rather than replicating an off-by-one that only adds noise.
+    /// </summary>
+    private static byte[]? TryDecompress(byte[] payload, uint declaredBits, FfxiHuffman codec)
+    {
+        if (declaredBits < 8)
+        {
+            return null;
+        }
+
+        int bitstreamBits = (int)declaredBits - 8;
+        int compressedBytes = 1 + FfxiHuffman.CompressedByteLength(bitstreamBits);
+        if (compressedBytes > payload.Length - 4)
+        {
+            return null;
+        }
+
+        // A Huffman-coded byte can't take fewer than one bit, so the bit count
+        // is its own upper bound on the symbol count.
+        var output = new byte[bitstreamBits];
+        int written = codec.Decompress(payload.AsSpan(0, compressedBytes), bitstreamBits, output);
+
+        return written < 0 ? null : output.AsSpan(0, written).ToArray();
     }
 
     public void Dispose() => _udp.Dispose();

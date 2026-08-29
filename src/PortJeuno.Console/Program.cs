@@ -312,7 +312,14 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
 
             var zoneEndpoint = new System.Net.IPEndPoint(System.Net.IPAddress.Parse(zoneHost), (int)handoff.ZoneServerPort);
 
-            using var zone = new FfxiZoneClient(handoff);
+            FfxiHuffmanTables? tables = FfxiHuffmanTables.TryLoadDefault();
+            if (tables is null)
+            {
+                Console.WriteLine("  (compression tables not found - replies will decrypt but stay compressed.");
+                Console.WriteLine($"   Set PORTJEUNO_FFXI_RES to a directory with {FfxiHuffmanTables.EncodeFileName} and {FfxiHuffmanTables.DecodeFileName}.)");
+            }
+
+            using var zone = new FfxiZoneClient(handoff, tables is null ? null : new FfxiHuffman(tables));
 
             Console.WriteLine($"Sending GP_CLI_COMMAND_LOGIN (0x00A) to {zoneEndpoint} for charid {handoff.ContentId} (retransmitting until answered)...");
 
@@ -334,7 +341,36 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
 
             Console.WriteLine($"Zone reply: {reply.Datagram.Length} bytes, serverCounter={reply.ServerCounter}, acks our counter {reply.AcknowledgedClientCounter}");
             Console.WriteLine($"  MD5 after Blowfish decrypt: {(reply.ChecksumValid ? "VALID - cipher, key schedule and key derivation all confirmed correct" : "INVALID - decryption is wrong somewhere")}");
-            Console.WriteLine($"  Decrypted payload ({reply.Payload.Length} bytes, still Huffman-compressed): {Convert.ToHexString(reply.Payload.AsSpan(0, Math.Min(64, reply.Payload.Length)))}...");
+            Console.WriteLine($"  Decrypted payload ({reply.Payload.Length} bytes compressed, declared {reply.DeclaredBits} bits)");
+
+            if (reply.Plaintext is null)
+            {
+                Console.WriteLine($"  Still compressed: {Convert.ToHexString(reply.Payload.AsSpan(0, Math.Min(64, reply.Payload.Length)))}...");
+            }
+            else
+            {
+                Console.WriteLine($"  DECOMPRESSED to {reply.Plaintext.Length} bytes:");
+                Console.WriteLine($"    {Convert.ToHexString(reply.Plaintext.AsSpan(0, Math.Min(96, reply.Plaintext.Length)))}...");
+
+                // Walk the sub-packet chain the way the server's own parse loop
+                // does: each entry's first uint16 packs id:9 and size:7, with
+                // the size counted in 4-byte units.
+                Console.WriteLine("  Sub-packets:");
+                int offset = 0;
+                while (offset + 4 <= reply.Plaintext.Length)
+                {
+                    ushort word = BitConverter.ToUInt16(reply.Plaintext, offset);
+                    (ushort id, int size) = FfxiZonePacket.UnpackIdAndSize(word);
+                    if (size == 0 || offset + size > reply.Plaintext.Length)
+                    {
+                        break;
+                    }
+
+                    ushort sync = BitConverter.ToUInt16(reply.Plaintext, offset + 2);
+                    Console.WriteLine($"    0x{id:X3}  {size,4} bytes  sync={sync}");
+                    offset += size;
+                }
+            }
 
             if (flags.TryGetValue("zone-hold", out string? holdSeconds) && int.TryParse(holdSeconds, out int seconds))
             {
