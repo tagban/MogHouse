@@ -96,6 +96,66 @@ public static class FfxiChatPacket
 }
 
 /// <summary>
+/// GP_CLI_COMMAND_CHAT_NAME (C2S 0x0B6) - sending a tell.
+///
+/// Same variable-length rule as <see cref="FfxiChatPacket"/>, with a different
+/// constant: the recipient name occupies offsets 6..20, so the server derives
+/// the message length as `header.size * 4 - 0x15` rather than `- 6`.
+///
+/// Layout read back from the real compiled struct: unknown04 at 4, unknown05
+/// at 5, sName[15] at 6, Mes[128] at 21.
+/// </summary>
+public static class FfxiTellPacket
+{
+    public const ushort PacketId = 0x0B6;
+
+    private const int OffsetIdAndSize = 0;
+    private const int OffsetSync = 2;
+    private const int OffsetUnknown04 = 4;
+    private const int OffsetUnknown05 = 5;
+    private const int OffsetRecipient = 6;
+    private const int OffsetText = 21;
+
+    private const int RecipientLength = 15;
+    public const int MaxTextLength = 128;
+
+    /// <summary>
+    /// `unknown04` has to be 3 and `unknown05` has to be 0 - the server
+    /// validates both (`mustEqual(this->unknown04, 3, "unknown04 not 3")`) and
+    /// drops the packet otherwise. Their meaning is unknown; the names are the
+    /// server's own. Leaving them zero, which is the obvious default for a
+    /// field called "unknown", silently fails - the server logs a warning the
+    /// sender never sees.
+    /// </summary>
+    private const byte RequiredUnknown04 = 3;
+    private const byte RequiredUnknown05 = 0;
+
+    public static byte[] Build(string recipient, string message, ushort sync)
+    {
+        byte[] text = Encoding.ASCII.GetBytes(message);
+        if (text.Length >= MaxTextLength)
+        {
+            text = text[..(MaxTextLength - 1)];
+        }
+
+        int unpadded = OffsetText + text.Length + 1;
+        int size = (unpadded + 3) & ~3;
+
+        var packet = new byte[size];
+        BinaryPrimitives.WriteUInt16LittleEndian(packet.AsSpan(OffsetIdAndSize, 2), FfxiZonePacket.PackIdAndSize(PacketId, size));
+        BinaryPrimitives.WriteUInt16LittleEndian(packet.AsSpan(OffsetSync, 2), sync);
+        packet[OffsetUnknown04] = RequiredUnknown04;
+        packet[OffsetUnknown05] = RequiredUnknown05;
+
+        byte[] name = Encoding.ASCII.GetBytes(recipient);
+        name.AsSpan(0, Math.Min(name.Length, RecipientLength - 1)).CopyTo(packet.AsSpan(OffsetRecipient, RecipientLength));
+
+        text.CopyTo(packet, OffsetText);
+        return packet;
+    }
+}
+
+/// <summary>
 /// GP_SERV_COMMAND_CHAT_STD (S2C 0x017) - a chat message to display.
 ///
 /// Body layout from the real compiled struct: Kind at body+0, Attr at +1,

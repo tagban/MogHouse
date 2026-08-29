@@ -431,6 +431,10 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                         interval: TimeSpan.FromMilliseconds(400),
                         walkRadius: flags.TryGetValue("zone-walk", out string? radius) && float.TryParse(radius, out float r) ? r : 2.0f,
                         sayEvery: flags.TryGetValue("zone-say", out string? sayText) && sayText.Length > 0 ? sayText : null,
+                        sayKind: flags.TryGetValue("zone-say-kind", out string? kindText) && Enum.TryParse(kindText, true, out FfxiChatKind parsedKind) ? parsedKind : FfxiChatKind.Say,
+                        followCharId: flags.TryGetValue("zone-follow", out string? followSpec) && uint.TryParse(followSpec, out uint followId) ? followId : null,
+                        tellTo: flags.TryGetValue("zone-tell", out string? tellTarget) && tellTarget.Length > 0 ? tellTarget : null,
+                        tellText: flags.GetValueOrDefault("zone-tell-text", "hello from PortJeuno"),
                         onReply: reply =>
                         {
                             if (reply.Plaintext is null)
@@ -461,6 +465,17 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                                     if (!isSelf && entity.PacketId == FfxiEntityUpdate.PlayerPacketId && count % 40 == 1)
                                     {
                                         Console.WriteLine($"    POS charid {entity.UniqueNo}: x={entity.X:F2} y={entity.Vertical:F2} z={entity.Depth:F2} dir={entity.Direction}");
+                                    }
+
+                                    // Dump the whole spawn packet once per
+                                    // character. Comparing a character the
+                                    // retail client renders against one it
+                                    // doesn't is the only way to see which
+                                    // field it actually cares about.
+                                    if (entity.PacketId == FfxiEntityUpdate.PlayerPacketId && count == 1)
+                                    {
+                                        Console.WriteLine($"    FULL 0x00D charid {entity.UniqueNo} (self={isSelf}, {size} bytes):");
+                                        Console.WriteLine($"      {Convert.ToHexString(reply.Plaintext.AsSpan(offset, size))}");
                                     }
                                 }
 

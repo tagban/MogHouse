@@ -73,6 +73,20 @@ public sealed class FfxiZoneClient : IDisposable
     /// <summary>How many times the key has rotated this session. Purely diagnostic.</summary>
     public int KeyRotations { get; private set; }
 
+    /// <summary>
+    /// Last position we were told about for each entity, keyed by charid.
+    /// Lets a client place itself relative to somebody else without anyone
+    /// having to agree on what the axes are called - the numbers come off the
+    /// wire in the same order for everyone.
+    /// </summary>
+    private readonly Dictionary<uint, (ushort PacketId, float X, float Vertical, float Depth)> _knownPositions = [];
+
+    public bool TryGetKnownPosition(uint charId, out (ushort PacketId, float X, float Vertical, float Depth) position) =>
+        _knownPositions.TryGetValue(charId, out position);
+
+    /// <summary>Our own charid, so "somebody else" is answerable without the caller passing it around.</summary>
+    private uint _ownCharId;
+
     /// <summary>Our own outgoing packet counter (header offset 0).</summary>
     private ushort _ownCounter;
 
@@ -196,7 +210,8 @@ public sealed class FfxiZoneClient : IDisposable
 
         for (int attempt = 1; attempt <= attempts; attempt++)
         {
-            await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVersion, clientLanguage, ct);
+                        _ownCharId = uniqueNo;
+await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVersion, clientLanguage, ct);
 
             FfxiZoneReply? reply = await ReceiveAsync(interval, ct);
             if (reply is not null)
@@ -243,6 +258,18 @@ public sealed class FfxiZoneClient : IDisposable
         if (reply.ChecksumValid || reply.ServerCounter > _lastServerCounter)
         {
             _lastServerCounter = reply.ServerCounter;
+        }
+
+        if (reply.Plaintext is not null)
+        {
+            foreach ((ushort _, int offset, int size) in FfxiZonePacket.EnumerateSubPackets(reply.Plaintext))
+            {
+                FfxiEntityUpdate? entity = FfxiEntityUpdate.TryParse(reply.Plaintext.AsSpan(offset, size));
+                if (entity is not null)
+                {
+                    _knownPositions[entity.UniqueNo] = (entity.PacketId, entity.X, entity.Vertical, entity.Depth);
+                }
+            }
         }
 
         return reply;
@@ -329,7 +356,11 @@ public sealed class FfxiZoneClient : IDisposable
         Action<FfxiZoneReply>? onReply = null,
         float walkRadius = 0f,
         string? sayEvery = null,
+        FfxiChatKind sayKind = FfxiChatKind.Say,
         int sayIntervalUpdates = 25,
+        uint? followCharId = null,
+        string? tellTo = null,
+        string? tellText = null,
         CancellationToken ct = default)
     {
         TimeSpan gap = interval ?? TimeSpan.FromSeconds(1);
@@ -352,11 +383,45 @@ public sealed class FfxiZoneClient : IDisposable
                 offsetZ = walkRadius * (float)Math.Sin(angle);
             }
 
+            // Following takes the target's position verbatim off the wire, so
+            // it needs no agreement about which float is "up" - a small offset
+            // keeps us beside them rather than inside them.
+            float baseX = x, baseVertical = vertical, baseDepth = depth;
+            {
+                // Prefer the requested target, but fall back to any other
+                // player we can see - which charid a person is logged in as
+                // is not something worth making the caller guess.
+                (ushort PacketId, float X, float Vertical, float Depth)? theirs = null;
+
+                if (followCharId is uint target && _knownPositions.TryGetValue(target, out var requested))
+                {
+                    theirs = requested;
+                }
+                else if (followCharId is not null)
+                {
+                    foreach ((uint charId, var known) in _knownPositions)
+                    {
+                        if (known.PacketId == FfxiEntityUpdate.PlayerPacketId && charId != _ownCharId)
+                        {
+                            theirs = known;
+                            break;
+                        }
+                    }
+                }
+
+                if (theirs is not null)
+                {
+                    baseX = theirs.Value.X + 0.5f;
+                    baseVertical = theirs.Value.Vertical;
+                    baseDepth = theirs.Value.Depth + 0.5f;
+                }
+            }
+
             byte[] pos = FfxiPositionPacket.Build(
                 sync: (ushort)(_ownCounter + 1),
-                x: x + offsetX,
-                vertical: vertical,
-                depth: depth + offsetZ,
+                x: baseX + offsetX,
+                vertical: baseVertical,
+                depth: baseDepth + offsetZ,
                 direction: direction,
                 moveFrame: (ushort)(sent & 0xFFFF),
                 modes: walkRadius > 0f ? FfxiPositionPacket.ModeFlags.Run : FfxiPositionPacket.ModeFlags.None,
@@ -369,8 +434,14 @@ public sealed class FfxiZoneClient : IDisposable
             // it goes out as its own datagram between position updates.
             if (sayEvery is not null && sent % sayIntervalUpdates == 0)
             {
-                byte[] chat = FfxiChatPacket.Build(FfxiChatKind.Say, $"{sayEvery} #{sent / sayIntervalUpdates}", (ushort)(_ownCounter + 1));
+                byte[] chat = FfxiChatPacket.Build(sayKind, $"{sayEvery} #{sent / sayIntervalUpdates}", (ushort)(_ownCounter + 1));
                 await SendEncryptedAsync(zoneServer, chat, ct);
+            }
+
+            if (tellTo is not null && sent % sayIntervalUpdates == 0)
+            {
+                byte[] tell = FfxiTellPacket.Build(tellTo, $"{tellText} #{sent / sayIntervalUpdates}", (ushort)(_ownCounter + 1));
+                await SendEncryptedAsync(zoneServer, tell, ct);
             }
 
             // Spend the rest of the interval draining replies, so the server's
