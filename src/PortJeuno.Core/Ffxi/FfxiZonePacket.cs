@@ -88,4 +88,29 @@ public static class FfxiZonePacket
     /// <summary>Inverse of <see cref="PackIdAndSize"/>.</summary>
     public static (ushort Id, int SizeInBytes) UnpackIdAndSize(ushort word) =>
         ((ushort)(word & 0x1FF), (word >> 9) * 4);
+
+    /// <summary>
+    /// Walks a decompressed payload's sub-packet chain, yielding each one's id
+    /// and the slice it occupies. Stops at the first entry that declares a
+    /// zero or over-long size, matching the server's own loop, which is
+    /// bounded the same way - the tail of a payload is often padding rather
+    /// than a real packet.
+    /// </summary>
+    public static IEnumerable<(ushort Id, int Offset, int Size)> EnumerateSubPackets(byte[] payload)
+    {
+        int offset = 0;
+        while (offset + 4 <= payload.Length)
+        {
+            ushort word = BitConverter.ToUInt16(payload, offset);
+            (ushort id, int size) = UnpackIdAndSize(word);
+
+            if (size == 0 || offset + size > payload.Length)
+            {
+                yield break;
+            }
+
+            yield return (id, offset, size);
+            offset += size;
+        }
+    }
 }

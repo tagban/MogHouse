@@ -71,6 +71,31 @@ public sealed class FfxiBlowfish
     }
 
     /// <summary>
+    /// The next key in the zone session's rotation. `MapSession::incrementBlowfish()`
+    /// adds 2 to `key[4]` and re-derives the cipher from the changed key array,
+    /// which the server does every time it sends a GP_SERV_COMMAND_LOGOUT
+    /// (0x00B) - zone transitions included.
+    ///
+    /// This matters even for a client that never zones, because the rotation
+    /// is silent and total: once the server advances, our packets stop
+    /// decrypting for it *and* its packets stop decrypting for us, so the
+    /// 0x00B that announced the change is itself unreadable. The only way
+    /// back is to try the next key, which is exactly what the server does in
+    /// the other direction with its `prev_blowfish` copy.
+    /// </summary>
+    public static uint[] NextSessionKey(ReadOnlySpan<uint> sessionKey)
+    {
+        if (sessionKey.Length != 5)
+        {
+            throw new ArgumentException("Session key must be 5 uint32 words.", nameof(sessionKey));
+        }
+
+        uint[] next = sessionKey.ToArray();
+        next[4] += 2;
+        return next;
+    }
+
+    /// <summary>
     /// The modified F-function - see the class remarks. Byte 0 (bits 0-7)
     /// and byte 2 (bits 16-23) use their full S-box word; byte 1 (bits
     /// 8-15) and byte 3 (bits 24-31) are masked to their low bit and XORed

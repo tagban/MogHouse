@@ -396,15 +396,63 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                 {
                     Console.WriteLine($"Sending 0x015 position updates for {seconds}s - the real client's heartbeat, so the character reads as live rather than timed out...");
 
+                    bool trace = flags.ContainsKey("zone-trace");
+                    var seen = new Dictionary<ushort, int>();
+
+                    // Lets two test clients be parked next to each other
+                    // regardless of where they logged out, which is what the
+                    // "can A see B" experiment needs.
+                    float posX = zoneState.X, posY = zoneState.Vertical, posZ = zoneState.Depth;
+                    if (flags.TryGetValue("zone-pos", out string? posSpec))
+                    {
+                        string[] parts = posSpec.Split(',');
+                        if (parts.Length == 3 &&
+                            float.TryParse(parts[0], out float px) &&
+                            float.TryParse(parts[1], out float py) &&
+                            float.TryParse(parts[2], out float pz))
+                        {
+                            (posX, posY, posZ) = (px, py, pz);
+                            Console.WriteLine($"  position overridden to x={posX} y={posY} z={posZ}");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"  --zone-pos '{posSpec}' is not 'x,y,z' - using the server's position.");
+                        }
+                    }
+
                     int sent = await zone.HoldWithPositionAsync(
                         zoneEndpoint,
-                        x: zoneState.X,
-                        vertical: zoneState.Vertical,
-                        depth: zoneState.Depth,
+                        x: posX,
+                        vertical: posY,
+                        depth: posZ,
                         direction: zoneState.Direction,
-                        duration: TimeSpan.FromSeconds(seconds));
+                        duration: TimeSpan.FromSeconds(seconds),
+                        interval: TimeSpan.FromMilliseconds(400),
+                        walkRadius: flags.TryGetValue("zone-walk", out string? radius) && float.TryParse(radius, out float r) ? r : 2.0f,
+                        onReply: reply =>
+                        {
+                            if (reply.Plaintext is null)
+                            {
+                                return;
+                            }
 
-                    Console.WriteLine($"Done - sent {sent} position updates.");
+                            foreach ((ushort id, int offset, int size) in FfxiZonePacket.EnumerateSubPackets(reply.Plaintext))
+                            {
+                                seen[id] = seen.GetValueOrDefault(id) + 1;
+
+                                if (trace)
+                                {
+                                    Console.WriteLine($"    <- 0x{id:X3} ({size} bytes) {Convert.ToHexString(reply.Plaintext.AsSpan(offset, Math.Min(size, 48)))}");
+                                }
+                            }
+                        });
+
+                    Console.WriteLine($"Done - sent {sent} position updates. Blowfish key rotations detected: {zone.KeyRotations}.");
+                    Console.WriteLine("Sub-packets received during the session (id x count):");
+                    foreach ((ushort id, int count) in seen.OrderByDescending(kv => kv.Value))
+                    {
+                        Console.WriteLine($"    0x{id:X3}  x{count}");
+                    }
                 }
                 else
                 {

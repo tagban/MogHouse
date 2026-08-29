@@ -24,3 +24,20 @@ public sealed record FfxiZoneHandoff(
     uint SearchServerIp,
     uint SearchServerPort,
     uint[] SessionKey);
+
+/// <summary>
+/// The login server answered with an error packet (command 0x24) instead of
+/// the thing we asked for. Carries the server's own numeric code so callers
+/// can react to specific, expected conditions - a stale session row, say -
+/// rather than pattern-matching on a message.
+/// </summary>
+public sealed class FfxiLoginErrorException : Exception
+{
+    public uint Code { get; }
+
+    public FfxiLoginErrorException(uint code, string description)
+        : base($"Login server returned error {code}: {description}")
+    {
+        Code = code;
+    }
+}

@@ -340,8 +340,31 @@ public sealed class FfxiRosterClient : IDisposable
     /// </summary>
     private const uint ExpectedZoneHandoffCommand = 0x0B; // S2C_0x000B_ResponseNextLogin
 
+    /// <summary>
+    /// Error packets (command 0x24) are 0x24 bytes and carry their code in the
+    /// last word - see loginHelpers::generateErrorMessage. Decoding them turns
+    /// an opaque "packet too short" into the server actually telling us what
+    /// went wrong. Codes are from login_errors.h.
+    /// </summary>
+    private const int ErrorPacketSize = 0x24;
+    private const uint ErrorPacketCommand = 0x24;
+
+    public static string DescribeLoginError(uint code) => code switch
+    {
+        201 => "CHARACTER_ALREADY_LOGGED_IN - a session row for this character still exists; the map server clears it about 60s after the last valid packet",
+        305 => "UNABLE_TO_CONNECT_TO_WORLD_SERVER - usually a stale accounts_sessions row blocking the insert, not the world server being down",
+        _ => $"login error {code} (see login_errors.h)",
+    };
+
     internal static FfxiZoneHandoff ParseZoneHandoff(ReadOnlySpan<byte> packet, uint[] sessionKey)
     {
+        if (packet.Length == ErrorPacketSize &&
+            BinaryPrimitives.ReadUInt32LittleEndian(packet.Slice(8, 4)) == ErrorPacketCommand)
+        {
+            uint code = BinaryPrimitives.ReadUInt32LittleEndian(packet.Slice(ErrorPacketSize - 4, 4));
+            throw new FfxiLoginErrorException(code, DescribeLoginError(code));
+        }
+
         if (packet.Length < ZoneHandoffSize)
         {
             throw new ArgumentException($"Zone handoff packet too short: got {packet.Length} bytes, need {ZoneHandoffSize}. Raw: {Convert.ToHexString(packet)}", nameof(packet));

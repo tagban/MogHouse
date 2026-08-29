@@ -64,8 +64,14 @@ public sealed record FfxiZoneReply(
 public sealed class FfxiZoneClient : IDisposable
 {
     private readonly UdpClient _udp = new();
-    private readonly FfxiBlowfish _blowfish;
     private readonly FfxiHuffman? _codec;
+
+    /// <summary>Current session key and the cipher derived from it. Both advance together - see <see cref="TryAdvanceKey"/>.</summary>
+    private uint[] _sessionKey;
+    private FfxiBlowfish _blowfish;
+
+    /// <summary>How many times the key has rotated this session. Purely diagnostic.</summary>
+    public int KeyRotations { get; private set; }
 
     /// <summary>Our own outgoing packet counter (header offset 0).</summary>
     private ushort _ownCounter;
@@ -78,8 +84,44 @@ public sealed class FfxiZoneClient : IDisposable
     /// </param>
     public FfxiZoneClient(FfxiZoneHandoff handoff, FfxiHuffman? codec = null)
     {
-        _blowfish = FfxiBlowfish.FromSessionKey(handoff.SessionKey);
+        _sessionKey = handoff.SessionKey.ToArray();
+        _blowfish = FfxiBlowfish.FromSessionKey(_sessionKey);
         _codec = codec;
+    }
+
+    /// <summary>
+    /// Tries the next key in the rotation against a datagram that failed to
+    /// decrypt, adopting it if it works.
+    ///
+    /// The server rotates its key whenever it sends a 0x00B, and does so
+    /// silently from our point of view: after it rotates, the 0x00B itself is
+    /// undecryptable to us, so there is no message to react to - the only
+    /// evidence is that everything stops working at once, in both directions.
+    /// Probing forward on failure is the client-side mirror of the server's
+    /// own `prev_blowfish` fallback.
+    ///
+    /// Bounded to a few steps so a genuinely corrupt packet costs a little
+    /// wasted work rather than an unbounded search.
+    /// </summary>
+    private bool TryAdvanceKey(byte[] datagram, int maxSteps = 4)
+    {
+        uint[] candidateKey = _sessionKey;
+
+        for (int step = 0; step < maxSteps; step++)
+        {
+            candidateKey = FfxiBlowfish.NextSessionKey(candidateKey);
+            var candidate = FfxiBlowfish.FromSessionKey(candidateKey);
+
+            if (Decode(datagram, candidate, _codec).ChecksumValid)
+            {
+                _sessionKey = candidateKey;
+                _blowfish = candidate;
+                KeyRotations++;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -190,6 +232,13 @@ public sealed class FfxiZoneClient : IDisposable
 
         FfxiZoneReply reply = Decode(result.Buffer, _blowfish, _codec);
 
+        // A failed checksum here is the only signal that the server rotated
+        // its key - see TryAdvanceKey.
+        if (!reply.ChecksumValid && TryAdvanceKey(result.Buffer))
+        {
+            reply = Decode(result.Buffer, _blowfish, _codec);
+        }
+
         // Track the server's counter so our outgoing headers can acknowledge it.
         if (reply.ChecksumValid || reply.ServerCounter > _lastServerCounter)
         {
@@ -265,6 +314,10 @@ public sealed class FfxiZoneClient : IDisposable
     /// client does) until <paramref name="duration"/> elapses. Returns the
     /// number of updates sent.
     /// </summary>
+    /// <param name="onReply">
+    /// Called for every decoded reply. Handy for tracing what the server is
+    /// actually telling us during a session.
+    /// </param>
     public async Task<int> HoldWithPositionAsync(
         IPEndPoint zoneServer,
         float x,
@@ -273,6 +326,8 @@ public sealed class FfxiZoneClient : IDisposable
         sbyte direction,
         TimeSpan duration,
         TimeSpan? interval = null,
+        Action<FfxiZoneReply>? onReply = null,
+        float walkRadius = 0f,
         CancellationToken ct = default)
     {
         TimeSpan gap = interval ?? TimeSpan.FromSeconds(1);
@@ -281,12 +336,28 @@ public sealed class FfxiZoneClient : IDisposable
 
         while (DateTimeOffset.UtcNow < until && !ct.IsCancellationRequested)
         {
+            // Reporting a byte-identical position every tick makes the
+            // server's own `moved` check false forever, so it never calls
+            // onEntityMoved and never sets UPDATE_POS. Tracing a small circle
+            // keeps the character genuinely in motion, which is what a real
+            // client always is.
+            float offsetX = 0f;
+            float offsetZ = 0f;
+            if (walkRadius > 0f)
+            {
+                double angle = sent * 0.4;
+                offsetX = walkRadius * (float)Math.Cos(angle);
+                offsetZ = walkRadius * (float)Math.Sin(angle);
+            }
+
             byte[] pos = FfxiPositionPacket.Build(
                 sync: (ushort)(_ownCounter + 1),
-                x: x,
+                x: x + offsetX,
                 vertical: vertical,
-                depth: depth,
+                depth: depth + offsetZ,
                 direction: direction,
+                moveFrame: (ushort)(sent & 0xFFFF),
+                modes: walkRadius > 0f ? FfxiPositionPacket.ModeFlags.Run : FfxiPositionPacket.ModeFlags.None,
                 timeNow: (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
 
             await SendEncryptedAsync(zoneServer, pos, ct);
@@ -305,10 +376,18 @@ public sealed class FfxiZoneClient : IDisposable
             while (DateTimeOffset.UtcNow < deadline && !ct.IsCancellationRequested)
             {
                 TimeSpan remaining = deadline - DateTimeOffset.UtcNow;
-                if (remaining <= TimeSpan.Zero || await ReceiveAsync(remaining, ct) is null)
+                if (remaining <= TimeSpan.Zero)
                 {
                     break;
                 }
+
+                FfxiZoneReply? incoming = await ReceiveAsync(remaining, ct);
+                if (incoming is null)
+                {
+                    break;
+                }
+
+                onReply?.Invoke(incoming);
             }
 
             // If replies kept arriving right up to the deadline the loop above
