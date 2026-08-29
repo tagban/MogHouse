@@ -273,3 +273,65 @@ concluding anything.
 - `SaveCharGMLevel` writes the character's *in-memory* GM level back to the
   database on logout and on zoning, so editing `chars.gmlevel` while the
   character is logged in gets silently overwritten. Edit it while logged out.
+
+## Zoning
+
+Only the client ever starts a zone change. The server waits to be asked, so a
+character can walk over a zone line indefinitely and stay where it is.
+
+**Zone line data** lives in the server's `data/zones/<zone>/zone.yaml` under a
+`zonelines:` block:
+
+```yaml
+zonelines:
+  z6j0:
+    from:  [-202.243, 0.332, -197.784]   # where the line sits in this zone
+    to:    bastok_mines                   # destination zone
+    at:    [-104.018, 9.359, 81.411, 1.570796]
+    scale: [1.000, 8.000]                 # trigger box
+```
+
+The key is a four-character client token. Its id is that token's little-endian
+bytes — `packZoneLineId` shifts each character in by its index — so `z6j0`
+becomes `0x306A367A`.
+
+**The request** is `GP_CLI_COMMAND_MAPRECT` (C2S `0x05E`, 24 bytes): the packed
+id, the current position, the entity index, and two trailing bytes that are
+validated against enums whose default member is 0. The server answers with a
+`0x00B`.
+
+**The handoff** is `GP_SERV_COMMAND_LOGOUT` (S2C `0x00B`) — mostly *not* a
+logout. State 2 is an ordinary zone change; the packet carries the next zone
+server's address. Immediately after sending it the server rotates its Blowfish
+key, so a client that ignores this packet keeps talking to the old address with
+the old key and the session dies, looking from outside like being logged off
+for no reason.
+
+Completing a change means: rotate the key, reset the per-session packet
+counters (the server zeroes its own when it accepts a fresh `0x00A`), send a
+new `0x00A` and `GAMEOK` to the new address, and reload the zone's navmesh and
+zone lines.
+
+Two things that bite:
+
+- **Arriving lands you on the return line**, which immediately triggers the
+  trip back. Whichever line you arrive inside has to be treated as already
+  requested until you leave its radius.
+- **The sync number.** A hardcoded sync works once and then never again — the
+  server's parse loop silently skips any sub-packet at or below the session's
+  last client counter, with nothing logged. This has now caused the same bug
+  twice, in chat and in the zone-line request. Anything that builds a packet
+  with a sync belongs on the class that owns the counter.
+
+## Terrain and collision
+
+Movement needs ground height and walkability, and both come from the server's
+`navmeshes/<zone>.nav` — the same Recast/Detour meshes it walks mobs around
+with. Read them with DotRecast; no game client or zone geometry parsing
+involved. See `FfxiNavMesh` for the three traps (coordinate handedness, 32-bit
+tile refs, and `AddTile`'s `lastRef`).
+
+Collision needs a **raycast along the path**, not a test of the destination.
+`FindNearestPoly` searches a box and returns the closest walkable polygon, so a
+point inside a wall finds the floor on the far side and reports success — which
+looks like working collision right up until you walk through something.
