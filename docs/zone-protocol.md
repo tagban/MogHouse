@@ -79,8 +79,10 @@ every real connection and neither of which fails loudly:
 The server rotates its key (`key[4] += 2`, re-derive) every time it sends a
 `0x00B`. The rotation is invisible: afterwards the `0x00B` announcing it is
 itself undecryptable, so the only evidence is that both directions stop working
-at once. `FfxiZoneClient` probes forward on a checksum failure, mirroring the
-server's own `prev_blowfish` fallback. *This has not yet been observed firing.*
+at once. `FfxiZoneClient` rotates explicitly on seeing a `0x00B`, and also probes
+forward on a checksum failure as a fallback, mirroring the server's own
+`prev_blowfish` behaviour. Confirmed working: a zone change from Bastok Mines
+to Bastok Markets survives the rotation and the session continues.
 
 ## Compression
 
