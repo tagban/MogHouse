@@ -167,7 +167,7 @@ public class FfxiRosterClientTests
         BinaryPrimitives.WriteUInt32BigEndian(packet.AsSpan(64, 4), 0xC0A80002);  // 192.168.0.2
         BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(68, 4), 54001u);   // search port
 
-        FfxiZoneHandoff handoff = FfxiRosterClient.ParseZoneHandoff(packet);
+        FfxiZoneHandoff handoff = FfxiRosterClient.ParseZoneHandoff(packet, new uint[5]);
 
         Assert.Equal(12345u, handoff.ContentId);
         Assert.Equal(42u, handoff.CharIdMain);
@@ -182,7 +182,7 @@ public class FfxiRosterClientTests
     [Fact]
     public void ParseZoneHandoff_TooShort_Throws()
     {
-        Assert.Throws<ArgumentException>(() => FfxiRosterClient.ParseZoneHandoff(new byte[10]));
+        Assert.Throws<ArgumentException>(() => FfxiRosterClient.ParseZoneHandoff(new byte[10], new uint[5]));
     }
 
     [Fact]
@@ -191,7 +191,7 @@ public class FfxiRosterClientTests
         var packet = new byte[72];
         BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(8, 4), 0x24); // an error packet's command, not 0x0B
 
-        var ex = Assert.Throws<InvalidOperationException>(() => FfxiRosterClient.ParseZoneHandoff(packet));
+        var ex = Assert.Throws<InvalidOperationException>(() => FfxiRosterClient.ParseZoneHandoff(packet, new uint[5]));
         Assert.Contains("0x24", ex.Message);
     }
 }

@@ -67,7 +67,8 @@ static void PrintUsage()
 
         Add --select-character <name> to any login to also select a
         character after listing the roster and print the zone-server
-        handoff (not the real game protocol - just the login/lobby steps).
+        handoff. Add --zone on top of that to also send the zone server's
+        GP_CLI_COMMAND_LOGIN (0x00A) over UDP and decrypt its reply.
 
         Ports default to the standard 54231/54230/54001 - override with
         --auth-port/--data-port/--view-port if your server differs.
@@ -289,9 +290,51 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
             Console.WriteLine($"Zone handoff: character={handoff.CharacterName} serverId={handoff.ServerId}");
             Console.WriteLine($"  Zone server:   {FfxiRosterClient.FormatIpAddress(handoff.ZoneServerIp)}:{handoff.ZoneServerPort}");
             Console.WriteLine($"  Search server: {FfxiRosterClient.FormatIpAddress(handoff.SearchServerIp)}:{handoff.SearchServerPort}");
-            Console.WriteLine("(Actually connecting to the zone server is a separate, Blowfish-encrypted protocol - not implemented yet.)");
+            Console.WriteLine($"  Session key (from our own 0xA2 key3): {string.Join(" ", handoff.SessionKey.Select(k => k.ToString("X8")))}");
 
-            return 0;
+            if (!flags.ContainsKey("zone"))
+            {
+                Console.WriteLine("(Add --zone to also send the zone-server login packet.)");
+                return 0;
+            }
+
+            // The handoff reports the zone server's own configured address,
+            // which for a server bound to 0.0.0.0 isn't a routable target -
+            // fall back to the host the login server was reached on.
+            string zoneHost = FfxiRosterClient.FormatIpAddress(handoff.ZoneServerIp);
+            if (zoneHost is "0.0.0.0")
+            {
+                zoneHost = profile.Host;
+                Console.WriteLine($"  (zone server reported 0.0.0.0; using {zoneHost} instead)");
+            }
+
+            var zoneEndpoint = new System.Net.IPEndPoint(System.Net.IPAddress.Parse(zoneHost), (int)handoff.ZoneServerPort);
+
+            using var zone = new FfxiZoneClient(handoff);
+
+            Console.WriteLine($"Sending GP_CLI_COMMAND_LOGIN (0x00A) to {zoneEndpoint} for charid {handoff.ContentId} (retransmitting until answered)...");
+
+            FfxiZoneReply? reply = await zone.LoginAsync(
+                zoneEndpoint,
+                uniqueNo: handoff.ContentId,
+                characterName: handoff.CharacterName,
+                accountName: profile.Username,
+                clientVersion: 99,
+                clientLanguage: 2);
+
+            Console.WriteLine($"  sent: {Convert.ToHexString(zone.LastSentDatagram!)}");
+
+            if (reply is null)
+            {
+                Console.WriteLine("No reply after retrying - the zone server drops packets it rejects rather than answering, so check its log for why.");
+                return 1;
+            }
+
+            Console.WriteLine($"Zone reply: {reply.Datagram.Length} bytes, serverCounter={reply.ServerCounter}, acks our counter {reply.AcknowledgedClientCounter}");
+            Console.WriteLine($"  MD5 after Blowfish decrypt: {(reply.ChecksumValid ? "VALID - cipher, key schedule and key derivation all confirmed correct" : "INVALID - decryption is wrong somewhere")}");
+            Console.WriteLine($"  Decrypted payload ({reply.Payload.Length} bytes, still Huffman-compressed): {Convert.ToHexString(reply.Payload.AsSpan(0, Math.Min(64, reply.Payload.Length)))}...");
+
+            return reply.ChecksumValid ? 0 : 1;
         }
     }
     catch (Exception ex)

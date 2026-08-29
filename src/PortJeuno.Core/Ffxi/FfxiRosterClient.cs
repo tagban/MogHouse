@@ -180,7 +180,7 @@ public sealed class FfxiRosterClient : IDisposable
 
         var viewBuffer = new byte[ZoneHandoffSize];
         int viewRead = await viewStream.ReadAsync(viewBuffer, ct);
-        return ParseZoneHandoff(viewBuffer.AsSpan(0, viewRead));
+        return ParseZoneHandoff(viewBuffer.AsSpan(0, viewRead), DeriveSessionKey(sessionHash));
     }
 
     internal static byte[] BuildViewAcquirePlayerDataRequest(ReadOnlySpan<byte> sessionHash)
@@ -242,6 +242,39 @@ public sealed class FfxiRosterClient : IDisposable
         packet[0] = DataOpcodeConfirmSelection;
         sessionHash.CopyTo(packet.AsSpan(FfxiConstants.PacketIdentifierOffset, FfxiConstants.PacketIdentifierLength));
         return packet;
+    }
+
+    /// <summary>
+    /// The 20-byte `key3` blob the 0xA2 request carries becomes the zone
+    /// connection's Blowfish session key verbatim - the login server reads it
+    /// straight out of the packet (`memcpy(key3, buffer_.data() + 1, 20)`)
+    /// and stores it in `accounts_sessions.session_key`, and the map server
+    /// later loads that same blob into `MapSession::blowfish.key` and MD5s it
+    /// into the actual cipher key. So the client already knows the key from
+    /// the moment it sends 0xA2; nothing needs to be read back.
+    ///
+    /// Because key3 starts at packet offset 1 and the mandatory session-hash
+    /// region starts at offset 12, key3 is 11 zero bytes followed by the
+    /// first 9 bytes of the session hash - a direct consequence of the
+    /// overlap described in SelectCharacterAsync's remarks, not a choice.
+    ///
+    /// The server can further mutate `key3[16]` before storing it
+    /// (`+= 6` for a just-created character, `+= incrementKeyValue`) - but
+    /// `incrementKeyValue` is only ever advanced on error paths that return
+    /// before the INSERT, so for a clean login the stored key matches this
+    /// exactly. A first login on a brand-new character is the known
+    /// exception and is not handled here.
+    /// </summary>
+    internal static uint[] DeriveSessionKey(ReadOnlySpan<byte> sessionHash)
+    {
+        var packet = BuildDataConfirmSelectionRequest(sessionHash);
+
+        var key = new uint[5];
+        for (int i = 0; i < 5; i++)
+        {
+            key[i] = BinaryPrimitives.ReadUInt32LittleEndian(packet.AsSpan(1 + i * 4, 4));
+        }
+        return key;
     }
 
     /// <summary>
@@ -307,7 +340,7 @@ public sealed class FfxiRosterClient : IDisposable
     /// </summary>
     private const uint ExpectedZoneHandoffCommand = 0x0B; // S2C_0x000B_ResponseNextLogin
 
-    internal static FfxiZoneHandoff ParseZoneHandoff(ReadOnlySpan<byte> packet)
+    internal static FfxiZoneHandoff ParseZoneHandoff(ReadOnlySpan<byte> packet, uint[] sessionKey)
     {
         if (packet.Length < ZoneHandoffSize)
         {
@@ -334,7 +367,8 @@ public sealed class FfxiRosterClient : IDisposable
             ZoneServerIp: BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(OffsetHandoffServerIp, 4)),
             ZoneServerPort: BinaryPrimitives.ReadUInt32LittleEndian(packet.Slice(OffsetHandoffServerPort, 4)),
             SearchServerIp: BinaryPrimitives.ReadUInt32BigEndian(packet.Slice(OffsetHandoffCacheIp, 4)),
-            SearchServerPort: BinaryPrimitives.ReadUInt32LittleEndian(packet.Slice(OffsetHandoffCachePort, 4)));
+            SearchServerPort: BinaryPrimitives.ReadUInt32LittleEndian(packet.Slice(OffsetHandoffCachePort, 4)),
+            SessionKey: sessionKey);
     }
 
     /// <summary>Formats a ZoneServerIp/SearchServerIp value (big-endian octets - see ParseZoneHandoff) as a dotted-quad string.</summary>
