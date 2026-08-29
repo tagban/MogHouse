@@ -116,3 +116,58 @@ public class FfxiChatMessageTests
         Assert.Null(FfxiChatMessage.TryParse(new byte[8]));
     }
 }
+
+public class FfxiTellPacketTests
+{
+    /// <summary>
+    /// These two fields are named "unknown" but are validated: the server
+    /// requires unknown04 == 3 and unknown05 == 0, and silently drops the
+    /// packet otherwise while logging a warning only it can see. Leaving them
+    /// zero - the natural default - fails invisibly, which is exactly how this
+    /// was originally missed.
+    /// </summary>
+    [Fact]
+    public void Build_SetsTheValidatedUnknownFields()
+    {
+        byte[] packet = FfxiTellPacket.Build("Tagban", "hello", sync: 1);
+
+        Assert.Equal(3, packet[4]);
+        Assert.Equal(0, packet[5]);
+    }
+
+    [Fact]
+    public void Build_PlacesRecipientAndTextAtRealOffsets()
+    {
+        byte[] packet = FfxiTellPacket.Build("Tagban", "hello", sync: 1);
+
+        Assert.Equal("Tagban", System.Text.Encoding.ASCII.GetString(packet, 6, 6));
+        Assert.Equal("hello", System.Text.Encoding.ASCII.GetString(packet, 21, 5));
+    }
+
+    /// <summary>
+    /// The server derives message length as `header.size * 4 - 0x15`, so the
+    /// declared size must be right and a multiple of 4.
+    /// </summary>
+    [Theory]
+    [InlineData("hi", 24)]      // 21 + 2 + 1 = 24
+    [InlineData("hello", 28)]   // 21 + 5 + 1 = 27 -> 28
+    [InlineData("", 24)]        // 21 + 0 + 1 = 22 -> 24
+    public void Build_SizeIsPaddedToFourByteUnits(string message, int expectedSize)
+    {
+        byte[] packet = FfxiTellPacket.Build("Tagban", message, sync: 1);
+
+        Assert.Equal(expectedSize, packet.Length);
+        (ushort id, int declared) = FfxiZonePacket.UnpackIdAndSize(
+            System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(packet));
+        Assert.Equal(FfxiTellPacket.PacketId, id);
+        Assert.Equal(expectedSize, declared);
+    }
+
+    [Fact]
+    public void Build_LongRecipientIsTruncatedLeavingRoomForATerminator()
+    {
+        byte[] packet = FfxiTellPacket.Build(new string('x', 40), "hi", sync: 1);
+
+        Assert.Equal(0, packet[6 + 14]);
+    }
+}

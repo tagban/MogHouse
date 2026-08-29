@@ -20,6 +20,16 @@ namespace PortJeuno.Core.Ffxi;
 /// is a large structure with no compiled reference read yet, and guessing at
 /// it would produce fields that look authoritative while being wrong.
 /// </summary>
+/// <param name="Name">
+/// Present only for player updates long enough to carry it - NPC updates use a
+/// different layout past the shared head, so this is never read for them.
+/// </param>
+/// <param name="ModelSize">
+/// `Flags1.GraphSize`, the model scale the server sends from `char_look.size`.
+/// Surfaced because a zero here is worth noticing: that column defaults to 0
+/// and isn't populated by the character-insert trigger, and a zero-scale
+/// character is present and targetable while plausibly drawing as nothing.
+/// </param>
 public sealed record FfxiEntityUpdate(
     ushort PacketId,
     uint UniqueNo,
@@ -27,7 +37,9 @@ public sealed record FfxiEntityUpdate(
     sbyte Direction,
     float X,
     float Vertical,
-    float Depth)
+    float Depth,
+    string? Name = null,
+    byte? ModelSize = null)
 {
     public const ushort PlayerPacketId = 0x00D;
     public const ushort NpcPacketId = 0x00E;
@@ -42,6 +54,17 @@ public sealed record FfxiEntityUpdate(
 
     /// <summary>Minimum bytes needed for the head this parses.</summary>
     public const int MinimumSize = Body + 20;
+
+    // Offsets confirmed against the compiled GP_SERV_CHAR_PC, not counted by
+    // hand: the struct threads several bitfield blocks and a misaligned
+    // uint8 between the head and the name.
+    private const int OffsetFlags1 = 32;
+    private const int OffsetName = 90;
+    private const int NameLength = 16;
+
+    /// <summary>Flags1 bits 9-10 - see <see cref="ModelSize"/>.</summary>
+    private const int GraphSizeBitOffset = 9;
+    private const uint GraphSizeMask = 0b11;
 
     /// <summary>True for the two ids that carry a GP_SERV_POS_HEAD.</summary>
     public static bool IsEntityUpdate(ushort id) => id is PlayerPacketId or NpcPacketId;
@@ -63,6 +86,24 @@ public sealed record FfxiEntityUpdate(
             return null;
         }
 
+        // Only player updates share the layout past the head, so name and
+        // model size are read for those alone - and only when the packet is
+        // actually long enough, since these are truncated by update type.
+        string? name = null;
+        byte? modelSize = null;
+
+        if (id == PlayerPacketId && subPacket.Length >= OffsetFlags1 + 4)
+        {
+            uint flags1 = BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(OffsetFlags1, 4));
+            modelSize = (byte)((flags1 >> GraphSizeBitOffset) & GraphSizeMask);
+
+            if (subPacket.Length >= OffsetName + 1)
+            {
+                int available = Math.Min(NameLength, subPacket.Length - OffsetName);
+                name = ReadFixedString(subPacket.Slice(OffsetName, available));
+            }
+        }
+
         return new FfxiEntityUpdate(
             PacketId: id,
             UniqueNo: BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(OffsetUniqueNo, 4)),
@@ -70,6 +111,14 @@ public sealed record FfxiEntityUpdate(
             Direction: (sbyte)subPacket[OffsetDirection],
             X: BinaryPrimitives.ReadSingleLittleEndian(subPacket.Slice(OffsetX, 4)),
             Vertical: BinaryPrimitives.ReadSingleLittleEndian(subPacket.Slice(OffsetVertical, 4)),
-            Depth: BinaryPrimitives.ReadSingleLittleEndian(subPacket.Slice(OffsetDepth, 4)));
+            Depth: BinaryPrimitives.ReadSingleLittleEndian(subPacket.Slice(OffsetDepth, 4)),
+            Name: name,
+            ModelSize: modelSize);
+    }
+
+    private static string ReadFixedString(ReadOnlySpan<byte> field)
+    {
+        int nul = field.IndexOf((byte)0);
+        return System.Text.Encoding.ASCII.GetString(nul >= 0 ? field[..nul] : field);
     }
 }

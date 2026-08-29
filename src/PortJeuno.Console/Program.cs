@@ -464,7 +464,7 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                                     // terrain rather than staying put.
                                     if (!isSelf && entity.PacketId == FfxiEntityUpdate.PlayerPacketId && count % 40 == 1)
                                     {
-                                        Console.WriteLine($"    POS charid {entity.UniqueNo}: x={entity.X:F2} y={entity.Vertical:F2} z={entity.Depth:F2} dir={entity.Direction}");
+                                        Console.WriteLine($"    POS charid {entity.UniqueNo} ({entity.Name}): x={entity.X:F2} y={entity.Vertical:F2} z={entity.Depth:F2} dir={entity.Direction} modelSize={entity.ModelSize}");
                                     }
 
                                     // Dump the whole spawn packet once per
