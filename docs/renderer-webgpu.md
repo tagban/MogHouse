@@ -84,6 +84,27 @@ A vertical slice first, to fail in days rather than months:
 3. Real MZB zone geometry, parsed by `ffxi-lib`, rendered through Dawn
 4. The same verified on the M4
 
+Step 3 splits, and the first half is much cheaper than expected. `MZB` parses
+zone collision geometry into `CollisionMeshData`:
+
+```cpp
+struct CollisionMeshData
+{
+    std::vector<uint8_t> vertices;
+    std::vector<uint8_t> normals;
+    std::vector<uint16_t> indices;
+};
+```
+
+Plain CPU data, no Vulkan in it at all. So:
+
+- **3a** - render those meshes untextured. Proves DAT -> parse -> Dawn -> screen
+  on all three platforms without touching materials, textures, or any of the
+  four Vulkan-entangled parsers.
+- **3b** - render MMB models with their DXT3 textures. This is where the binding
+  redesign actually has to happen, and it is worth doing only once 3a has shown
+  the foundation works everywhere.
+
 `ffxi-lib` is already linkable from outside the engine's own executable, and a
 C ABI round trip from C# through it into the retail DATs is verified - see
 `docs/engine-build.md`.
