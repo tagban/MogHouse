@@ -166,10 +166,40 @@ renders to others as "timed out" — accurately, since nothing is arriving.
 
 **The three floats are not x/y/z in order.** The server's own handler maps them
 with a `// Not a typo.` comment: the second float is the engine's *vertical*
-axis, the third is horizontal depth. Getting this wrong does not fail loudly —
-it buries the character in terrain. Verified end-to-end: one client walking a
+axis, the third is horizontal depth. Verified end-to-end: one client walking a
 3-unit circle was observed by another at the correct radius on x and z with the
 vertical held exactly constant.
+
+A fixed vertical is survivable in practice. This client echoes back whatever
+height the server first reported and never adjusts it, and the retail client
+still draws the character stepping correctly up and down stairs — it snaps
+other players to the ground itself. It also appears to ignore collision, so a
+client-driven character can walk through obstacles.
+
+## A character that is present but invisible
+
+If a character is in the zone, answers tells, appears in search, and yet is not
+drawn for anybody, check whether it is **parked in an unfinished event**. A
+character in a cutscene is not rendered to other players, and nothing about the
+zone, position or spawn packets looks wrong. The first-login expansion prompt
+(e.g. Adoulin's "start now / start later") is exactly this: a client that never
+answers it leaves the character in an event forever.
+
+The login reply carries the event state — `EventNo`, `EventNum`, `EventPara`,
+`EventMode` — and `LoginState` (2 = GAME, i.e. normal). Check those before
+theorising about anything subtler.
+
+Two things this is *not*, both of which cost real time to rule out:
+
+- **`Flags1.GraphSize == 0`** is not a broken model scale. `getSize()`
+  documents it as "Small: 0, Medium: 1, Large: 2".
+- **A fixed vertical** does not bury the character (see above).
+
+And one that is genuinely invisible to packet inspection: `m_isGMHidden` gates
+`considerCandidate` in `SpawnPCs` and would silently exclude a character from
+every spawn list, but it is **not** the packet's `Flags1.HideFlag` — that is
+`m_isPCHidden`. It loads from `char_flags.gmHiddenEnabled` for any character,
+regardless of GM level, so it can only be checked in the database.
 
 Sessions are reaped roughly 60 seconds after the last valid packet.
 
