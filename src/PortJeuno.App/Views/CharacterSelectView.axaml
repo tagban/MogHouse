@@ -1,0 +1,38 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:PortJeuno.App.ViewModels"
+             xmlns:ffxi="using:PortJeuno.Core.Ffxi"
+             x:Class="PortJeuno.App.Views.CharacterSelectView"
+             x:DataType="vm:CharacterSelectViewModel">
+  <StackPanel Width="420" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="10">
+    <TextBlock Text="Select a character" FontSize="22" FontWeight="Light" HorizontalAlignment="Center"/>
+
+    <ListBox ItemsSource="{Binding Characters}"
+             SelectedItem="{Binding SelectedCharacter}"
+             Height="240">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="ffxi:FfxiCharacter">
+          <StackPanel Margin="4">
+            <TextBlock Text="{Binding Name}" FontSize="16"/>
+            <TextBlock Opacity="0.6" FontSize="12">
+              <Run Text="job"/><Run Text="{Binding MainJob}"/>
+              <Run Text=" level"/><Run Text="{Binding MainJobLevel}"/>
+              <Run Text="  zone"/><Run Text="{Binding Zone}"/>
+            </TextBlock>
+          </StackPanel>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+    <Button Content="Enter world"
+            Command="{Binding EnterWorldCommand}"
+            IsEnabled="{Binding !IsBusy}"
+            HorizontalAlignment="Stretch"
+            HorizontalContentAlignment="Center"/>
+
+    <TextBlock Text="{Binding Error}"
+               Foreground="#EF5350"
+               TextWrapping="Wrap"
+               IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+  </StackPanel>
+</UserControl>

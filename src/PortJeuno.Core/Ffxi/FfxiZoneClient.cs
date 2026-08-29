@@ -84,6 +84,22 @@ public sealed class FfxiZoneClient : IDisposable
     public bool TryGetKnownPosition(uint charId, out (ushort PacketId, float X, float Vertical, float Depth) position) =>
         _knownPositions.TryGetValue(charId, out position);
 
+    /// <summary>
+    /// Snapshot of every entity we have been told about, for callers that want
+    /// to draw or list them. Copied rather than exposed live, since the
+    /// receive loop mutates the underlying map.
+    /// </summary>
+    public IReadOnlyList<FfxiEntityUpdate> KnownEntities()
+    {
+        lock (_entityLock)
+        {
+            return _knownEntities.Values.ToList();
+        }
+    }
+
+    private readonly Dictionary<uint, FfxiEntityUpdate> _knownEntities = [];
+    private readonly object _entityLock = new();
+
     /// <summary>Our own charid, so "somebody else" is answerable without the caller passing it around.</summary>
     private uint _ownCharId;
 
@@ -268,6 +284,21 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
                 if (entity is not null)
                 {
                     _knownPositions[entity.UniqueNo] = (entity.PacketId, entity.X, entity.Vertical, entity.Depth);
+
+                    lock (_entityLock)
+                    {
+                        // Partial updates carry position but no name, so keep
+                        // the richer earlier record and refresh its position
+                        // rather than overwriting a named entity with a blank.
+                        if (entity.Name is null && _knownEntities.TryGetValue(entity.UniqueNo, out FfxiEntityUpdate? existing))
+                        {
+                            _knownEntities[entity.UniqueNo] = existing with { X = entity.X, Vertical = entity.Vertical, Depth = entity.Depth, Direction = entity.Direction };
+                        }
+                        else
+                        {
+                            _knownEntities[entity.UniqueNo] = entity;
+                        }
+                    }
                 }
             }
         }

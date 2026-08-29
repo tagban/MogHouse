@@ -1,0 +1,31 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:PortJeuno.App.ViewModels"
+             x:Class="PortJeuno.App.Views.LoginView"
+             x:DataType="vm:LoginViewModel">
+  <StackPanel Width="320" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="10">
+    <TextBlock Text="PortJeuno" FontSize="28" FontWeight="Light" HorizontalAlignment="Center"/>
+    <TextBlock Text="Connect to a server" Opacity="0.6" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+
+    <TextBlock Text="Host"/>
+    <TextBox Text="{Binding Host}"/>
+
+    <TextBlock Text="Username"/>
+    <TextBox Text="{Binding Username}"/>
+
+    <TextBlock Text="Password"/>
+    <TextBox Text="{Binding Password}" PasswordChar="•"/>
+
+    <Button Content="Log in"
+            Command="{Binding LoginCommand}"
+            IsEnabled="{Binding !IsBusy}"
+            HorizontalAlignment="Stretch"
+            HorizontalContentAlignment="Center"
+            Margin="0,10,0,0"/>
+
+    <TextBlock Text="{Binding Error}"
+               Foreground="#EF5350"
+               TextWrapping="Wrap"
+               IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+  </StackPanel>
+</UserControl>
