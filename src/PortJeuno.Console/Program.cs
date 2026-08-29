@@ -388,6 +388,11 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                 }
             }
 
+            // Complete the zone-in handshake before anything else: the server
+            // only starts sending the initialization batch once it sees this.
+            await zone.SendGameOkAsync(zoneEndpoint);
+            Console.WriteLine("Sent GP_CLI_COMMAND_GAMEOK (0x00C) - zone-in handshake completed.");
+
             if (flags.TryGetValue("zone-hold", out string? holdSeconds) && int.TryParse(holdSeconds, out int seconds))
             {
                 Console.WriteLine("Ctrl+C to stop early.");

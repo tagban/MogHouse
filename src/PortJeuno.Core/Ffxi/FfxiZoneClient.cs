@@ -341,6 +341,14 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
     /// client does) until <paramref name="duration"/> elapses. Returns the
     /// number of updates sent.
     /// </summary>
+    /// <summary>
+    /// Sends GP_CLI_COMMAND_GAMEOK - the "finished loading, send me everything"
+    /// step of zoning in. Must follow a successful 0x00A: it travels encrypted
+    /// like all steady-state traffic, so it needs the codec.
+    /// </summary>
+    public async Task SendGameOkAsync(IPEndPoint zoneServer, CancellationToken ct = default) =>
+        await SendEncryptedAsync(zoneServer, FfxiGameOkPacket.Build((ushort)(_ownCounter + 1)), ct);
+
     /// <param name="onReply">
     /// Called for every decoded reply. Handy for tracing what the server is
     /// actually telling us during a session.
