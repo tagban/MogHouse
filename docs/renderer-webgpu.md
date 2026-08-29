@@ -109,6 +109,24 @@ Plain CPU data, no Vulkan in it at all. So:
 C ABI round trip from C# through it into the retail DATs is verified - see
 `docs/engine-build.md`.
 
+## The dependency problem step 3a runs into
+
+To render MZB geometry the renderer needs the MZB parser, which lives in
+`ffxi-lib`, which links `lotus-engine`, which is Vulkan. Pulling the whole
+Vulkan engine into a WebGPU renderer to reach a parser is obviously wrong, and
+on macOS it is worse than wrong - the engine cannot initialise there at all.
+
+So the parsers have to come out into a library of their own with no lotus and
+no Vulkan in it. The measurement above says that is mostly a matter of moving
+files: `dat`, `dat_loader`, `key_tables`, `sk2`, `mo2`, `scheduler`, `generator`,
+`sep`, `cib` and `os2` are already clean. Only `mmb`, `d3m`, `dxt3` and `mzb`
+need splitting, and the split is along one seam - parse into plain CPU data on
+one side, upload to the GPU on the other.
+
+This is the real architectural work, and it is worth doing properly rather than
+shortcutting for the slice: it is also what makes shipping on macOS possible at
+all, since nothing Vulkan-dependent can be on that path.
+
 ## Not decided yet
 
 Whether the new renderer consumes lotus's entity/scene system or sits directly
