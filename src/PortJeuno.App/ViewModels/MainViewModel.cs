@@ -30,16 +30,21 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>Where the zone navmeshes live, if the user has pointed us at them.</summary>
     public string? NavMeshDirectory { get; }
 
+    /// <summary>The server's data/zones directory, which holds zone lines.</summary>
+    public string? ZoneDataDirectory { get; }
+
     public MainViewModel()
     {
         Tables = FfxiHuffmanTables.TryLoadDefault();
         // Navmeshes come from the same place as the compression tables by
         // default, since both are server-side data the project does not ship.
         NavMeshDirectory = Environment.GetEnvironmentVariable("PORTJEUNO_FFXI_NAVMESHES");
+        ZoneDataDirectory = Environment.GetEnvironmentVariable("PORTJEUNO_FFXI_ZONEDATA");
 
         Session = new FfxiGameSession(
             Tables is null ? null : new FfxiHuffman(Tables),
-            NavMeshDirectory);
+            NavMeshDirectory,
+            ZoneDataDirectory);
 
         Session.Status += message => Dispatcher.UIThread.Post(() => Status = message);
 

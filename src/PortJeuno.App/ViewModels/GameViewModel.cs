@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
+using Avalonia.Media;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -9,8 +10,14 @@ using PortJeuno.Core.Ffxi;
 
 namespace PortJeuno.App.ViewModels;
 
-/// <summary>One entity as a dot on the radar, already in canvas coordinates.</summary>
-public sealed record EntityDot(double Left, double Top, string Label, string Colour, double Size);
+/// <summary>
+/// One entity as a dot on the radar, already in canvas coordinates.
+///
+/// Colour is an IBrush rather than a string on purpose: a string works when
+/// written literally in XAML but silently fails to convert through a binding,
+/// which shows up as an empty canvas with no error anywhere.
+/// </summary>
+public sealed record EntityDot(double Left, double Top, string Label, IBrush Colour, double Size);
 
 public partial class GameViewModel : ViewModelBase
 {
@@ -24,6 +31,10 @@ public partial class GameViewModel : ViewModelBase
     /// is 45 units, so 50 covers everything the server will tell us about.
     /// </summary>
     private const double RangeInUnits = 50;
+
+    private static readonly IBrush SelfBrush = new SolidColorBrush(Color.Parse("#4FC3F7"));
+    private static readonly IBrush PlayerBrush = new SolidColorBrush(Color.Parse("#FFD54F"));
+    private static readonly IBrush NpcBrush = new SolidColorBrush(Color.Parse("#8D8D8D"));
 
     public ObservableCollection<FfxiChatLine> ChatLines { get; } = [];
     public ObservableCollection<EntityDot> Dots { get; } = [];
@@ -83,7 +94,7 @@ public partial class GameViewModel : ViewModelBase
         int players = 0, npcs = 0;
 
         // Us, always dead centre.
-        Dots.Add(new EntityDot(Radius - 4, Radius - 4, CharacterName, "#4FC3F7", 8));
+        Dots.Add(new EntityDot(Radius - 4, Radius - 4, CharacterName, SelfBrush, 8));
 
         foreach (FfxiEntityUpdate entity in entities)
         {
@@ -118,7 +129,7 @@ public partial class GameViewModel : ViewModelBase
                 Radius + dx - size / 2,
                 Radius + dz - size / 2,
                 isPlayer ? entity.Name ?? $"#{entity.UniqueNo}" : "",
-                isPlayer ? "#FFD54F" : "#8D8D8D",
+                isPlayer ? PlayerBrush : NpcBrush,
                 size));
         }
 

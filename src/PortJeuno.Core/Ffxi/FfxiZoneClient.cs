@@ -443,6 +443,15 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
     public async Task SendTellAsync(IPEndPoint zoneServer, string recipient, string message, CancellationToken ct = default) =>
         await SendEncryptedAsync(zoneServer, FfxiTellPacket.Build(recipient, message, (ushort)(_ownCounter + 1)), ct);
 
+    /// <summary>
+    /// Requests a zone change after touching a zone line (0x05E). Same sync
+    /// caveat as chat: a hardcoded value is silently skipped by the server's
+    /// parse loop once the session counter has moved past it, with no warning
+    /// logged anywhere - the request simply never happens.
+    /// </summary>
+    public async Task SendZoneLineAsync(IPEndPoint zoneServer, uint rectId, float x, float vertical, float depth, ushort actIndex, CancellationToken ct = default) =>
+        await SendEncryptedAsync(zoneServer, FfxiZoneLinePacket.Build(rectId, x, vertical, depth, actIndex, (ushort)(_ownCounter + 1)), ct);
+
     public async Task SendGameOkAsync(IPEndPoint zoneServer, CancellationToken ct = default) =>
         await SendEncryptedAsync(zoneServer, FfxiGameOkPacket.Build((ushort)(_ownCounter + 1)), ct);
 

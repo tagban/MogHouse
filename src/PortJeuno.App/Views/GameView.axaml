@@ -55,12 +55,20 @@
                 <Canvas/>
               </ItemsPanelTemplate>
             </ItemsControl.ItemsPanel>
+            <!-- Canvas.Left/Top have to be set on the generated container, not
+                 on the child inside the template: the Canvas positions its own
+                 children, and a ContentPresenter with no coordinates stacks
+                 everything at the origin. -->
+            <ItemsControl.Styles>
+              <Style Selector="ItemsControl > ContentPresenter">
+                <Setter Property="Canvas.Left" Value="{Binding Left, DataType=vm:EntityDot}"/>
+                <Setter Property="Canvas.Top" Value="{Binding Top, DataType=vm:EntityDot}"/>
+              </Style>
+            </ItemsControl.Styles>
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="vm:EntityDot">
                 <Ellipse Width="{Binding Size}" Height="{Binding Size}"
                          Fill="{Binding Colour}"
-                         Canvas.Left="{Binding Left}"
-                         Canvas.Top="{Binding Top}"
                          ToolTip.Tip="{Binding Label}"/>
               </DataTemplate>
             </ItemsControl.ItemTemplate>

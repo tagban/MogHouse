@@ -25,16 +25,26 @@ public sealed class FfxiGameSession : IDisposable
     private Task? _holdTask;
 
     private readonly string? _navMeshDirectory;
+    private readonly string? _zoneDataDirectory;
+
+    /// <summary>Zone lines for the current zone, if the data was available.</summary>
+    public IReadOnlyList<FfxiZoneLine> ZoneLines { get; private set; } = [];
 
     /// <param name="navMeshDirectory">
     /// Where the server's `.nav` files live. Optional: without it the character
     /// can still move, but at a fixed height and with nothing stopping it
     /// walking off a ledge.
     /// </param>
-    public FfxiGameSession(FfxiHuffman? codec = null, string? navMeshDirectory = null)
+    /// <param name="zoneDataDirectory">
+    /// The server's `data/zones` directory, which holds each zone's zone lines.
+    /// Optional: without it the character can walk over a zone line and nothing
+    /// happens, because only the client ever initiates a zone change.
+    /// </param>
+    public FfxiGameSession(FfxiHuffman? codec = null, string? navMeshDirectory = null, string? zoneDataDirectory = null)
     {
         _codec = codec;
         _navMeshDirectory = navMeshDirectory;
+        _zoneDataDirectory = zoneDataDirectory;
     }
 
     /// <summary>Raised for every chat message received.</summary>
@@ -102,6 +112,7 @@ public sealed class FfxiGameSession : IDisposable
                 PosDepth = newZ;
                 Facing = (sbyte)(Math.Atan2(-dx, -dz) * (128.0 / Math.PI));
                 Moved?.Invoke();
+                _ = CheckZoneLinesAsync();
                 return;
             }
 
@@ -116,6 +127,7 @@ public sealed class FfxiGameSession : IDisposable
         // atan2 scaled by 256/2pi rather than by 360.
         Facing = (sbyte)(Math.Atan2(-dx, -dz) * (128.0 / Math.PI));
         Moved?.Invoke();
+        _ = CheckZoneLinesAsync();
     }
     public FfxiZoneHandoff? Handoff { get; private set; }
     public uint OwnCharId => Handoff?.ContentId ?? 0;
@@ -180,11 +192,23 @@ public sealed class FfxiGameSession : IDisposable
             }
         }
 
+        // Adopt the reported position before loading zone lines: the arrival
+        // guard compares against where we are, and at this point the heartbeat
+        // has not started to set it.
+        if (ZoneState is not null)
+        {
+            PosX = ZoneState.X;
+            PosVertical = ZoneState.Vertical;
+            PosDepth = ZoneState.Depth;
+            Facing = ZoneState.Direction;
+        }
+
         // Without this the server never sends the initialization batch, so the
         // character arrives knowing nothing about itself.
         await _zone.SendGameOkAsync(_zoneEndpoint, ct);
 
         TryLoadNavMesh();
+        TryLoadZoneLines();
         Status?.Invoke($"In {(ZoneState is null ? "zone" : $"zone {ZoneState.ZoneNo}")} as {Handoff.CharacterName}.");
     }
 
@@ -365,8 +389,105 @@ public sealed class FfxiGameSession : IDisposable
             Facing = ZoneState.Direction;
             NavMesh = null;
             TryLoadNavMesh();
+            TryLoadZoneLines();
             ZoneChanged?.Invoke(ZoneState.ZoneNo);
             Status?.Invoke($"Now in zone {ZoneState.ZoneNo}.");
+        }
+    }
+
+    /// <summary>Which zone line we have already asked about, so one step does not fire a dozen requests.</summary>
+    private uint? _zoneLineRequested;
+
+    private void TryLoadZoneLines()
+    {
+        ZoneLines = [];
+        _zoneLineRequested = null;
+
+        if (_zoneDataDirectory is null || ZoneState is null)
+        {
+            return;
+        }
+
+        string? zoneName = FfxiZoneNames.Get(ZoneState.ZoneNo);
+        if (zoneName is null)
+        {
+            return;
+        }
+
+        // Zone data directories are the zone name lowercased.
+        string path = Path.Combine(_zoneDataDirectory, zoneName.ToLowerInvariant(), "zone.yaml");
+
+        try
+        {
+            ZoneLines = FfxiZoneLineReader.Read(path);
+            if (ZoneLines.Count > 0)
+            {
+                Status?.Invoke($"{ZoneLines.Count} zone lines loaded for {zoneName}.");
+            }
+
+            // Zoning drops us onto the arrival zone line, which is the return
+            // trip. Treat whichever line we land inside as already requested,
+            // so we do not bounce straight back where we came from.
+            foreach (FfxiZoneLine line in ZoneLines)
+            {
+                if (line.DistanceSquaredTo(PosX, PosDepth) <= line.Radius * line.Radius)
+                {
+                    _zoneLineRequested = line.Id;
+                    break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Status?.Invoke($"Zone lines for {zoneName} could not be read: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Asks the server to zone if we are standing on a zone line. Only the
+    /// client ever starts a zone change - the server waits to be asked - so
+    /// without this a character can walk over a zone line all day and stay put.
+    /// </summary>
+    private async Task CheckZoneLinesAsync()
+    {
+        if (_zone is null || _zoneEndpoint is null || ZoneState is null || ZoneLines.Count == 0 || _pendingZone is not null)
+        {
+            return;
+        }
+
+        FfxiZoneLine? touching = null;
+        foreach (FfxiZoneLine candidate in ZoneLines)
+        {
+            if (candidate.DistanceSquaredTo(PosX, PosDepth) <= candidate.Radius * candidate.Radius)
+            {
+                touching = candidate;
+                break;
+            }
+        }
+
+        // Clear the guard once clear of every line, so the same one can be
+        // used again on a later crossing.
+        if (touching is null)
+        {
+            _zoneLineRequested = null;
+            return;
+        }
+
+        foreach (FfxiZoneLine line in new[] { touching })
+        {
+            if (_zoneLineRequested == line.Id)
+            {
+                return;
+            }
+
+            Status?.Invoke($"Touched zone line {line.Token} to {line.Destination} - requesting zone change.");
+
+            // One request per touch. The heartbeat calls this several times a
+            // second, and the server takes a moment to answer, so without a
+            // guard a single step onto a line fires a dozen requests.
+            _zoneLineRequested = line.Id;
+            await _zone.SendZoneLineAsync(_zoneEndpoint, line.Id, PosX, PosVertical, PosDepth, ZoneState.ActIndex);
+            return;
         }
     }
 
