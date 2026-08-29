@@ -68,7 +68,9 @@ static void PrintUsage()
         Add --select-character <name> to any login to also select a
         character after listing the roster and print the zone-server
         handoff. Add --zone on top of that to also send the zone server's
-        GP_CLI_COMMAND_LOGIN (0x00A) over UDP and decrypt its reply.
+        GP_CLI_COMMAND_LOGIN (0x00A) over UDP and decrypt its reply, and
+        --zone-hold <seconds> to keep that session alive afterwards
+        (otherwise the server reaps it about 60s after login).
 
         Ports default to the standard 54231/54230/54001 - override with
         --auth-port/--data-port/--view-port if your server differs.
@@ -333,6 +335,23 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
             Console.WriteLine($"Zone reply: {reply.Datagram.Length} bytes, serverCounter={reply.ServerCounter}, acks our counter {reply.AcknowledgedClientCounter}");
             Console.WriteLine($"  MD5 after Blowfish decrypt: {(reply.ChecksumValid ? "VALID - cipher, key schedule and key derivation all confirmed correct" : "INVALID - decryption is wrong somewhere")}");
             Console.WriteLine($"  Decrypted payload ({reply.Payload.Length} bytes, still Huffman-compressed): {Convert.ToHexString(reply.Payload.AsSpan(0, Math.Min(64, reply.Payload.Length)))}...");
+
+            if (flags.TryGetValue("zone-hold", out string? holdSeconds) && int.TryParse(holdSeconds, out int seconds))
+            {
+                Console.WriteLine($"Holding the session open for {seconds}s (resending 0x00A every 20s so the server's ~60s cleanup sweep doesn't reap it)...");
+                Console.WriteLine("Ctrl+C to stop early.");
+
+                int sent = await zone.HoldSessionAsync(
+                    zoneEndpoint,
+                    uniqueNo: handoff.ContentId,
+                    characterName: handoff.CharacterName,
+                    accountName: profile.Username,
+                    clientVersion: 99,
+                    clientLanguage: 2,
+                    duration: TimeSpan.FromSeconds(seconds));
+
+                Console.WriteLine($"Done - sent {sent} keepalives. The session will be reaped ~60s from now.");
+            }
 
             return reply.ChecksumValid ? 0 : 1;
         }

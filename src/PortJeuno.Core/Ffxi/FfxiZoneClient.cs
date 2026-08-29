@@ -167,6 +167,61 @@ public sealed class FfxiZoneClient : IDisposable
     }
 
     /// <summary>
+    /// Holds an established session open by resending the login packet on an
+    /// interval, until <paramref name="duration"/> elapses or the caller
+    /// cancels. Returns how many keepalives were sent.
+    ///
+    /// This works because a repeat 0x00A on a session the server already knows
+    /// takes a different path than the first one: `recv_parse` finds the
+    /// session by address, so it skips the pending-session adoption and the
+    /// character reload, and `handle_incoming_packet` then runs `parse`, whose
+    /// first act is `tapLastUpdate()` for any session no longer in the
+    /// WAITING or PENDING_ZONE state - which is exactly what an accepted
+    /// session is. That tap is what the cleanup sweep checks, so the session
+    /// stops being reaped ~60s after login.
+    ///
+    /// It also survives `GP_CLI_COMMAND_LOGIN::validate`'s "Player already
+    /// logged in" rejection, which only fires once `hasDecryptedPacket` is
+    /// set - and that flag is only set by a successfully *decrypted* packet,
+    /// which this client cannot send yet. So this is a keepalive that happens
+    /// to work rather than the mechanism the real client uses; the real one
+    /// holds its session open with ordinary encrypted traffic. Replace this
+    /// once the compressor lands and real packets can be sent.
+    /// </summary>
+    public async Task<int> HoldSessionAsync(
+        IPEndPoint zoneServer,
+        uint uniqueNo,
+        string characterName,
+        string accountName,
+        uint clientVersion,
+        ushort clientLanguage,
+        TimeSpan duration,
+        TimeSpan? interval = null,
+        CancellationToken ct = default)
+    {
+        TimeSpan gap = interval ?? TimeSpan.FromSeconds(20);
+        DateTimeOffset until = DateTimeOffset.UtcNow + duration;
+        int sent = 0;
+
+        while (DateTimeOffset.UtcNow < until && !ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(gap, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVersion, clientLanguage, ct);
+            sent++;
+        }
+
+        return sent;
+    }
+
+    /// <summary>
     /// Decrypts and verifies a received datagram. Split out from
     /// <see cref="ReceiveAsync"/> so it can be tested against captured bytes
     /// without a socket.
