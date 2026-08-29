@@ -398,6 +398,7 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
 
                     bool trace = flags.ContainsKey("zone-trace");
                     var seen = new Dictionary<ushort, int>();
+                    var entitiesSeen = new Dictionary<uint, (ushort PacketId, bool IsSelf, int Count)>();
 
                     // Lets two test clients be parked next to each other
                     // regardless of where they logged out, which is what the
@@ -440,6 +441,17 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                             {
                                 seen[id] = seen.GetValueOrDefault(id) + 1;
 
+                                FfxiEntityUpdate? entity = FfxiEntityUpdate.TryParse(reply.Plaintext.AsSpan(offset, size));
+                                if (entity is not null)
+                                {
+                                    // The interesting question is never "did an
+                                    // 0x00D arrive" - the server describes you
+                                    // to yourself. It's whether one arrived
+                                    // about somebody else.
+                                    bool isSelf = entity.UniqueNo == handoff.ContentId;
+                                    entitiesSeen[entity.UniqueNo] = (entity.PacketId, isSelf, entitiesSeen.GetValueOrDefault(entity.UniqueNo).Count + 1);
+                                }
+
                                 if (trace)
                                 {
                                     Console.WriteLine($"    <- 0x{id:X3} ({size} bytes) {Convert.ToHexString(reply.Plaintext.AsSpan(offset, Math.Min(size, 48)))}");
@@ -452,6 +464,29 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                     foreach ((ushort id, int count) in seen.OrderByDescending(kv => kv.Value))
                     {
                         Console.WriteLine($"    0x{id:X3}  x{count}");
+                    }
+
+                    // The point of this harness: whether we were told about
+                    // any player other than ourselves.
+                    var otherPlayers = entitiesSeen
+                        .Where(kv => kv.Value.PacketId == FfxiEntityUpdate.PlayerPacketId && !kv.Value.IsSelf)
+                        .ToList();
+
+                    Console.WriteLine($"Entities we were told about: {entitiesSeen.Count} " +
+                        $"({entitiesSeen.Count(kv => kv.Value.PacketId == FfxiEntityUpdate.PlayerPacketId)} players, " +
+                        $"{entitiesSeen.Count(kv => kv.Value.PacketId == FfxiEntityUpdate.NpcPacketId)} NPCs)");
+
+                    if (otherPlayers.Count == 0)
+                    {
+                        Console.WriteLine("    OTHER PLAYERS: none - every 0x00D we got described ourselves.");
+                    }
+                    else
+                    {
+                        Console.WriteLine("    OTHER PLAYERS SEEN:");
+                        foreach ((uint uniqueNo, var info) in otherPlayers)
+                        {
+                            Console.WriteLine($"      charid {uniqueNo}  x{info.Count} updates");
+                        }
                     }
                 }
                 else

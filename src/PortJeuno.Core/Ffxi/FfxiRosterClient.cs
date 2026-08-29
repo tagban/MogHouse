@@ -347,21 +347,26 @@ public sealed class FfxiRosterClient : IDisposable
     /// went wrong. Codes are from login_errors.h.
     /// </summary>
     private const int ErrorPacketSize = 0x24;
-    private const uint ErrorPacketCommand = 0x24;
+
+    /// <summary>generateErrorMessage writes 0x04 into the result field at offset 8.</summary>
+    private const uint ErrorPacketResult = 0x04;
+
+    /// <summary>...and the code itself is a uint16 at offset 32, not the trailing word.</summary>
+    private const int OffsetErrorCode = 32;
 
     public static string DescribeLoginError(uint code) => code switch
     {
         201 => "CHARACTER_ALREADY_LOGGED_IN - a session row for this character still exists; the map server clears it about 60s after the last valid packet",
-        305 => "UNABLE_TO_CONNECT_TO_WORLD_SERVER - usually a stale accounts_sessions row blocking the insert, not the world server being down",
+        305 => "UNABLE_TO_CONNECT_TO_WORLD_SERVER - the accounts_sessions insert failed. That table has UNIQUE KEY (accid), so this is what you get when the account already has ANY character logged in, as well as when a stale row from a previous run hasn't been cleared yet. Two characters on one account can never be online at the same time.",
         _ => $"login error {code} (see login_errors.h)",
     };
 
     internal static FfxiZoneHandoff ParseZoneHandoff(ReadOnlySpan<byte> packet, uint[] sessionKey)
     {
         if (packet.Length == ErrorPacketSize &&
-            BinaryPrimitives.ReadUInt32LittleEndian(packet.Slice(8, 4)) == ErrorPacketCommand)
+            BinaryPrimitives.ReadUInt32LittleEndian(packet.Slice(8, 4)) == ErrorPacketResult)
         {
-            uint code = BinaryPrimitives.ReadUInt32LittleEndian(packet.Slice(ErrorPacketSize - 4, 4));
+            uint code = BinaryPrimitives.ReadUInt16LittleEndian(packet.Slice(OffsetErrorCode, 2));
             throw new FfxiLoginErrorException(code, DescribeLoginError(code));
         }
 
