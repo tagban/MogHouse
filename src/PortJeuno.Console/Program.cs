@@ -450,7 +450,18 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                                     // to yourself. It's whether one arrived
                                     // about somebody else.
                                     bool isSelf = entity.UniqueNo == handoff.ContentId;
-                                    entitiesSeen[entity.UniqueNo] = (entity.PacketId, isSelf, entitiesSeen.GetValueOrDefault(entity.UniqueNo).Count + 1);
+                                    int count = entitiesSeen.GetValueOrDefault(entity.UniqueNo).Count + 1;
+                                    entitiesSeen[entity.UniqueNo] = (entity.PacketId, isSelf, count);
+
+                                    // Sample another player's reported position
+                                    // occasionally. If our axis mapping were
+                                    // wrong, this is where it would show:
+                                    // the vertical would drift into the
+                                    // terrain rather than staying put.
+                                    if (!isSelf && entity.PacketId == FfxiEntityUpdate.PlayerPacketId && count % 40 == 1)
+                                    {
+                                        Console.WriteLine($"    POS charid {entity.UniqueNo}: x={entity.X:F2} y={entity.Vertical:F2} z={entity.Depth:F2} dir={entity.Direction}");
+                                    }
                                 }
 
                                 FfxiChatMessage? chat = FfxiChatMessage.TryParse(reply.Plaintext.AsSpan(offset, size));
