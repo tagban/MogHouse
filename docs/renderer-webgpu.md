@@ -1,0 +1,95 @@
+# Replacing the renderer
+
+## Why
+
+macOS is a requirement, and lotus cannot render there. Measured on the user's
+M4 Mac mini with MoltenVK 1.4.2, which exposes 167 `VK_KHR_*` extensions and
+none of these:
+
+```
+vulkaninfo | grep -iE "ray_tracing|ray_query|acceleration_structure"   # empty
+```
+
+lotus has three render modes and only one of them is real:
+
+| Mode | State |
+| --- | --- |
+| Raytrace | Works. Full colour. The only maintained path. |
+| Hybrid | Renders geometry, no lighting - `raytrace_hybrid.slang`'s `Raygen()` is an empty function, its body commented out since `e69ea94` (2025-01-25). |
+| Rasterization | Does not start. Loads `shaders/deferred.spv` and `deferred_raster.spv`, whose GLSL sources were deleted 2020-05-14 and never ported to slang. Upstream `551ae3b` is titled "Started removing pure raster renderer". |
+
+So the only working path needs exactly the extensions macOS does not have, and
+the two that do not need them are a stub and a corpse respectively. Reviving
+either would mean writing deferred lighting from scratch *and* maintaining a
+renderer upstream is actively deleting.
+
+## What instead
+
+A WebGPU renderer, using Dawn, **in C++**. Native Metal on macOS with no
+MoltenVK in the path, D3D12 on Windows, Vulkan on Linux.
+
+Dawn rather than Rust `wgpu` specifically so this stays in C++ and keeps
+everything above the renderer: the DAT parsing, skeletal animation, entity and
+scene systems in lotus-ffxi are the years of work worth preserving, and an FFI
+boundary between them and the renderer would be pure cost.
+
+## What we already know
+
+**Slang targets WGSL directly** (`slangc -target wgsl`, alongside `metal` and
+`metallib`). `ffxi/shaders/mmb.slang` compiles to 203 lines of WGSL with no
+source changes, module imports and all.
+
+**But the resource model does not survive.** That generated WGSL contains:
+
+```wgsl
+@align(16) vertex_buffer_0 : u64,                              // no 64-bit ints in WGSL
+@binding(1) var textures_texture_0 : array<texture_2d<f32>>;   // unbounded = bindless
+```
+
+Those are `VK_KHR_buffer_device_address` and bindless descriptor arrays, and
+WebGPU has neither by design. The shading maths translates; the binding
+architecture has to be redesigned around bind groups and indices.
+
+That is the right outcome anyway. lotus is bindless-with-raw-pointers because a
+raytracer needs the whole scene addressable at once. Nothing here does. FFXI's
+retail client was a 2002 rasterizer - directional light, ambient, vertex colour,
+fog - so a conventional forward or lightly-deferred renderer is both less work
+and closer to how the game actually looked. lotus's raytraced PBR is a
+reimagining, not fidelity.
+
+## Quality
+
+Raytracing is not a goal; looking good is. Those are separable, and a rasterizer
+has plenty of headroom before anyone misses ray tracing - anisotropic filtering,
+real mipmaps, MSAA, and a decent tonemap already put us well past what the
+retail client did in 2002.
+
+The constraint that has to be designed in from the start, rather than retrofitted:
+**texture sources are pluggable and no resolution is ever assumed.** Community
+upscale packs replace the DAT textures at much higher resolution, and they are
+in scope once the DAT path renders cross-platform. Nothing in the renderer may
+hardcode DXT3, DAT-native dimensions, or a 1:1 mapping from DAT entry to GPU
+texture. Loading from the DATs is the default, not the only path.
+
+Order of work is deliberate: get the DAT path rendering on all three platforms
+first, then raise quality. Quality work on a renderer that only runs on one
+platform would have to be redone.
+
+## Plan
+
+A vertical slice first, to fail in days rather than months:
+
+1. Dawn building through CMake on Windows and macOS
+2. Slang -> WGSL on one existing FFXI shader (**done** - with the caveat above)
+3. Real MZB zone geometry, parsed by `ffxi-lib`, rendered through Dawn
+4. The same verified on the M4
+
+`ffxi-lib` is already linkable from outside the engine's own executable, and a
+C ABI round trip from C# through it into the retail DATs is verified - see
+`docs/engine-build.md`.
+
+## Not decided yet
+
+Whether the new renderer consumes lotus's entity/scene system or sits directly
+on lotus-ffxi's parsed asset data. That depends on how entangled the per-frame
+render path is with the Vulkan types, which the slice will show.

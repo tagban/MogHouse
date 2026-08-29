@@ -19,3 +19,7 @@ build/
 local.credentials.json
 obj/
 out/
+
+# Dawn (WebGPU) checkout and build - large, regenerable via build-dawn.bat
+/vendor/dawn/
+build-dawn/

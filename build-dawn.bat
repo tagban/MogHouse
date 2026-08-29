@@ -1,0 +1,26 @@
+@echo off
+REM Build Dawn (WebGPU) as a static library for the new renderer.
+REM Dawn fetches its own dependencies with python rather than needing depot_tools.
+call "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat" >nul
+cd /d "%~dp0"
+
+set VSROOT=C:\Program Files\Microsoft Visual Studio\18\Community
+set CMAKE=%VSROOT%\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe
+set NINJA=%VSROOT%\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe
+
+"%CMAKE%" -S vendor/dawn -B build-dawn -G Ninja ^
+  -DCMAKE_MAKE_PROGRAM="%NINJA%" ^
+  -DCMAKE_BUILD_TYPE=Release ^
+  -DDAWN_FETCH_DEPENDENCIES=ON ^
+  -DDAWN_ENABLE_INSTALL=ON ^
+  -DDAWN_BUILD_SAMPLES=OFF ^
+  -DDAWN_BUILD_TESTS=OFF ^
+  -DTINT_BUILD_TESTS=OFF ^
+  -DTINT_BUILD_CMD_TOOLS=OFF ^
+  -DDAWN_ENABLE_OPENGLES=OFF ^
+  -DDAWN_ENABLE_DESKTOP_GL=OFF
+echo --- CONFIGURE EXIT: %ERRORLEVEL% ---
+if not "%ERRORLEVEL%"=="0" exit /b %ERRORLEVEL%
+
+"%CMAKE%" --build build-dawn
+echo --- BUILD EXIT: %ERRORLEVEL% ---

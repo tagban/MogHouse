@@ -143,3 +143,19 @@ exact error (`microsoft/STL` search for `_Stop_callback_base`, and for
 
 See `ffxi-engine/configure.bat` and `ffxi-engine/build.bat` for the full,
 current working invocation combining all of the above.
+
+## Dawn (WebGPU)
+
+Not committed - it is large and regenerable. To set it up:
+
+```
+git clone --depth 1 https://dawn.googlesource.com/dawn vendor/dawn
+```
+
+Then `build-dawn.bat` configures and builds it. Dawn fetches its own
+dependencies through CMake (`DAWN_FETCH_DEPENDENCIES=ON`) and needs python on
+PATH, so depot_tools is not required.
+
+Why Dawn is here at all: see `docs/renderer-webgpu.md`. Short version - macOS
+has no Vulkan ray tracing, lotus needs it, and the two non-raytraced paths in
+lotus are a stub and a corpse.
