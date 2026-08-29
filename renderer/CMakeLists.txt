@@ -35,6 +35,9 @@ target_link_libraries(portjeuno-renderer PRIVATE dawn::webgpu_dawn SDL3::SDL3)
 
 if(APPLE)
     target_link_libraries(portjeuno-renderer PRIVATE "-framework QuartzCore" "-framework Cocoa")
+    # surface_metal.mm uses __bridge casts, which only exist under ARC. Without
+    # this the file does not compile.
+    set_source_files_properties(surface_metal.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 endif()
 
 if(MSVC)
