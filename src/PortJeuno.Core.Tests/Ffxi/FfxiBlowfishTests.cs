@@ -99,11 +99,6 @@ public class FfxiBlowfishTests
     [Fact]
     public void FromSessionKey_ProducesUsableCipher()
     {
-        // No independent reference for this specific path (MD5-derivation
-        // is separate from the raw-key encipher tests above) - this just
-        // confirms it doesn't throw and produces a working, self-consistent
-        // round-trip, matching MapSession::initBlowfish()'s hash-truncation
-        // behavior.
         var bf = FfxiBlowfish.FromSessionKey([1, 2, 3, 4, 5]);
         uint xl = 0x11111111, xr = 0x22222222;
 
@@ -112,5 +107,27 @@ public class FfxiBlowfishTests
 
         Assert.Equal(0x11111111u, xl);
         Assert.Equal(0x22222222u, xr);
+    }
+
+    /// <summary>
+    /// Session key {132,0,0,0,0} was brute-forced (against a real compiled
+    /// copy of blowfish.cpp + LandSandBoat's actual md52.cpp, not this port)
+    /// specifically because its MD5 hash contains a zero byte at index 9,
+    /// not at the very start or end - the case that distinguishes "zero-pad
+    /// the key to 16 bytes" (what MapSession::initBlowfish() actually does)
+    /// from "shorten the key to 9 bytes and cycle at that length" (a bug
+    /// this port had until this test caught it via the real reference
+    /// value below).
+    /// </summary>
+    [Fact]
+    public void FromSessionKey_ZeroByteInHash_MatchesRealServerReference()
+    {
+        var bf = FfxiBlowfish.FromSessionKey([132, 0, 0, 0, 0]);
+        uint xl = 0x01234567, xr = 0x89ABCDEF;
+
+        bf.Encipher(ref xl, ref xr);
+
+        Assert.Equal(0x8916FA2Fu, xl);
+        Assert.Equal(0xD7B4CCF2u, xr);
     }
 }

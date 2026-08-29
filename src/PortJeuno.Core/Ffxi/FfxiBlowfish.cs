@@ -27,10 +27,18 @@ public sealed class FfxiBlowfish
 
     /// <summary>
     /// Matches MapSession::initBlowfish() (map_session.cpp): MD5-hash the
-    /// 5-word session key to get a 16-byte Blowfish key, truncating at the
-    /// first zero byte if one appears (matching the C server's
-    /// null-terminated-C-string-style truncation of the hash before it's
-    /// used as the key).
+    /// 5-word session key to get a 16-byte Blowfish key. If the hash contains
+    /// a zero byte, everything from that byte to the end of the 16-byte hash
+    /// is zeroed out (`memset(hash + i, 0, 16 - i)`) - the key stays a full
+    /// 16 bytes, it's not shortened. This matters: <see cref="Init"/> XORs
+    /// the key into P cyclically using its length as the modulus, so
+    /// treating this as "shrink the key to i bytes" instead of "zero-pad to
+    /// 16" changes the cycling pattern whenever 16 isn't a multiple of i,
+    /// producing a different (wrong) key schedule. Confirmed against a real
+    /// compiled reference: session key {132,0,0,0,0} hashes to a zero at
+    /// byte 9, and the zero-padded (not truncated) key is what
+    /// FfxiBlowfishTests.FromSessionKey_ZeroByteInHash_MatchesRealServerReference
+    /// checks against.
     /// </summary>
     public static FfxiBlowfish FromSessionKey(ReadOnlySpan<uint> sessionKey)
     {
@@ -48,10 +56,13 @@ public sealed class FfxiBlowfish
         Span<byte> hash = stackalloc byte[16];
         System.Security.Cryptography.MD5.HashData(keyBytes, hash);
 
-        int truncateAt = hash.IndexOf((byte)0);
-        ReadOnlySpan<byte> effectiveKey = truncateAt >= 0 ? hash[..truncateAt] : hash;
+        int zeroAt = hash.IndexOf((byte)0);
+        if (zeroAt >= 0)
+        {
+            hash[zeroAt..].Clear();
+        }
 
-        return new FfxiBlowfish(effectiveKey);
+        return new FfxiBlowfish(hash);
     }
 
     public FfxiBlowfish(ReadOnlySpan<byte> key)
@@ -163,13 +174,26 @@ public sealed class FfxiBlowfish
         // exactly (this is big-endian despite everything else in this
         // protocol being little-endian - confirmed directly from source,
         // not assumed).
+        //
+        // The real signature is `blowfish_init(const int8 key[], ...)` -
+        // key[j] is a SIGNED char. `data << 8 | key[j]` sign-extends any
+        // byte >= 0x80 to a negative int before it's converted to uint32_t
+        // for the OR, which clobbers the upper 3 bytes of `data` with 1s
+        // instead of leaving them alone. This looks like a bug in the real
+        // server, but it's what the real server does, so it must be
+        // replicated exactly - confirmed against a real compiled reference
+        // using a key with bytes >= 0x80 (see
+        // FfxiBlowfishTests.FromSessionKey_ZeroByteInHash_MatchesRealServerReference,
+        // which silently produced wrong output without this until the real
+        // reference value caught it).
         int j = 0;
         for (int i = 0; i < 18; i++)
         {
             uint data = 0;
             for (int k = 0; k < 4; k++)
             {
-                data = (data << 8) | key[j];
+                uint signExtended = unchecked((uint)(int)(sbyte)key[j]);
+                data = (data << 8) | signExtended;
                 j++;
                 if (j >= key.Length)
                 {
