@@ -39,7 +39,9 @@ public sealed record FfxiEntityUpdate(
     float Vertical,
     float Depth,
     string? Name = null,
-    byte? ModelSize = null)
+    byte? ModelSize = null,
+    uint? RawFlags1 = null,
+    uint? RawFlags0 = null)
 {
     public const ushort PlayerPacketId = 0x00D;
     public const ushort NpcPacketId = 0x00E;
@@ -91,10 +93,14 @@ public sealed record FfxiEntityUpdate(
         // actually long enough, since these are truncated by update type.
         string? name = null;
         byte? modelSize = null;
+        uint? rawFlags1 = null;
+        uint? rawFlags0 = null;
 
         if (id == PlayerPacketId && subPacket.Length >= OffsetFlags1 + 4)
         {
             uint flags1 = BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(OffsetFlags1, 4));
+            rawFlags1 = flags1;
+            rawFlags0 = BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(24, 4));
             modelSize = (byte)((flags1 >> GraphSizeBitOffset) & GraphSizeMask);
 
             if (subPacket.Length >= OffsetName + 1)
@@ -113,7 +119,9 @@ public sealed record FfxiEntityUpdate(
             Vertical: BinaryPrimitives.ReadSingleLittleEndian(subPacket.Slice(OffsetVertical, 4)),
             Depth: BinaryPrimitives.ReadSingleLittleEndian(subPacket.Slice(OffsetDepth, 4)),
             Name: name,
-            ModelSize: modelSize);
+            ModelSize: modelSize,
+            RawFlags1: rawFlags1,
+            RawFlags0: rawFlags0);
     }
 
     private static string ReadFixedString(ReadOnlySpan<byte> field)

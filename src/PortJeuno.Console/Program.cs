@@ -404,6 +404,7 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                     bool trace = flags.ContainsKey("zone-trace");
                     var seen = new Dictionary<ushort, int>();
                     var entitiesSeen = new Dictionary<uint, (ushort PacketId, bool IsSelf, int Count)>();
+                    var lastFlags = new Dictionary<uint, (uint Flags0, uint Flags1)>();
 
                     // Lets two test clients be parked next to each other
                     // regardless of where they logged out, which is what the
@@ -438,6 +439,7 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                         sayEvery: flags.TryGetValue("zone-say", out string? sayText) && sayText.Length > 0 ? sayText : null,
                         sayKind: flags.TryGetValue("zone-say-kind", out string? kindText) && Enum.TryParse(kindText, true, out FfxiChatKind parsedKind) ? parsedKind : FfxiChatKind.Say,
                         followCharId: flags.TryGetValue("zone-follow", out string? followSpec) && uint.TryParse(followSpec, out uint followId) ? followId : null,
+                        gmCommand: flags.TryGetValue("zone-command", out string? gmCmd) && gmCmd.Length > 0 ? gmCmd : null,
                         tellTo: flags.TryGetValue("zone-tell", out string? tellTarget) && tellTarget.Length > 0 ? tellTarget : null,
                         tellText: flags.GetValueOrDefault("zone-tell-text", "hello from PortJeuno"),
                         onReply: reply =>
@@ -467,6 +469,20 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                                     // wrong, this is where it would show:
                                     // the vertical would drift into the
                                     // terrain rather than staying put.
+                                    // Report flag transitions the moment they happen -
+                                    // e.g. a GM toggling hide - rather than
+                                    // sampling and hoping to catch the change.
+                                    if (entity.RawFlags1 is uint f1 && entity.RawFlags0 is uint f0)
+                                    {
+                                        var now = (f0, f1);
+                                        if (!lastFlags.TryGetValue(entity.UniqueNo, out var prev) || prev != now)
+                                        {
+                                            lastFlags[entity.UniqueNo] = now;
+                                            Console.WriteLine($"    FLAGS charid {entity.UniqueNo} ({entity.Name}) flags0=0x{f0:X8} flags1=0x{f1:X8}" +
+                                                $"  [hide={(f1 >> 1) & 1} monster={f1 & 1} anon={(f1 >> 12) & 1} invis={(f1 >> 29) & 1} gmlvl={(f1 >> 24) & 7} size={(f1 >> 9) & 3}]");
+                                        }
+                                    }
+
                                     if (!isSelf && entity.PacketId == FfxiEntityUpdate.PlayerPacketId && count % 40 == 1)
                                     {
                                         Console.WriteLine($"    POS charid {entity.UniqueNo} ({entity.Name}): x={entity.X:F2} y={entity.Vertical:F2} z={entity.Depth:F2} dir={entity.Direction} modelSize={entity.ModelSize}");

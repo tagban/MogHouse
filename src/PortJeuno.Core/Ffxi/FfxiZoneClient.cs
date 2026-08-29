@@ -367,6 +367,7 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
         FfxiChatKind sayKind = FfxiChatKind.Say,
         int sayIntervalUpdates = 25,
         uint? followCharId = null,
+        string? gmCommand = null,
         string? tellTo = null,
         string? tellText = null,
         CancellationToken ct = default)
@@ -440,6 +441,16 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
 
             // Chat rides the same encrypted transport as everything else, so
             // it goes out as its own datagram between position updates.
+            // GM commands ride the ordinary chat packet: the server routes any
+            // message starting with '!' to its command handler. Sent once,
+            // a few updates in, so the session is settled first - and once
+            // only, since most of these toggle.
+            if (gmCommand is not null && sent == 5)
+            {
+                byte[] command = FfxiChatPacket.Build(FfxiChatKind.Say, gmCommand.StartsWith('!') ? gmCommand : $"!{gmCommand}", (ushort)(_ownCounter + 1));
+                await SendEncryptedAsync(zoneServer, command, ct);
+            }
+
             if (sayEvery is not null && sent % sayIntervalUpdates == 0)
             {
                 byte[] chat = FfxiChatPacket.Build(sayKind, $"{sayEvery} #{sent / sayIntervalUpdates}", (ushort)(_ownCounter + 1));
