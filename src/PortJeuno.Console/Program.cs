@@ -430,6 +430,7 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                         duration: TimeSpan.FromSeconds(seconds),
                         interval: TimeSpan.FromMilliseconds(400),
                         walkRadius: flags.TryGetValue("zone-walk", out string? radius) && float.TryParse(radius, out float r) ? r : 2.0f,
+                        sayEvery: flags.TryGetValue("zone-say", out string? sayText) && sayText.Length > 0 ? sayText : null,
                         onReply: reply =>
                         {
                             if (reply.Plaintext is null)
@@ -450,6 +451,12 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                                     // about somebody else.
                                     bool isSelf = entity.UniqueNo == handoff.ContentId;
                                     entitiesSeen[entity.UniqueNo] = (entity.PacketId, isSelf, entitiesSeen.GetValueOrDefault(entity.UniqueNo).Count + 1);
+                                }
+
+                                FfxiChatMessage? chat = FfxiChatMessage.TryParse(reply.Plaintext.AsSpan(offset, size));
+                                if (chat is not null)
+                                {
+                                    Console.WriteLine($"    CHAT [{chat.Kind}] <{chat.Sender}> {chat.Text}");
                                 }
 
                                 if (trace)

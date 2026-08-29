@@ -328,6 +328,8 @@ public sealed class FfxiZoneClient : IDisposable
         TimeSpan? interval = null,
         Action<FfxiZoneReply>? onReply = null,
         float walkRadius = 0f,
+        string? sayEvery = null,
+        int sayIntervalUpdates = 25,
         CancellationToken ct = default)
     {
         TimeSpan gap = interval ?? TimeSpan.FromSeconds(1);
@@ -362,6 +364,14 @@ public sealed class FfxiZoneClient : IDisposable
 
             await SendEncryptedAsync(zoneServer, pos, ct);
             sent++;
+
+            // Chat rides the same encrypted transport as everything else, so
+            // it goes out as its own datagram between position updates.
+            if (sayEvery is not null && sent % sayIntervalUpdates == 0)
+            {
+                byte[] chat = FfxiChatPacket.Build(FfxiChatKind.Say, $"{sayEvery} #{sent / sayIntervalUpdates}", (ushort)(_ownCounter + 1));
+                await SendEncryptedAsync(zoneServer, chat, ct);
+            }
 
             // Spend the rest of the interval draining replies, so the server's
             // counter stays tracked and the socket buffer doesn't fill - but
