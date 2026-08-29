@@ -8,6 +8,7 @@
 #include <SDL3/SDL.h>
 #include <webgpu/webgpu_cpp.h>
 
+#include <cmath>
 #include <cstdio>
 #include <iterator>
 #include <string>
@@ -33,6 +34,11 @@ const char* BackendName(wgpu::BackendType backend)
 
 int main(int, char**)
 {
+    // The whole point of this program is the line it prints saying which
+    // backend it got. Buffered stdout loses that if the process is killed
+    // rather than closed, so don't buffer it.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+
     if (!SDL_Init(SDL_INIT_VIDEO))
     {
         std::printf("SDL_Init failed: %s\n", SDL_GetError());
@@ -135,6 +141,10 @@ int main(int, char**)
             {
                 running = false;
             }
+            else if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE)
+            {
+                running = false;
+            }
             else if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED)
             {
                 configure(static_cast<uint32_t>(event.window.data1), static_cast<uint32_t>(event.window.data2));
@@ -148,10 +158,16 @@ int main(int, char**)
             continue;
         }
 
+        // Deliberately animated. A static dark clear looks exactly like a window
+        // that never rendered anything, and telling those apart is the entire
+        // job of this program - especially on a machine I cannot see.
+        double t = SDL_GetTicks() / 1000.0;
+        auto wave = [&](double phase) { return 0.25 + 0.2 * std::sin(t * 0.8 + phase); };
+
         wgpu::RenderPassColorAttachment colour{.view = surface_texture.texture.CreateView(),
                                                .loadOp = wgpu::LoadOp::Clear,
                                                .storeOp = wgpu::StoreOp::Store,
-                                               .clearValue = {0.06, 0.09, 0.11, 1.0}};
+                                               .clearValue = {wave(0.0), wave(2.1), wave(4.2), 1.0}};
         wgpu::RenderPassDescriptor pass_descriptor{.colorAttachmentCount = 1, .colorAttachments = &colour};
 
         wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
