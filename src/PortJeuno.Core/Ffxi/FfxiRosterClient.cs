@@ -88,7 +88,15 @@ public sealed class FfxiRosterClient : IDisposable
     private const int OffsetWorldName = 28;
     private const int WorldNameLength = 16;
     private const int OffsetJobBlock = 44; // start of TC_OPERATION_MAKE
-    private const int OffsetRace = OffsetJobBlock + 0;
+    // TC_OPERATION_MAKE, offsets within one record. Natural alignment; the
+    // job and zone offsets here were already confirmed against live roster
+    // data, which corroborates the rest of the layout.
+    private const int OffsetRace = OffsetJobBlock + 0;       // mon_no
+    private const int OffsetFace = OffsetJobBlock + 4;       // face_no
+    private const int OffsetHair = OffsetJobBlock + 8;       // hair_no
+    private const int OffsetSize = OffsetJobBlock + 9;       // size
+    private const int OffsetEquipment = OffsetJobBlock + 12; // GrapIDTbl[8]
+    private const int EquipmentSlots = 8;
     private const int OffsetMainJob = OffsetJobBlock + 2;
     private const int OffsetSubJob = OffsetJobBlock + 3;
     private const int OffsetZone = OffsetJobBlock + 28;
@@ -319,7 +327,11 @@ public sealed class FfxiRosterClient : IDisposable
                 SubJob: record[OffsetSubJob],
                 Zone: record[OffsetZone],
                 CanRename: (flags & 0b0000_0001) != 0,
-                EligibleForRaceChange: (flags & 0b0000_0010) != 0));
+                EligibleForRaceChange: (flags & 0b0000_0010) != 0,
+                Face: BinaryPrimitives.ReadUInt16LittleEndian(record.Slice(OffsetFace, 2)),
+                Hair: record[OffsetHair],
+                Size: record[OffsetSize],
+                Equipment: ReadEquipment(record)));
         }
 
         return characters;
@@ -402,6 +414,16 @@ public sealed class FfxiRosterClient : IDisposable
     /// <summary>Formats a ZoneServerIp/SearchServerIp value (big-endian octets - see ParseZoneHandoff) as a dotted-quad string.</summary>
     public static string FormatIpAddress(uint value) =>
         $"{(value >> 24) & 0xFF}.{(value >> 16) & 0xFF}.{(value >> 8) & 0xFF}.{value & 0xFF}";
+
+    private static ushort[] ReadEquipment(ReadOnlySpan<byte> record)
+    {
+        var models = new ushort[EquipmentSlots];
+        for (int i = 0; i < EquipmentSlots; i++)
+        {
+            models[i] = BinaryPrimitives.ReadUInt16LittleEndian(record.Slice(OffsetEquipment + (i * 2), 2));
+        }
+        return models;
+    }
 
     private static string ReadFixedString(ReadOnlySpan<byte> field)
     {

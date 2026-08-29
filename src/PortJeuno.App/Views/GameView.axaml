@@ -33,8 +33,10 @@
 
       <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" Margin="0,8,0,0">
         <TextBox Grid.Column="0"
+                 Name="ChatInput"
                  Text="{Binding Input}"
-                 Watermark="Say something, or /tell Name message"/>
+                 KeyDown="OnChatKeyDown"
+                 PlaceholderText="Say something, /tell Name message, or !gmcommand"/>
         <Button Grid.Column="1" Content="Send" Command="{Binding SendCommand}" Margin="6,0,0,0"/>
         <Button Grid.Column="2" Content="Log out" Command="{Binding LogoutCommand}" Margin="6,0,0,0"/>
       </Grid>

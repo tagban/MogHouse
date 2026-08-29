@@ -90,16 +90,23 @@ public sealed class FfxiGameSession : IDisposable
 
         if (NavMesh is not null)
         {
-            if (!NavMesh.TryGetGroundHeight(targetX, PosVertical, targetZ, out float ground))
+            // Raycast along the path rather than testing the destination:
+            // a destination test finds the floor on the far side of a wall and
+            // waves the move through.
+            if (NavMesh.TryMove(PosX, PosVertical, PosDepth, targetX, targetZ,
+                                out float newX, out float newVertical, out float newZ, out bool blocked))
             {
-                // Off the walkable surface - a wall, a ledge, or thin air.
-                // Refusing beats walking into it and being written to the
-                // character record somewhere invalid.
-                LastMoveBlocked = true;
+                LastMoveBlocked = blocked;
+                PosX = newX;
+                PosVertical = newVertical;
+                PosDepth = newZ;
+                Facing = (sbyte)(Math.Atan2(-dx, -dz) * (128.0 / Math.PI));
+                Moved?.Invoke();
                 return;
             }
 
-            PosVertical = ground;
+            // Not on the mesh at all - fall through and move anyway rather
+            // than freezing the character somewhere it can never leave.
         }
 
         PosX = targetX;

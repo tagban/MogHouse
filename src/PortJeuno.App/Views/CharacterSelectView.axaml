@@ -4,22 +4,38 @@
              xmlns:ffxi="using:PortJeuno.Core.Ffxi"
              x:Class="PortJeuno.App.Views.CharacterSelectView"
              x:DataType="vm:CharacterSelectViewModel">
-  <StackPanel Width="420" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="10">
+  <StackPanel Width="460" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="10">
     <TextBlock Text="Select a character" FontSize="22" FontWeight="Light" HorizontalAlignment="Center"/>
 
     <ListBox ItemsSource="{Binding Characters}"
              SelectedItem="{Binding SelectedCharacter}"
-             Height="240">
+             Height="280">
       <ListBox.ItemTemplate>
         <DataTemplate x:DataType="ffxi:FfxiCharacter">
-          <StackPanel Margin="4">
-            <TextBlock Text="{Binding Name}" FontSize="16"/>
-            <TextBlock Opacity="0.6" FontSize="12">
-              <Run Text="job"/><Run Text="{Binding MainJob}"/>
-              <Run Text=" level"/><Run Text="{Binding MainJobLevel}"/>
-              <Run Text="  zone"/><Run Text="{Binding Zone}"/>
-            </TextBlock>
-          </StackPanel>
+          <Grid ColumnDefinitions="Auto,*" Margin="4">
+
+            <!-- Generated avatar. A real portrait needs the model files;
+                 this at least distinguishes characters at a glance. -->
+            <Border Grid.Column="0" Width="44" Height="44" CornerRadius="22"
+                    Background="{Binding AvatarColour}" Margin="0,0,10,0">
+              <TextBlock Text="{Binding Initial}"
+                         FontSize="20" FontWeight="SemiBold" Foreground="#111"
+                         HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+
+            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+              <TextBlock Text="{Binding Name}" FontSize="16"/>
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="{Binding RaceName}" Opacity="0.75" FontSize="12"/>
+                <TextBlock Text="{Binding JobSummary}" Opacity="0.75" FontSize="12"/>
+              </StackPanel>
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="{Binding WorldName}" Opacity="0.45" FontSize="11"/>
+                <TextBlock Text="{Binding ZoneName}" Opacity="0.45" FontSize="11"/>
+                <TextBlock Text="{Binding FaceHair}" Opacity="0.35" FontSize="11"/>
+              </StackPanel>
+            </StackPanel>
+          </Grid>
         </DataTemplate>
       </ListBox.ItemTemplate>
     </ListBox>

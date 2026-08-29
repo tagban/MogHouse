@@ -173,6 +173,70 @@ public sealed class FfxiNavMesh
         TryGetGroundHeight(x, vertical, z, out _);
 
     /// <summary>
+    /// Walks from one point towards another, stopping at the first wall.
+    ///
+    /// This is what collision actually needs, and a nearest-polygon lookup at
+    /// the destination is not: FindNearestPoly searches a box and returns the
+    /// closest walkable polygon, so a point *inside* a wall happily finds the
+    /// floor on the other side and reports success. That looks exactly like
+    /// working collision right up until you walk through a wall.
+    ///
+    /// Detour's raycast is the right tool: it traces along the surface and
+    /// reports how far it got before meeting an edge with no neighbour, which
+    /// is precisely a wall.
+    /// </summary>
+    /// <returns>False if the starting point isn't on the mesh at all.</returns>
+    public bool TryMove(
+        float fromX, float fromVertical, float fromZ,
+        float toX, float toZ,
+        out float resultX, out float resultVertical, out float resultZ, out bool blocked)
+    {
+        resultX = fromX;
+        resultVertical = fromVertical;
+        resultZ = fromZ;
+        blocked = false;
+
+        RcVec3f start = ToDetour(fromX, fromVertical, fromZ);
+
+        if (_query.FindNearestPoly(start, SearchExtents, _filter, out long startRef, out RcVec3f startOnMesh, out _).Failed()
+            || startRef == 0)
+        {
+            return false;
+        }
+
+        RcVec3f end = ToDetour(toX, fromVertical, toZ);
+
+        Span<long> path = stackalloc long[16];
+        DtStatus status = _query.Raycast(startRef, startOnMesh, end, _filter, out float t, out _, path, out _, path.Length);
+
+        if (status.Failed())
+        {
+            blocked = true;
+            return true;
+        }
+
+        // t >= 1 means the whole segment was walkable. Less than that is a wall
+        // partway along, so stop just short of it - ending exactly on the
+        // boundary tends to leave the next step wedged.
+        float travelled = Math.Min(t, 1.0f);
+        if (t < 1.0f)
+        {
+            blocked = true;
+            travelled = Math.Max(0f, t - 0.1f);
+        }
+
+        resultX = fromX + ((toX - fromX) * travelled);
+        resultZ = fromZ + ((toZ - fromZ) * travelled);
+
+        if (TryGetGroundHeight(resultX, fromVertical, resultZ, out float ground))
+        {
+            resultVertical = ground;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// FFXI to Detour. Right-handed versus left-handed: Y and Z flip sign.
     /// Taken from the server's own `toDetour`, not derived independently.
     /// </summary>

@@ -24,6 +24,22 @@ public partial class GameView : UserControl
         Focus();
     }
 
+    /// <summary>Enter sends. Bound on the chat box itself so it never competes with movement keys.</summary>
+    private void OnChatKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || DataContext is not GameViewModel vm)
+        {
+            return;
+        }
+
+        if (vm.SendCommand.CanExecute(null))
+        {
+            vm.SendCommand.Execute(null);
+        }
+
+        e.Handled = true;
+    }
+
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (DataContext is not GameViewModel vm || e.Source is TextBox)
