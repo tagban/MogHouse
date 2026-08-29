@@ -144,6 +144,14 @@ that skips it never receives any of that.
 Both payload words are validated as zero, so the packet is a header plus eight
 zero bytes.
 
+The effect is measurable and large. Before sending it, a session received three
+distinct sub-packet types (`0x00E`, `0x0DF`, `0x037`). After, the same session
+receives more than twenty, including `0x008` ENTERZONE, `0x0B4` config, `0x01B`
+job info, `0x01C` item max, `0x063` (homepoints and status icons, ~80 of them),
+`0x056` (quest and mission logs), `0x01D`/`0x020` inventory, `0x08C` merits and
+`0x067` char sync. If a client appears to log in successfully but never learns
+anything about itself, this packet is the reason.
+
 Other client packets in the zone-in family, not yet implemented: `0x00F`
 (CLSTAT), `0x011` (zone transition), `0x016`/`0x017` (CHARREQ — how a client
 asks the server for information about an entity it has seen but lacks data
