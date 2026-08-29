@@ -392,6 +392,7 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
         int sayIntervalUpdates = 25,
         uint? followCharId = null,
         string? gmCommand = null,
+        string? stopFile = null,
         string? tellTo = null,
         string? tellText = null,
         CancellationToken ct = default)
@@ -402,6 +403,15 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
 
         while (DateTimeOffset.UtcNow < until && !ct.IsCancellationRequested)
         {
+            // A stop file is how an outside caller asks for a *graceful* exit.
+            // Killing the process instead skips the logout entirely, leaving
+            // the server to reap the session on a timeout and holding the
+            // character's session row for about a minute afterwards.
+            if (stopFile is not null && File.Exists(stopFile))
+            {
+                break;
+            }
+
             // Reporting a byte-identical position every tick makes the
             // server's own `moved` check false forever, so it never calls
             // onEntityMoved and never sets UPDATE_POS. Tracing a small circle

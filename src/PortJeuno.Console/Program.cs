@@ -447,6 +447,7 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                         sayKind: flags.TryGetValue("zone-say-kind", out string? kindText) && Enum.TryParse(kindText, true, out FfxiChatKind parsedKind) ? parsedKind : FfxiChatKind.Say,
                         followCharId: flags.TryGetValue("zone-follow", out string? followSpec) && uint.TryParse(followSpec, out uint followId) ? followId : null,
                         gmCommand: flags.TryGetValue("zone-command", out string? gmCmd) && gmCmd.Length > 0 ? gmCmd : null,
+                        stopFile: flags.TryGetValue("zone-stopfile", out string? stopPath) && stopPath.Length > 0 ? stopPath : null,
                         tellTo: flags.TryGetValue("zone-tell", out string? tellTarget) && tellTarget.Length > 0 ? tellTarget : null,
                         tellText: flags.GetValueOrDefault("zone-tell-text", "hello from PortJeuno"),
                         onReply: reply =>
