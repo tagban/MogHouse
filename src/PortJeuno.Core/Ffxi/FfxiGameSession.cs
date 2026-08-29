@@ -131,6 +131,9 @@ public sealed class FfxiGameSession : IDisposable
     }
     public FfxiZoneHandoff? Handoff { get; private set; }
     public uint OwnCharId => Handoff?.ContentId ?? 0;
+
+    /// <summary>How many entities we currently know about. Diagnostic.</summary>
+    public int KnownEntityCount => _zone?.KnownEntities().Count ?? 0;
     public bool IsConnected => _holdTask is { IsCompleted: false };
 
     /// <summary>Authenticates and returns the character roster.</summary>
