@@ -36,6 +36,40 @@ public sealed class FfxiGameSession : IDisposable
     public event Action<string>? Status;
 
     public FfxiZoneLoginReply? ZoneState { get; private set; }
+
+    /// <summary>
+    /// Where we currently tell the server we are. Movement is horizontal only:
+    /// the vertical stays at whatever the server reported on zone-in, because
+    /// this client has no terrain height. Other players still see the
+    /// character correctly, since the game client draws them on the ground -
+    /// but the server persists position, so walking far from the starting
+    /// ground level can leave a height in the character record that puts a
+    /// real client underground next time it logs in there.
+    /// </summary>
+    public float PosX { get; private set; }
+    public float PosVertical { get; private set; }
+    public float PosDepth { get; private set; }
+    public sbyte Facing { get; private set; }
+
+    /// <summary>Raised after the position changes, so a UI can redraw.</summary>
+    public event Action? Moved;
+
+    /// <summary>Steps the character horizontally and turns it to face the direction of travel.</summary>
+    public void Move(float dx, float dz)
+    {
+        if (dx == 0 && dz == 0)
+        {
+            return;
+        }
+
+        PosX += dx;
+        PosDepth += dz;
+
+        // FFXI packs a full turn into one signed byte, so a heading is
+        // atan2 scaled by 256/2pi rather than by 360.
+        Facing = (sbyte)(Math.Atan2(-dx, -dz) * (128.0 / Math.PI));
+        Moved?.Invoke();
+    }
     public FfxiZoneHandoff? Handoff { get; private set; }
     public uint OwnCharId => Handoff?.ContentId ?? 0;
     public bool IsConnected => _holdTask is { IsCompleted: false };
@@ -106,10 +140,9 @@ public sealed class FfxiGameSession : IDisposable
     }
 
     /// <summary>
-    /// Starts the position heartbeat that keeps the session alive. The
-    /// character stands still: this client has no terrain height, and the
-    /// server persists position, so moving without it risks writing a bad
-    /// position to the character record.
+    /// Starts the position heartbeat that keeps the session alive, reporting
+    /// whatever <see cref="PosX"/>/<see cref="PosDepth"/> currently say - so
+    /// <see cref="Move"/> steers a live character.
     /// </summary>
     public Task StartHeartbeatAsync()
     {
@@ -117,6 +150,11 @@ public sealed class FfxiGameSession : IDisposable
         {
             throw new InvalidOperationException("Call ConnectToZoneAsync first.");
         }
+
+        PosX = ZoneState.X;
+        PosVertical = ZoneState.Vertical;
+        PosDepth = ZoneState.Depth;
+        Facing = ZoneState.Direction;
 
         _holdCts = new CancellationTokenSource();
         _holdTask = _zone.HoldWithPositionAsync(
@@ -128,6 +166,7 @@ public sealed class FfxiGameSession : IDisposable
             duration: TimeSpan.FromHours(12),
             interval: TimeSpan.FromMilliseconds(400),
             onReply: OnReply,
+            positionProvider: () => (PosX, PosVertical, PosDepth, Facing),
             ct: _holdCts.Token);
 
         return Task.CompletedTask;

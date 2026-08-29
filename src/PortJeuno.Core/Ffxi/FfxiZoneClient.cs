@@ -424,6 +424,7 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
         uint? followCharId = null,
         string? gmCommand = null,
         string? stopFile = null,
+        Func<(float X, float Vertical, float Depth, sbyte Direction)>? positionProvider = null,
         string? tellTo = null,
         string? tellText = null,
         CancellationToken ct = default)
@@ -460,7 +461,14 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
             // Following takes the target's position verbatim off the wire, so
             // it needs no agreement about which float is "up" - a small offset
             // keeps us beside them rather than inside them.
+            // A provider lets the caller steer while the heartbeat runs; without
+            // one the character simply reports where it started.
+            sbyte baseDirection = direction;
             float baseX = x, baseVertical = vertical, baseDepth = depth;
+            if (positionProvider is not null)
+            {
+                (baseX, baseVertical, baseDepth, baseDirection) = positionProvider();
+            }
             {
                 // Prefer the requested target, but fall back to any other
                 // player we can see - which charid a person is logged in as
@@ -496,7 +504,7 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
                 x: baseX + offsetX,
                 vertical: baseVertical,
                 depth: baseDepth + offsetZ,
-                direction: direction,
+                direction: baseDirection,
                 moveFrame: (ushort)(sent & 0xFFFF),
                 modes: walkRadius > 0f ? FfxiPositionPacket.ModeFlags.Run : FfxiPositionPacket.ModeFlags.None,
                 timeNow: (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds());

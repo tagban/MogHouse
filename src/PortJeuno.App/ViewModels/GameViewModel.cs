@@ -68,11 +68,16 @@ public partial class GameViewModel : ViewModelBase
 
     private void OnEntities(IReadOnlyList<FfxiEntityUpdate> entities) => Dispatcher.UIThread.Post(() =>
     {
-        FfxiZoneLoginReply? state = _shell.Session.ZoneState;
-        if (state is null)
+        FfxiGameSession session = _shell.Session;
+        if (session.ZoneState is null)
         {
             return;
         }
+
+        // Centre on where we are *now*, not where we logged in - otherwise
+        // walking slides the whole world off the edge of the radar.
+        float centreX = session.PosX;
+        float centreZ = session.PosDepth;
 
         Dots.Clear();
         int players = 0, npcs = 0;
@@ -82,7 +87,7 @@ public partial class GameViewModel : ViewModelBase
 
         foreach (FfxiEntityUpdate entity in entities)
         {
-            if (entity.UniqueNo == _shell.Session.OwnCharId)
+            if (entity.UniqueNo == session.OwnCharId)
             {
                 continue;
             }
@@ -100,8 +105,8 @@ public partial class GameViewModel : ViewModelBase
             // Screen x follows game x; screen y follows game *depth*, not the
             // vertical axis - the radar is a top-down map, so height is
             // deliberately dropped rather than drawn.
-            double dx = (entity.X - state.X) / RangeInUnits * Radius;
-            double dz = (entity.Depth - state.Depth) / RangeInUnits * Radius;
+            double dx = (entity.X - centreX) / RangeInUnits * Radius;
+            double dz = (entity.Depth - centreZ) / RangeInUnits * Radius;
 
             if (Math.Abs(dx) > Radius || Math.Abs(dz) > Radius)
             {
@@ -148,6 +153,49 @@ public partial class GameViewModel : ViewModelBase
 
         await _shell.Session.SayAsync(text);
     }
+
+    /// <summary>How far one key press moves the character, in game units.</summary>
+    [ObservableProperty]
+    public partial double StepSize { get; set; } = 1.0;
+
+    /// <summary>
+    /// Steps the character. Screen-style directions: north decreases depth,
+    /// east increases x - matching how the radar is drawn, so what you press
+    /// matches what you see move.
+    /// </summary>
+    public void Move(string direction)
+    {
+        float step = (float)StepSize;
+        (float dx, float dz) = direction switch
+        {
+            "north" => (0f, -step),
+            "south" => (0f, step),
+            "west" => (-step, 0f),
+            "east" => (step, 0f),
+            _ => (0f, 0f),
+        };
+
+        _shell.Session.Move(dx, dz);
+        RefreshPosition();
+    }
+
+    private void RefreshPosition()
+    {
+        FfxiGameSession s = _shell.Session;
+        PositionText = $"x {s.PosX:F1}  y {s.PosVertical:F1}  z {s.PosDepth:F1}  facing {s.Facing}";
+    }
+
+    [RelayCommand]
+    private void MoveNorth() => Move("north");
+
+    [RelayCommand]
+    private void MoveSouth() => Move("south");
+
+    [RelayCommand]
+    private void MoveWest() => Move("west");
+
+    [RelayCommand]
+    private void MoveEast() => Move("east");
 
     [RelayCommand]
     private async Task LogoutAsync()
