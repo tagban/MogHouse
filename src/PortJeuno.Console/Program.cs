@@ -484,6 +484,12 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                                     }
                                 }
 
+                                FfxiJobInfo? jobInfo = FfxiJobInfo.TryParse(reply.Plaintext.AsSpan(offset, size));
+                                if (jobInfo is not null)
+                                {
+                                    Console.WriteLine($"    JOB main={jobInfo.MainJob} lvl={jobInfo.MainJobLevel} sub={jobInfo.SubJob} hp={jobInfo.MaxHp} mp={jobInfo.MaxMp} stats=[{string.Join(",", jobInfo.BaseStats)}]");
+                                }
+
                                 FfxiChatMessage? chat = FfxiChatMessage.TryParse(reply.Plaintext.AsSpan(offset, size));
                                 if (chat is not null)
                                 {
