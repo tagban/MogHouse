@@ -130,6 +130,25 @@ reasons:
 
 Both clear on the second attempt.
 
+## Finishing the zone-in
+
+`GP_CLI_COMMAND_GAMEOK` (`0x00C`, 12 bytes) is the second half of zoning in,
+and it is easy to miss because everything *appears* to work without it: the
+`0x00A` handshake succeeds, the character reaches the world, moves and talks.
+But the server describes this packet as "one of the first packets sent when
+zoning in", and it is what "causes the server to start rapidly sending a lot of
+information to initialize the client" — ENTERZONE, config, job info, inventory,
+key items, quest and mission logs, merits, magic, mounts, a char sync. A client
+that skips it never receives any of that.
+
+Both payload words are validated as zero, so the packet is a header plus eight
+zero bytes.
+
+Other client packets in the zone-in family, not yet implemented: `0x00F`
+(CLSTAT), `0x011` (zone transition), `0x016`/`0x017` (CHARREQ — how a client
+asks the server for information about an entity it has seen but lacks data
+for), `0x00D` (NETEND).
+
 ## Staying alive
 
 `GP_CLI_COMMAND_POS` (`0x015`, 32 bytes) is the real heartbeat. Its handler sets
@@ -165,6 +184,33 @@ coincidence; the server's list continues into tells and system messages no
 client ever sends. Do not cast between them.
 
 ## Entity updates
+
+`GP_SERV_CHAR_PC` (`0x00D`) offsets, from the compiled struct — several
+bitfield blocks and a misaligned `uint8` sit between the head and the name, so
+counting by hand is unreliable:
+
+| Field | Offset |
+|---|---|
+| `UniqueNo` | 4 |
+| `ActIndex` | 8 |
+| position (x / vertical / depth) | 12 / 16 / 20 |
+| `Flags0` (MovTime, RunMode, facetarget) | 24 |
+| `Flags1` | 32 |
+| `Flags2` | 36 |
+| `GrapIDTbl` | 72 |
+| `name` | 90 |
+
+The packet is truncated by update type, so the later fields are not always
+present — check the declared length before reading them.
+
+`Flags1` fields worth knowing: `GraphSize` at bits 9–10 (from
+`char_look.size`), `Gender` at bit 15, `GmLevel` at bits 24–26. GM level is
+sent as `min(gmlevel + 3, 7)`, so a GM level 2 character reports 5.
+
+**`GraphSize == 0` is not a bug.** `getSize()` documents the scale as
+"Small: 0, Medium: 1, Large: 2", so zero is simply Small. This looked like a
+promising explanation for a character the retail client would not render, and
+it was wrong.
 
 `0x00D` (another player) and `0x00E` (NPC/mob) both open with the same
 `GP_SERV_POS_HEAD` block that `GP_SERV_COMMAND_LOGIN` uses, so identity and
