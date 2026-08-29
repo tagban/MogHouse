@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
 
@@ -187,7 +188,15 @@ public sealed class FfxiZoneClient : IDisposable
             return null;
         }
 
-        return Decode(result.Buffer, _blowfish, _codec);
+        FfxiZoneReply reply = Decode(result.Buffer, _blowfish, _codec);
+
+        // Track the server's counter so our outgoing headers can acknowledge it.
+        if (reply.ChecksumValid || reply.ServerCounter > _lastServerCounter)
+        {
+            _lastServerCounter = reply.ServerCounter;
+        }
+
+        return reply;
     }
 
     /// <summary>
@@ -243,6 +252,180 @@ public sealed class FfxiZoneClient : IDisposable
         }
 
         return sent;
+    }
+
+    /// <summary>
+    /// Holds a session open the way a real client does: by sending position
+    /// updates. Unlike <see cref="HoldSessionAsync"/>'s 0x00A resend trick,
+    /// this is the actual mechanism - the server's 0x015 handler sets
+    /// UPDATE_POS and `requestedInfoSync`, so the character stops looking
+    /// timed out to other players.
+    ///
+    /// Sends at <paramref name="interval"/> (default 1s, near what a real
+    /// client does) until <paramref name="duration"/> elapses. Returns the
+    /// number of updates sent.
+    /// </summary>
+    public async Task<int> HoldWithPositionAsync(
+        IPEndPoint zoneServer,
+        float x,
+        float vertical,
+        float depth,
+        sbyte direction,
+        TimeSpan duration,
+        TimeSpan? interval = null,
+        CancellationToken ct = default)
+    {
+        TimeSpan gap = interval ?? TimeSpan.FromSeconds(1);
+        DateTimeOffset until = DateTimeOffset.UtcNow + duration;
+        int sent = 0;
+
+        while (DateTimeOffset.UtcNow < until && !ct.IsCancellationRequested)
+        {
+            byte[] pos = FfxiPositionPacket.Build(
+                sync: (ushort)(_ownCounter + 1),
+                x: x,
+                vertical: vertical,
+                depth: depth,
+                direction: direction,
+                timeNow: (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+
+            await SendEncryptedAsync(zoneServer, pos, ct);
+            sent++;
+
+            // Spend the rest of the interval draining replies, so the server's
+            // counter stays tracked and the socket buffer doesn't fill - but
+            // still leave the interval when it goes quiet.
+            //
+            // Draining must not double as the pacing, which is what an earlier
+            // version did: ReceiveAsync returns the moment a datagram is
+            // waiting, so with a busy server the loop never waited at all and
+            // sent hundreds of thousands of updates a minute instead of one a
+            // second. Deadline first, receive second.
+            DateTimeOffset deadline = DateTimeOffset.UtcNow + gap;
+            while (DateTimeOffset.UtcNow < deadline && !ct.IsCancellationRequested)
+            {
+                TimeSpan remaining = deadline - DateTimeOffset.UtcNow;
+                if (remaining <= TimeSpan.Zero || await ReceiveAsync(remaining, ct) is null)
+                {
+                    break;
+                }
+            }
+
+            // If replies kept arriving right up to the deadline the loop above
+            // exits with no time left; if they stopped early, wait out the rest.
+            TimeSpan leftover = deadline - DateTimeOffset.UtcNow;
+            if (leftover > TimeSpan.Zero)
+            {
+                try
+                {
+                    await Task.Delay(leftover, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+        }
+
+        return sent;
+    }
+
+    /// <summary>
+    /// Sends one or more sub-packets as a normal encrypted datagram - the
+    /// wrapping every packet after the plaintext 0x00A uses. This is
+    /// `send_parse`/`compressPacket`/`finalizePacket` run in reverse:
+    /// compress the body, append its bit count, append an MD5 over both,
+    /// then Blowfish the whole thing from byte 28 onward.
+    ///
+    /// Requires a codec - there is no uncompressed form of these packets.
+    /// </summary>
+    public async Task SendEncryptedAsync(IPEndPoint zoneServer, byte[] subPackets, CancellationToken ct = default)
+    {
+        if (_codec is null)
+        {
+            throw new InvalidOperationException(
+                "Sending encrypted packets needs the Huffman tables - construct FfxiZoneClient with a codec. See FfxiHuffmanTables.");
+        }
+
+        _ownCounter++;
+
+        byte[] datagram = BuildEncryptedDatagram(
+            subPackets,
+            _ownCounter,
+            _lastServerCounter,
+            (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            _codec,
+            _blowfish);
+
+        LastSentDatagram = datagram;
+        await _udp.SendAsync(datagram, zoneServer, ct);
+    }
+
+    /// <summary>Highest counter seen from the server, echoed back in our header so it can tell what we've received.</summary>
+    private ushort _lastServerCounter;
+
+    /// <summary>
+    /// Builds a compressed+encrypted datagram. Split out from
+    /// <see cref="SendEncryptedAsync"/> so it can be tested without a socket.
+    ///
+    /// Body layout after the 28-byte header, mirroring `compressPacket` +
+    /// `finalizePacket`: compressed bytes, then a uint32 holding the compressed
+    /// size in bits (marker included), then a 16-byte MD5 over everything
+    /// before it. Encryption then covers whole 64-bit blocks only - a trailing
+    /// partial block is left in the clear, exactly as the receive path assumes.
+    /// </summary>
+    internal static byte[] BuildEncryptedDatagram(
+        ReadOnlySpan<byte> subPackets,
+        ushort ownCounter,
+        ushort peerCounter,
+        uint timestamp,
+        FfxiHuffman codec,
+        FfxiBlowfish blowfish)
+    {
+        var compressed = new byte[subPackets.Length * 2 + 64];
+        int bits = codec.Compress(subPackets, compressed);
+        if (bits < 0)
+        {
+            throw new InvalidOperationException("Compression failed - output buffer too small.");
+        }
+
+        int compressedBytes = FfxiHuffman.CompressedByteLength(bits);
+        int bodyLength = compressedBytes + 4 + FfxiZonePacket.ChecksumSize;
+
+        var datagram = new byte[FfxiZonePacket.HeaderSize + bodyLength];
+
+        BinaryPrimitives.WriteUInt16LittleEndian(datagram.AsSpan(FfxiZonePacket.OffsetOwnCounter, 2), ownCounter);
+        BinaryPrimitives.WriteUInt16LittleEndian(datagram.AsSpan(FfxiZonePacket.OffsetPeerCounter, 2), peerCounter);
+        BinaryPrimitives.WriteUInt32LittleEndian(datagram.AsSpan(FfxiZonePacket.OffsetTimestamp, 4), timestamp);
+
+        Span<byte> body = datagram.AsSpan(FfxiZonePacket.HeaderSize);
+        compressed.AsSpan(0, compressedBytes).CopyTo(body);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.Slice(compressedBytes, 4), (uint)bits);
+
+        System.Security.Cryptography.MD5.HashData(
+            body[..(compressedBytes + 4)],
+            body.Slice(compressedBytes + 4, FfxiZonePacket.ChecksumSize));
+
+        // `cypherSize = (PacketSize / 4) & -2` - whole 4-byte words, rounded
+        // down to an even count, since Blowfish works on 64-bit pairs.
+        int words = (bodyLength / 4) & ~1;
+        if (words > 0)
+        {
+            Span<uint> block = new uint[words];
+            for (int i = 0; i < words; i++)
+            {
+                block[i] = BinaryPrimitives.ReadUInt32LittleEndian(body.Slice(i * 4, 4));
+            }
+
+            blowfish.EncipherBlocks(block);
+
+            for (int i = 0; i < words; i++)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(body.Slice(i * 4, 4), block[i]);
+            }
+        }
+
+        return datagram;
     }
 
     /// <summary>

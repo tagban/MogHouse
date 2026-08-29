@@ -341,6 +341,7 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
 
             Console.WriteLine($"Zone reply: {reply.Datagram.Length} bytes, serverCounter={reply.ServerCounter}, acks our counter {reply.AcknowledgedClientCounter}");
             Console.WriteLine($"  MD5 after Blowfish decrypt: {(reply.ChecksumValid ? "VALID - cipher, key schedule and key derivation all confirmed correct" : "INVALID - decryption is wrong somewhere")}");
+            FfxiZoneLoginReply? zoneState = null;
             Console.WriteLine($"  Decrypted payload ({reply.Payload.Length} bytes compressed, declared {reply.DeclaredBits} bits)");
 
             if (reply.Plaintext is null)
@@ -368,25 +369,58 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
 
                     ushort sync = BitConverter.ToUInt16(reply.Plaintext, offset + 2);
                     Console.WriteLine($"    0x{id:X3}  {size,4} bytes  sync={sync}");
+
+                    if (id == FfxiZoneLoginReply.PacketId && size == FfxiZoneLoginReply.PacketSize)
+                    {
+                        zoneState = FfxiZoneLoginReply.Parse(reply.Plaintext.AsSpan(offset, size));
+                    }
+
                     offset += size;
+                }
+
+                if (zoneState is not null)
+                {
+                    Console.WriteLine();
+                    Console.WriteLine($"  Zone state for {zoneState.Name} (charid {zoneState.UniqueNo}, entity index {zoneState.ActIndex}):");
+                    Console.WriteLine($"    position  x={zoneState.X:F3} y={zoneState.Vertical:F3} z={zoneState.Depth:F3} facing={zoneState.Direction}");
+                    Console.WriteLine($"    zone      {zoneState.ZoneNo} (map {zoneState.MapNumber}, sub {zoneState.ZoneSubNo})");
+                    Console.WriteLine($"    playtime  {zoneState.PlayTime}s, game clock {zoneState.GameTime}");
                 }
             }
 
             if (flags.TryGetValue("zone-hold", out string? holdSeconds) && int.TryParse(holdSeconds, out int seconds))
             {
-                Console.WriteLine($"Holding the session open for {seconds}s (resending 0x00A every 20s so the server's ~60s cleanup sweep doesn't reap it)...");
                 Console.WriteLine("Ctrl+C to stop early.");
 
-                int sent = await zone.HoldSessionAsync(
-                    zoneEndpoint,
-                    uniqueNo: handoff.ContentId,
-                    characterName: handoff.CharacterName,
-                    accountName: profile.Username,
-                    clientVersion: 99,
-                    clientLanguage: 2,
-                    duration: TimeSpan.FromSeconds(seconds));
+                if (zoneState is not null)
+                {
+                    Console.WriteLine($"Sending 0x015 position updates for {seconds}s - the real client's heartbeat, so the character reads as live rather than timed out...");
 
-                Console.WriteLine($"Done - sent {sent} keepalives. The session will be reaped ~60s from now.");
+                    int sent = await zone.HoldWithPositionAsync(
+                        zoneEndpoint,
+                        x: zoneState.X,
+                        vertical: zoneState.Vertical,
+                        depth: zoneState.Depth,
+                        direction: zoneState.Direction,
+                        duration: TimeSpan.FromSeconds(seconds));
+
+                    Console.WriteLine($"Done - sent {sent} position updates.");
+                }
+                else
+                {
+                    Console.WriteLine($"Holding for {seconds}s by resending 0x00A (no zone state parsed, so no position to report)...");
+
+                    int sent = await zone.HoldSessionAsync(
+                        zoneEndpoint,
+                        uniqueNo: handoff.ContentId,
+                        characterName: handoff.CharacterName,
+                        accountName: profile.Username,
+                        clientVersion: 99,
+                        clientLanguage: 2,
+                        duration: TimeSpan.FromSeconds(seconds));
+
+                    Console.WriteLine($"Done - sent {sent} keepalives.");
+                }
             }
 
             return reply.ChecksumValid ? 0 : 1;
