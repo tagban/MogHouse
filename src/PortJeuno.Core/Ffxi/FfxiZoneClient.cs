@@ -331,6 +331,16 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
     }
 
     /// <summary>
+    /// <remarks>
+    /// WARNING: the vertical this sends is fixed - whatever the caller passes,
+    /// typically echoed from the server's own reported position. FFXI terrain
+    /// is not flat, so moving horizontally without adjusting height walks the
+    /// character into the ground: still present, still able to chat and receive
+    /// tells, but buried and invisible to everyone. The server also persists
+    /// position periodically, so a bad height gets saved. Leave walkRadius at 0
+    /// and followCharId unset unless the caller genuinely knows the terrain
+    /// height along the path.
+    /// </remarks>
     /// Holds a session open the way a real client does: by sending position
     /// updates. Unlike <see cref="HoldSessionAsync"/>'s 0x00A resend trick,
     /// this is the actual mechanism - the server's 0x015 handler sets

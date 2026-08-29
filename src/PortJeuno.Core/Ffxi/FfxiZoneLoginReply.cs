@@ -30,7 +30,12 @@ public sealed record FfxiZoneLoginReply(
     ushort ZoneSubNo,
     uint GameTime,
     uint PlayTime,
-    string Name)
+    string Name,
+    ushort EventNo = 0,
+    ushort EventNum = 0,
+    ushort EventPara = 0,
+    ushort EventMode = 0,
+    uint LoginState = 0)
 {
     public const ushort PacketId = 0x00A;
     public const int PacketSize = 260;
@@ -46,6 +51,16 @@ public sealed record FfxiZoneLoginReply(
     private const int OffsetDepth = Body + 16;    // struct `y`, engine Z
 
     private const int OffsetZoneNo = Body + 44;
+
+    // Event state. A character parked in an unfinished event is treated as
+    // being in a cutscene, and cutscene players are not rendered to others -
+    // so a non-zero EventNo on a character nobody can see is a strong signal,
+    // not a curiosity.
+    private const int OffsetEventNo = Body + 60;
+    private const int OffsetEventNum = Body + 84;
+    private const int OffsetEventPara = Body + 86;
+    private const int OffsetEventMode = Body + 88;
+    private const int OffsetLoginState = Body + 124;
     private const int OffsetGameTime = Body + 56;
     private const int OffsetMapNumber = Body + 62;
     private const int OffsetName = Body + 128;
@@ -88,7 +103,12 @@ public sealed record FfxiZoneLoginReply(
             ZoneSubNo: BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(OffsetZoneSubNo, 2)),
             GameTime: BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(OffsetGameTime, 4)),
             PlayTime: BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(OffsetPlayTime, 4)),
-            Name: ReadFixedString(subPacket.Slice(OffsetName, NameLength)));
+            Name: ReadFixedString(subPacket.Slice(OffsetName, NameLength)),
+            EventNo: BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(OffsetEventNo, 2)),
+            EventNum: BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(OffsetEventNum, 2)),
+            EventPara: BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(OffsetEventPara, 2)),
+            EventMode: BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(OffsetEventMode, 2)),
+            LoginState: BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(OffsetLoginState, 4)));
     }
 
     private static string ReadFixedString(ReadOnlySpan<byte> field)

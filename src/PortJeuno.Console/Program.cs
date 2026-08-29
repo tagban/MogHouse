@@ -385,6 +385,7 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                     Console.WriteLine($"    position  x={zoneState.X:F3} y={zoneState.Vertical:F3} z={zoneState.Depth:F3} facing={zoneState.Direction}");
                     Console.WriteLine($"    zone      {zoneState.ZoneNo} (map {zoneState.MapNumber}, sub {zoneState.ZoneSubNo})");
                     Console.WriteLine($"    playtime  {zoneState.PlayTime}s, game clock {zoneState.GameTime}");
+                    Console.WriteLine($"    EVENT     no={zoneState.EventNo} num={zoneState.EventNum} para={zoneState.EventPara} mode={zoneState.EventMode} loginState={zoneState.LoginState}");
                 }
             }
 
@@ -435,7 +436,13 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                         direction: zoneState.Direction,
                         duration: TimeSpan.FromSeconds(seconds),
                         interval: TimeSpan.FromMilliseconds(400),
-                        walkRadius: flags.TryGetValue("zone-walk", out string? radius) && float.TryParse(radius, out float r) ? r : 2.0f,
+                        // Default to standing still. We report a FIXED vertical -
+                        // we echo back whatever height the server first gave us and
+                        // never adjust it - but FFXI terrain is not flat, so any
+                        // horizontal movement walks the character into the ground.
+                        // Moving safely needs terrain height, which this client does
+                        // not have, so movement is opt-in rather than the default.
+                        walkRadius: flags.TryGetValue("zone-walk", out string? radius) && float.TryParse(radius, out float r) ? r : 0f,
                         sayEvery: flags.TryGetValue("zone-say", out string? sayText) && sayText.Length > 0 ? sayText : null,
                         sayKind: flags.TryGetValue("zone-say-kind", out string? kindText) && Enum.TryParse(kindText, true, out FfxiChatKind parsedKind) ? parsedKind : FfxiChatKind.Say,
                         followCharId: flags.TryGetValue("zone-follow", out string? followSpec) && uint.TryParse(followSpec, out uint followId) ? followId : null,
