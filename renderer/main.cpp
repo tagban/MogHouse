@@ -9,6 +9,7 @@
 #include <webgpu/webgpu_cpp.h>
 
 #include <cstdio>
+#include <iterator>
 #include <string>
 
 namespace
@@ -45,7 +46,12 @@ int main(int, char**)
         return 1;
     }
 
-    wgpu::InstanceDescriptor instance_descriptor{};
+    // Waiting on a future with a non-zero timeout is an opt-in feature. Without
+    // it every WaitAny below fails with "Timeout waits are either not enabled
+    // or not supported", which reads like a driver problem and is not one.
+    static constexpr wgpu::InstanceFeatureName kInstanceFeatures[] = {wgpu::InstanceFeatureName::TimedWaitAny};
+
+    wgpu::InstanceDescriptor instance_descriptor{.requiredFeatureCount = std::size(kInstanceFeatures), .requiredFeatures = kInstanceFeatures};
     wgpu::Instance instance = wgpu::CreateInstance(&instance_descriptor);
     if (!instance)
     {

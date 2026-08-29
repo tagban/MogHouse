@@ -1,0 +1,17 @@
+# ninja log v7
+18	168	8097467856613733	CMakeFiles/portjeuno-renderer.dir/main.cpp.obj.ddi	941479b8c61be5f6
+19	247	8097468052822125	CMakeFiles/portjeuno-renderer.dir/surface_win32.cpp.obj.ddi	7baad4b8591892b2
+248	286	8097468055030566	CMakeFiles/portjeuno-renderer.dir/CXX.dd	163bd9583daa5f33
+248	286	8097468055030566	CMakeFiles/portjeuno-renderer.dir/CXXModules.json	163bd9583daa5f33
+248	286	8097468055030566	CMakeFiles/portjeuno-renderer.dir/main.cpp.obj.modmap	163bd9583daa5f33
+248	286	8097468055030566	CMakeFiles/portjeuno-renderer.dir/surface_win32.cpp.obj.modmap	163bd9583daa5f33
+238	1104	8097467858769993	CMakeFiles/portjeuno-renderer.dir/main.cpp.obj	54606183505ca964
+287	1106	8097468055424804	CMakeFiles/portjeuno-renderer.dir/surface_win32.cpp.obj	2df2a8ebd0c683a2
+1106	2845	8097468063686408	portjeuno-renderer.exe	e785130a11337f9c
+32	187	8097468590811774	CMakeFiles/portjeuno-renderer.dir/main.cpp.obj.ddi	941479b8c61be5f6
+188	232	8097468592296000	CMakeFiles/portjeuno-renderer.dir/CXX.dd	163bd9583daa5f33
+188	232	8097468592296000	CMakeFiles/portjeuno-renderer.dir/CXXModules.json	163bd9583daa5f33
+188	232	8097468592296000	CMakeFiles/portjeuno-renderer.dir/main.cpp.obj.modmap	163bd9583daa5f33
+188	232	8097468592296000	CMakeFiles/portjeuno-renderer.dir/surface_win32.cpp.obj.modmap	163bd9583daa5f33
+234	1087	8097468592778856	CMakeFiles/portjeuno-renderer.dir/main.cpp.obj	54606183505ca964
+1087	2792	8097468601300128	portjeuno-renderer.exe	e785130a11337f9c

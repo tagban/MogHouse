@@ -10,6 +10,11 @@ endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Dawn's exported target lists Threads::Threads in its link interface but its
+# config never looks for it, so find_package(Dawn) fails unless we do this
+# first.
+find_package(Threads REQUIRED)
+
 find_package(Dawn REQUIRED)
 find_package(SDL3 REQUIRED)
 

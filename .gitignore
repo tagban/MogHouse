@@ -23,3 +23,6 @@ out/
 # Dawn (WebGPU) checkout and build - large, regenerable via build-dawn.bat
 /vendor/dawn/
 build-dawn/
+
+# Dawn install prefix produced by build-dawn.bat
+/vendor/dawn-install/

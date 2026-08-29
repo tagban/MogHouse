@@ -132,3 +132,24 @@ all, since nothing Vulkan-dependent can be on that path.
 Whether the new renderer consumes lotus's entity/scene system or sits directly
 on lotus-ffxi's parsed asset data. That depends on how entangled the per-frame
 render path is with the Vulkan types, which the slice will show.
+
+## DAWN_FORCE_SYSTEM_COMPONENT_LOAD is required on Windows
+
+Without it, Dawn cannot load `d3dcompiler_47.dll` or `vulkan-1.dll` and no
+device can be created at all - both fail with `Windows Error: 87`.
+
+`DynamicLib::Open` in `src/dawn/common/DynamicLib.cpp` does:
+
+```cpp
+const DWORD loadLibraryFlags =
+    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
+mHandle = LoadLibraryExA(filename.c_str(), nullptr, loadLibraryFlags);
+```
+
+`LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR` requires a fully qualified path, and these
+are bare filenames, so Windows returns `ERROR_INVALID_PARAMETER` (87). Building
+with `DAWN_FORCE_SYSTEM_COMPONENT_LOAD=ON` compiles the other branch of that
+`#if`, which uses `LOAD_LIBRARY_SEARCH_SYSTEM32` and works.
+
+The error message points at the DLL, so it reads like a missing or broken system
+library. Both files are present in System32 and load fine for other programs.
