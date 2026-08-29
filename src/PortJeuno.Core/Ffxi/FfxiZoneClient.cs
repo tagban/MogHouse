@@ -352,6 +352,20 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
     /// number of updates sent.
     /// </summary>
     /// <summary>
+    /// Requests a clean logout (GP_CLI_COMMAND_REQLOGOUT). Preferable to just
+    /// dropping the socket: an abandoned session is reaped on a timeout about
+    /// a minute later and its accounts_sessions row survives until then,
+    /// blocking the next login for that character with error 201.
+    ///
+    /// The server applies a Leavegame effect rather than disconnecting
+    /// immediately, and refuses outright while the character is in an event,
+    /// crafting or otherwise action-blocked - so this can fail, and the caller
+    /// should not assume the session has ended.
+    /// </summary>
+    public async Task SendLogoutAsync(IPEndPoint zoneServer, CancellationToken ct = default) =>
+        await SendEncryptedAsync(zoneServer, FfxiLogoutPacket.Build((ushort)(_ownCounter + 1)), ct);
+
+    /// <summary>
     /// Sends GP_CLI_COMMAND_GAMEOK - the "finished loading, send me everything"
     /// step of zoning in. Must follow a successful 0x00A: it travels encrypted
     /// like all steady-state traffic, so it needs the codec.

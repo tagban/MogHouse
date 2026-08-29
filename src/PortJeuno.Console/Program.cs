@@ -527,6 +527,13 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                         });
 
                     Console.WriteLine($"Done - sent {sent} position updates. Blowfish key rotations detected: {zone.KeyRotations}.");
+
+                    // Leave cleanly so the session row is released now rather
+                    // than on the server's timeout, which would block the next
+                    // login for this character for about a minute.
+                    await zone.SendLogoutAsync(zoneEndpoint);
+                    Console.WriteLine("Sent GP_CLI_COMMAND_REQLOGOUT (0x0E7) - clean logout requested.");
+                    await Task.Delay(TimeSpan.FromSeconds(2));
                     Console.WriteLine("Sub-packets received during the session (id x count):");
                     foreach ((ushort id, int count) in seen.OrderByDescending(kv => kv.Value))
                     {
