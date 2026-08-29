@@ -86,6 +86,95 @@ public sealed class FfxiGameSession : IDisposable
     /// <summary>True when the last move was refused because the destination was off the navmesh.</summary>
     public bool LastMoveBlocked { get; private set; }
 
+    /// <summary>The route currently being walked, if any. World-space waypoints.</summary>
+    public IReadOnlyList<(float X, float Vertical, float Depth)> CurrentPath { get; private set; } = [];
+
+    private CancellationTokenSource? _walkCts;
+
+    /// <summary>
+    /// Walks to a point using the server's own navmesh for routing, so the path
+    /// goes around walls rather than into them.
+    ///
+    /// Cancels any walk already in progress: a second destination means the
+    /// first is no longer wanted.
+    /// </summary>
+    public async Task WalkToAsync(float targetX, float targetDepth)
+    {
+        if (NavMesh is null)
+        {
+            Status?.Invoke("No navmesh for this zone - cannot route.");
+            return;
+        }
+
+        _walkCts?.Cancel();
+        _walkCts = new CancellationTokenSource();
+        CancellationToken ct = _walkCts.Token;
+
+        if (!NavMesh.TryGetGroundHeight(targetX, PosVertical, targetDepth, out float targetVertical))
+        {
+            Status?.Invoke("Nothing walkable there.");
+            return;
+        }
+
+        IReadOnlyList<(float X, float Vertical, float Depth)> route =
+            NavMesh.FindPath(PosX, PosVertical, PosDepth, targetX, targetVertical, targetDepth);
+
+        if (route.Count == 0)
+        {
+            Status?.Invoke("No route to there.");
+            return;
+        }
+
+        CurrentPath = route;
+        Status?.Invoke($"Walking {route.Count} waypoints to ({targetX:F1}, {targetDepth:F1}).");
+
+        try
+        {
+            // Skip the first waypoint - it's where we already are.
+            for (int i = 1; i < route.Count && !ct.IsCancellationRequested; i++)
+            {
+                (float wx, _, float wz) = route[i];
+
+                // Step toward each corner at a walking pace rather than
+                // teleporting: the server tracks movement and a jump would
+                // look like a speed hack.
+                while (!ct.IsCancellationRequested)
+                {
+                    float dx = wx - PosX;
+                    float dz = wz - PosDepth;
+                    float distance = MathF.Sqrt((dx * dx) + (dz * dz));
+
+                    if (distance < 0.5f)
+                    {
+                        break;
+                    }
+
+                    float step = MathF.Min(StepDistance, distance);
+                    Move(dx / distance * step, dz / distance * step);
+
+                    await Task.Delay(StepInterval, ct);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer destination replaced this walk; nothing to report.
+        }
+
+        CurrentPath = [];
+    }
+
+    /// <summary>Stops any walk in progress.</summary>
+    public void StopWalking()
+    {
+        _walkCts?.Cancel();
+        CurrentPath = [];
+    }
+
+    /// <summary>Roughly a normal running pace once combined with the interval below.</summary>
+    private const float StepDistance = 0.6f;
+    private static readonly TimeSpan StepInterval = TimeSpan.FromMilliseconds(120);
+
     /// <summary>Steps the character horizontally and turns it to face the direction of travel.</summary>
     public void Move(float dx, float dz)
     {
@@ -132,8 +221,11 @@ public sealed class FfxiGameSession : IDisposable
     public FfxiZoneHandoff? Handoff { get; private set; }
     public uint OwnCharId => Handoff?.ContentId ?? 0;
 
+    /// <summary>Everything we have been told about, for drawing or listing.</summary>
+    public IReadOnlyList<FfxiEntityUpdate> KnownEntities() => _zone?.KnownEntities() ?? [];
+
     /// <summary>How many entities we currently know about. Diagnostic.</summary>
-    public int KnownEntityCount => _zone?.KnownEntities().Count ?? 0;
+    public int KnownEntityCount => KnownEntities().Count;
     public bool IsConnected => _holdTask is { IsCompleted: false };
 
     /// <summary>Authenticates and returns the character roster.</summary>

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
@@ -79,6 +80,9 @@ public partial class GameViewModel : ViewModelBase
 
     private void OnEntities(IReadOnlyList<FfxiEntityUpdate> entities) => Dispatcher.UIThread.Post(() =>
     {
+        RefreshRadar();
+        return;
+#pragma warning disable CS0162
         FfxiGameSession session = _shell.Session;
         if (session.ZoneState is null)
         {
@@ -135,7 +139,65 @@ public partial class GameViewModel : ViewModelBase
 
         PlayerCount = players;
         NpcCount = npcs;
+#pragma warning restore CS0162
     });
+
+    /// <summary>Map polygons, blips and route, refreshed together for the radar to draw.</summary>
+    public event Action? RadarChanged;
+
+    public IReadOnlyList<IReadOnlyList<(float X, float Depth)>> MapPolygons { get; private set; } = [];
+    public IReadOnlyList<PortJeuno.App.Controls.RadarBlip> Blips { get; private set; } = [];
+    public IReadOnlyList<(float X, float Depth)> RoutePoints { get; private set; } = [];
+
+    public float CentreX => _shell.Session.PosX;
+    public float CentreDepth => _shell.Session.PosDepth;
+
+    private void RefreshRadar()
+    {
+        FfxiGameSession session = _shell.Session;
+
+        MapPolygons = session.NavMesh?.WalkablePolygons(session.PosX, session.PosDepth, (float)RangeInUnits) ?? [];
+
+        var blips = new List<PortJeuno.App.Controls.RadarBlip>
+        {
+            new(session.PosX, session.PosDepth, CharacterName, IsPlayer: true, IsSelf: true),
+        };
+
+        int players = 0, npcs = 0;
+        foreach (FfxiEntityUpdate entity in session.KnownEntities())
+        {
+            if (entity.UniqueNo == session.OwnCharId)
+            {
+                continue;
+            }
+
+            bool isPlayer = entity.PacketId == FfxiEntityUpdate.PlayerPacketId;
+            if (isPlayer) { players++; } else { npcs++; }
+
+            blips.Add(new PortJeuno.App.Controls.RadarBlip(
+                entity.X, entity.Depth, entity.Name ?? "", isPlayer, IsSelf: false));
+        }
+
+        Blips = blips;
+        PlayerCount = players;
+        NpcCount = npcs;
+
+        RoutePoints = session.CurrentPath.Select(p => (p.X, p.Depth)).ToList();
+
+        RadarChanged?.Invoke();
+    }
+
+    /// <summary>Walks to a spot on the map, routed around walls by the navmesh.</summary>
+    public void WalkTo(float x, float depth) => _ = WalkToAsync(x, depth);
+
+    private async Task WalkToAsync(float x, float depth)
+    {
+        await _shell.Session.WalkToAsync(x, depth);
+        RefreshPosition();
+    }
+
+    [RelayCommand]
+    private void StopWalking() => _shell.Session.StopWalking();
 
     [RelayCommand]
     private async Task SendAsync()
@@ -162,6 +224,9 @@ public partial class GameViewModel : ViewModelBase
             return;
         }
 
+        // Echo locally: the server does not send our own say back to us, so
+        // without this the chat box stays empty no matter how much we talk.
+        ChatLines.Add(new FfxiChatLine(DateTimeOffset.Now, FfxiChatMessageType.Say, CharacterName, text));
         await _shell.Session.SayAsync(text);
     }
 
@@ -179,8 +244,10 @@ public partial class GameViewModel : ViewModelBase
         float step = (float)StepSize;
         (float dx, float dz) = direction switch
         {
-            "north" => (0f, -step),
-            "south" => (0f, step),
+            // North increases depth: the game compass and the depth axis run the
+            // same way, which is the opposite of screen-space intuition.
+            "north" => (0f, step),
+            "south" => (0f, -step),
             "west" => (-step, 0f),
             "east" => (step, 0f),
             _ => (0f, 0f),
@@ -188,6 +255,7 @@ public partial class GameViewModel : ViewModelBase
 
         _shell.Session.Move(dx, dz);
         RefreshPosition();
+        RefreshRadar();
 
         if (_shell.Session.LastMoveBlocked)
         {

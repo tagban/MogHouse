@@ -168,6 +168,143 @@ public sealed class FfxiNavMesh
         return true;
     }
 
+
+    /// <summary>
+    /// Walkable polygon outlines near a point, in FFXI coordinates, for drawing
+    /// a map. Returns each polygon as a list of (x, depth) corners with height
+    /// dropped, since this is for a top-down view.
+    ///
+    /// Only the 3x3 tile block around the point is walked, which is the same
+    /// neighbourhood Detour itself queries - a whole zone would be thousands of
+    /// polygons and none of the distant ones would be visible anyway.
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<(float X, float Depth)>> WalkablePolygons(float x, float z, float range)
+    {
+        var result = new List<IReadOnlyList<(float, float)>>();
+
+        RcVec3f centre = ToDetour(x, 0f, z);
+        _navMesh.CalcTileLoc(centre, out int tileX, out int tileY);
+
+        var tiles = new DtMeshTile[8];
+        float rangeSquared = range * range;
+
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                int found = _navMesh.GetTilesAt(tileX + dx, tileY + dy, tiles, tiles.Length);
+
+                for (int t = 0; t < found; t++)
+                {
+                    DtMeshData? data = tiles[t]?.data;
+                    if (data?.polys is null || data.verts is null)
+                    {
+                        continue;
+                    }
+
+                    foreach (DtPoly poly in data.polys)
+                    {
+                        if (poly is null || poly.vertCount < 3)
+                        {
+                            continue;
+                        }
+
+                        // Off-mesh connections are links, not surfaces.
+                        if ((poly.areaAndtype >> 6) != 0)
+                        {
+                            continue;
+                        }
+
+                        var corners = new List<(float, float)>(poly.vertCount);
+                        bool near = false;
+
+                        for (int v = 0; v < poly.vertCount; v++)
+                        {
+                            int index = poly.verts[v] * 3;
+                            if (index + 2 >= data.verts.Length)
+                            {
+                                break;
+                            }
+
+                            // Undo the handedness flip on the way back out.
+                            float px = data.verts[index];
+                            float pz = -data.verts[index + 2];
+
+                            corners.Add((px, pz));
+
+                            float ddx = px - x;
+                            float ddz = pz - z;
+                            if ((ddx * ddx) + (ddz * ddz) <= rangeSquared)
+                            {
+                                near = true;
+                            }
+                        }
+
+                        if (near && corners.Count >= 3)
+                        {
+                            result.Add(corners);
+                        }
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+
+    /// <summary>
+    /// A walkable route between two points, as world-space waypoints.
+    ///
+    /// This is the same pathfinding the server uses to move mobs, so a route
+    /// it returns is one the server will accept us walking: around walls,
+    /// never through them. Returns an empty list when either end is off the
+    /// mesh or no route exists.
+    /// </summary>
+    public IReadOnlyList<(float X, float Vertical, float Depth)> FindPath(
+        float fromX, float fromVertical, float fromZ,
+        float toX, float toVertical, float toZ)
+    {
+        RcVec3f start = ToDetour(fromX, fromVertical, fromZ);
+        RcVec3f end = ToDetour(toX, toVertical, toZ);
+
+        if (_query.FindNearestPoly(start, SearchExtents, _filter, out long startRef, out RcVec3f startOn, out _).Failed() || startRef == 0)
+        {
+            return [];
+        }
+
+        if (_query.FindNearestPoly(end, SearchExtents, _filter, out long endRef, out RcVec3f endOn, out _).Failed() || endRef == 0)
+        {
+            return [];
+        }
+
+        Span<long> polys = stackalloc long[MaxPathPolygons];
+        if (_query.FindPath(startRef, endRef, startOn, endOn, _filter, polys, out int polyCount, polys.Length).Failed() || polyCount == 0)
+        {
+            return [];
+        }
+
+        // FindPath gives a corridor of polygons; FindStraightPath turns that
+        // into the actual corner points to walk between.
+        Span<DtStraightPath> straight = new DtStraightPath[MaxPathPoints];
+        if (_query.FindStraightPath(startOn, endOn, polys[..polyCount], polyCount, straight, out int pointCount, straight.Length, 0).Failed())
+        {
+            return [];
+        }
+
+        var route = new List<(float, float, float)>(pointCount);
+        for (int i = 0; i < pointCount; i++)
+        {
+            RcVec3f p = straight[i].pos;
+            route.Add((p.X, -p.Y, -p.Z));
+        }
+
+        return route;
+    }
+
+    private const int MaxPathPolygons = 256;
+    private const int MaxPathPoints = 128;
+
     /// <summary>True when a character could stand at this position at all.</summary>
     public bool IsWalkable(float x, float vertical, float z) =>
         TryGetGroundHeight(x, vertical, z, out _);

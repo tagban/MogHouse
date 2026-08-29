@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:PortJeuno.App.ViewModels"
              xmlns:ffxi="using:PortJeuno.Core.Ffxi"
+             xmlns:controls="using:PortJeuno.App.Controls"
              x:Class="PortJeuno.App.Views.GameView"
              x:DataType="vm:GameViewModel">
   <Grid ColumnDefinitions="*,320" Margin="10">
@@ -18,13 +19,14 @@
           <ItemsControl ItemsSource="{Binding ChatLines}" Margin="6">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="ffxi:FfxiChatLine">
-                <TextBlock TextWrapping="Wrap" Margin="0,1">
-                  <Run Text="{Binding Kind}" Foreground="#7E9CD8"/>
-                  <Run Text=" "/>
-                  <Run Text="{Binding Sender}" FontWeight="SemiBold"/>
-                  <Run Text=": "/>
-                  <Run Text="{Binding Text}"/>
-                </TextBlock>
+                <!-- Plain TextBlocks rather than Runs: Avalonia's Run does not
+                     support every property through a binding, and failures are
+                     silent, which is how the chat box ended up empty. -->
+                <StackPanel Orientation="Horizontal" Spacing="5" Margin="0,1">
+                  <TextBlock Text="{Binding Kind}" Foreground="#7E9CD8" FontSize="12" VerticalAlignment="Center"/>
+                  <TextBlock Text="{Binding Sender}" FontWeight="SemiBold"/>
+                  <TextBlock Text="{Binding Text}" TextWrapping="Wrap"/>
+                </StackPanel>
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
@@ -45,42 +47,18 @@
     <!-- Radar -->
     <StackPanel Grid.Column="1" Spacing="8">
       <TextBlock Text="Nearby" FontSize="16"/>
-      <Border BorderBrush="#333" BorderThickness="1" CornerRadius="4" Background="#111">
-        <Canvas Width="300" Height="300">
-          <Ellipse Width="300" Height="300" Stroke="#222" StrokeThickness="1"/>
-          <Ellipse Width="150" Height="150" Canvas.Left="75" Canvas.Top="75" Stroke="#1c1c1c" StrokeThickness="1"/>
-          <ItemsControl ItemsSource="{Binding Dots}">
-            <ItemsControl.ItemsPanel>
-              <ItemsPanelTemplate>
-                <Canvas/>
-              </ItemsPanelTemplate>
-            </ItemsControl.ItemsPanel>
-            <!-- Canvas.Left/Top have to be set on the generated container, not
-                 on the child inside the template: the Canvas positions its own
-                 children, and a ContentPresenter with no coordinates stacks
-                 everything at the origin. -->
-            <ItemsControl.Styles>
-              <Style Selector="ItemsControl > ContentPresenter">
-                <Setter Property="Canvas.Left" Value="{Binding Left, DataType=vm:EntityDot}"/>
-                <Setter Property="Canvas.Top" Value="{Binding Top, DataType=vm:EntityDot}"/>
-              </Style>
-            </ItemsControl.Styles>
-            <ItemsControl.ItemTemplate>
-              <DataTemplate x:DataType="vm:EntityDot">
-                <Ellipse Width="{Binding Size}" Height="{Binding Size}"
-                         Fill="{Binding Colour}"
-                         ToolTip.Tip="{Binding Label}"/>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
-        </Canvas>
+      <Border BorderBrush="#333" BorderThickness="1" CornerRadius="4">
+        <controls:RadarControl Name="Radar" Width="300" Height="300"/>
       </Border>
-      <TextBlock Opacity="0.6" FontSize="12">
-        <Run Text="players "/><Run Text="{Binding PlayerCount}"/>
-        <Run Text="   npcs "/><Run Text="{Binding NpcCount}"/>
-      </TextBlock>
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <TextBlock Text="players" Opacity="0.5" FontSize="12"/>
+        <TextBlock Text="{Binding PlayerCount}" Opacity="0.85" FontSize="12"/>
+        <TextBlock Text="npcs" Opacity="0.5" FontSize="12" Margin="8,0,0,0"/>
+        <TextBlock Text="{Binding NpcCount}" Opacity="0.85" FontSize="12"/>
+      </StackPanel>
       <TextBlock Opacity="0.4" FontSize="11" TextWrapping="Wrap"
-                 Text="Top-down, 50 units to the edge. Blue is you, yellow players, grey NPCs."/>
+                 Text="Click the map to walk there, routed around walls. Blue is you, yellow players, grey NPCs; the lit area is walkable ground."/>
+      <Button Content="Stop walking" Command="{Binding StopWalkingCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
 
       <TextBlock Text="Move" FontSize="16" Margin="0,10,0,0"/>
       <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto" Width="180" HorizontalAlignment="Left">
