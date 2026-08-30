@@ -105,6 +105,8 @@ int main(int argc, char** argv)
             return 1;
         }
         std::printf("zone %s: %zu triangles\n", zoneId.c_str(), zone->indices.size() / 3);
+        std::printf("  bounds x %.1f..%.1f  y %.1f..%.1f  z %.1f..%.1f\n", zone->boundsMin.x, zone->boundsMax.x,
+                    zone->boundsMin.y, zone->boundsMax.y, zone->boundsMin.z, zone->boundsMax.z);
     }
     else
     {

@@ -231,15 +231,13 @@ Zone parseMzb(const Chunk& chunk, const KeyTable& keys)
 
                 CollisionInstance instance{};
                 instance.mesh = found->second;
-                // Stored row major; transpose into the column major a shader
-                // wants.
-                for (int row = 0; row < 4; ++row)
+                // Straight copy, no transpose. Transposing puts elements 3, 7
+                // and 11 - the constant (0,0,0,1) column - into the translation
+                // slot, which reads as every instance sitting exactly on the
+                // origin.
+                for (int i = 0; i < 16; ++i)
                 {
-                    for (int col = 0; col < 4; ++col)
-                    {
-                        instance.transform[col * 4 + row] =
-                            read<float>(buffer, placementOffset + static_cast<size_t>(row * 4 + col) * sizeof(float));
-                    }
+                    instance.transform[i] = read<float>(buffer, placementOffset + static_cast<size_t>(i) * sizeof(float));
                 }
                 zone.instances.push_back(instance);
             }

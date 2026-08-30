@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 
@@ -75,8 +76,24 @@ int main(int argc, char** argv)
 
             if (argc == 2)
             {
-                std::printf("zone %s  version=%#04x  placements=%zu  meshes=%zu\n", zone.id.c_str(), zone.version,
-                            zone.placements.size(), zone.collision.size());
+                std::printf("zone %s  version=%#04x  placements=%zu  meshes=%zu  instances=%zu\n", zone.id.c_str(), zone.version,
+                            zone.placements.size(), zone.collision.size(), zone.instances.size());
+
+                float lo[3] = {1e30f, 1e30f, 1e30f};
+                float hi[3] = {-1e30f, -1e30f, -1e30f};
+                for (const ffxi::CollisionInstance& instance : zone.instances)
+                {
+                    for (int axis = 0; axis < 3; ++axis)
+                    {
+                        lo[axis] = std::min(lo[axis], instance.transform[12 + axis]);
+                        hi[axis] = std::max(hi[axis], instance.transform[12 + axis]);
+                    }
+                }
+                if (!zone.instances.empty())
+                {
+                    std::printf("  instance origins  x %.1f..%.1f  y %.1f..%.1f  z %.1f..%.1f\n",
+                                lo[0], hi[0], lo[1], hi[1], lo[2], hi[2]);
+                }
                 std::printf("  %zu vertices, %zu triangles\n", vertices, triangles);
                 for (size_t i = 0; i < zone.placements.size() && i < 5; ++i)
                 {
