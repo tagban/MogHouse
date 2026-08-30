@@ -209,7 +209,7 @@ void Collision::forEachNear(float minX, float minZ, float maxX, float maxZ, cons
     single = &scratch;
 }
 
-std::optional<float> Collision::groundAt(float x, float z, float near) const
+std::optional<float> Collision::groundAt(float x, float z, float near, float maxDrop) const
 {
     if (triangles_.empty())
     {
@@ -229,7 +229,7 @@ std::optional<float> Collision::groundAt(float x, float z, float near) const
             continue;
         }
         const std::optional<float> y = heightAt(triangle.a, triangle.b, triangle.c, x, z);
-        if (!y || *y > near + kStepUp)
+        if (!y || *y > near + kStepUp || *y < near - maxDrop)
         {
             continue;
         }

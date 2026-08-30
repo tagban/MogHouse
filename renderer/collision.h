@@ -18,6 +18,7 @@
 #include "linalg.h"
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <vector>
 
@@ -40,7 +41,15 @@ public:
     /// below it wins, so standing on a bridge does not drop you to the riverbed
     /// underneath. A small tolerance above `near` is allowed so that walking up
     /// a slope does not fall through the step in front of you.
-    std::optional<float> groundAt(float x, float z, float near) const;
+    ///
+    /// `maxDrop` bounds how far *below* `near` a surface may be and still
+    /// count. Unbounded is right when placing a character with a whole zone to
+    /// aim at, and wrong for a footstep: without it, stepping where a stair
+    /// tread should be finds the floor underneath the staircase instead and
+    /// drops you inside it, and stepping off any edge falls to whatever is
+    /// below rather than stopping.
+    std::optional<float> groundAt(float x, float z, float near,
+                                  float maxDrop = std::numeric_limits<float>::max()) const;
 
     /// The nearest point with ground under it, searching outward from (x, z).
     ///

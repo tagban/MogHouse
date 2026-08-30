@@ -1485,18 +1485,26 @@ int mh::runViewer(const ViewerOptions& options)
             {
                 const mh::Vec3 stepped = collision.empty() ? wanted : collision.move(characterAt, wanted, 0.5f);
 
-                // A step needs ground directly under it. Searching outward for
-                // some, the way an initial drop does, turns walking off a ledge
-                // into a jump to wherever the nearest surface happens to be.
-                const bool footing =
-                    collision.empty() || collision.groundAt(stepped.x, stepped.z, characterAt.y + 1.0f).has_value();
+                // A step needs ground directly under it, within reach both
+                // ways. Rising is bounded by the step height; falling is
+                // bounded here, because without a limit a step finds whatever
+                // is below and takes it - through a staircase, off a quay,
+                // into the water.
+                //
+                // Blocking rather than falling is a stand-in. There is no
+                // gravity yet, and stopping at an edge is the wrong behaviour
+                // that is easiest to see and hardest to get stuck in.
+                constexpr float kMaxStepDrop = 1.5f;
+                const std::optional<float> footing =
+                    collision.empty() ? std::optional<float>{characterAt.y}
+                                      : collision.groundAt(stepped.x, stepped.z, characterAt.y, kMaxStepDrop);
 
                 if (footing)
                 {
                     const float dx = stepped.x - characterAt.x;
                     const float dz = stepped.z - characterAt.z;
                     moved = std::sqrt(dx * dx + dz * dz);
-                    placeCharacter(stepped, 0.0f);
+                    characterAt = {stepped.x, *footing, stepped.z};
                 }
 
                 // Facing follows the camera, not the step. Walking backwards or

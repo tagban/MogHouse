@@ -74,13 +74,15 @@ int main(int argc, char** argv)
                 const float dz = stepped.z - at->z;
                 const bool stopped = std::sqrt(dx * dx + dz * dz) < 1e-4f;
 
-                std::optional<mh::Vec3> next =
-                    collision.nearestGround(stepped.x, stepped.z, at->y + 1.0f, 4.0f);
-                if (!next)
+                // The same rule the viewer walks by, so this reports what a
+                // character would actually do rather than something close to it.
+                const std::optional<float> ground = collision.groundAt(stepped.x, stepped.z, at->y, 1.5f);
+                if (!ground)
                 {
-                    std::printf("  step %2d: walked off the edge at %.1f %.1f\n", step, stepped.x, stepped.z);
+                    std::printf("  step %2d: no footing at %.1f %.1f - edge\n", step, stepped.x, stepped.z);
                     break;
                 }
+                std::optional<mh::Vec3> next = mh::Vec3{stepped.x, *ground, stepped.z};
                 if (stopped)
                 {
                     ++blocked;
