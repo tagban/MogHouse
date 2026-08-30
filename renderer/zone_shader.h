@@ -41,9 +41,12 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
     let shade = 0.35 + 0.65 * lambert;
 
     let sampled = textureSample(zoneTexture, zoneSampler, in.uv);
-    // Alpha in FFXI textures is a cutout rather than a blend for most surfaces;
-    // discarding keeps foliage and railings from being solid rectangles.
-    if (sampled.a < 0.35) {
+    // FFXI's alpha is not 0..255. Measured across a zone's textures, 34% of
+    // texels are exactly 0 and 57% sit at 7 or 8 out of 15 - that cluster is
+    // what "opaque" means here, the same 0..128 scaling the vertex colours use.
+    // Only 2.4% ever reach 15. So anything but a near-zero test throws away most
+    // of the world: a 0.35 cutoff discarded 39.5% of all texels.
+    if (sampled.a < 0.03) {
         discard;
     }
     return vec4<f32>(sampled.rgb * shade, 1.0);

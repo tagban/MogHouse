@@ -42,6 +42,26 @@ exactly, and it does for all 44 - a cheap check that the header offsets are
 right, since a wrong offset would put a plausible-looking but wrong size in that
 field.
 
+## Alpha is not 0..255
+
+Measured across East Sarutabaruta's textures, 1.37 million alpha texels:
+
+| alpha | share |
+| --- | --- |
+| 0/15 | 34.4% |
+| 7/15 | 32.7% |
+| 8/15 | 24.6% |
+| 15/15 | **2.4%** |
+
+Almost nothing is fully opaque. The mass sits at 7 and 8 out of 15 - about 0.5 -
+and **that is what opaque means here**, the same 0..128 scaling the vertex
+colours use, where lotus divides by 128 rather than 255.
+
+The practical consequence: any alpha cutoff above about 0.4 throws away most of
+the world. A 0.35 threshold discards 39.5% of all texels, including the entire
+opaque population, and the zone renders full of holes. Only a near-zero test is
+safe, because the genuinely transparent texels really are exactly 0.
+
 ## Still to work out
 
 - The `0x01` and `0x81` encodings
