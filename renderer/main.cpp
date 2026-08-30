@@ -11,6 +11,7 @@
 #include "ffxi/mzb.h"
 #include "ffxi/texture.h"
 #include "gputexture.h"
+#include "camera.h"
 #include "math.h"
 #include "surface.h"
 #include "zone_shader.h"
@@ -425,11 +426,17 @@ int main(int argc, char** argv)
     const pj::Vec3 centre = zone ? zone->centre() : pj::Vec3{};
     const float radius = zone ? std::max(zone->radius(), 1.0f) : 1.0f;
 
-    float orbit = 0.0f;
-    float pitch = 0.45f;
-    float distance = radius * 2.4f;
+    pj::Camera camera;
+    camera.target = centre;
+    camera.distance = radius * 2.4f;
+    // Start standing near the middle of the zone rather than orbiting it. An
+    // outside view cannot tell you whether a zone looks right; being in it can.
+    camera.position = {centre.x, zone ? zone->boundsMin.y + pj::kEyeHeight + 2.0f : 0.0f, centre.z};
+    camera.pitch = 0.0f;
     bool dragging = false;
-    bool spinning = true;
+
+    std::printf("wasd to walk, mouse drag to look, space and ctrl for up and down,\n");
+    std::printf("shift to move faster, tab to orbit the whole zone, escape to quit\n");
 
     uint64_t previousTicks = SDL_GetTicksNS();
     bool running = true;
@@ -448,9 +455,9 @@ int main(int argc, char** argv)
                 {
                     running = false;
                 }
-                else if (event.key.key == SDLK_SPACE)
+                else if (event.key.key == SDLK_TAB)
                 {
-                    spinning = !spinning;
+                    camera.orbiting = !camera.orbiting;
                 }
             }
             else if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED)
@@ -460,7 +467,6 @@ int main(int argc, char** argv)
             else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
             {
                 dragging = true;
-                spinning = false;
             }
             else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP)
             {
@@ -468,22 +474,28 @@ int main(int argc, char** argv)
             }
             else if (event.type == SDL_EVENT_MOUSE_MOTION && dragging)
             {
-                orbit -= event.motion.xrel * 0.008f;
-                pitch = std::clamp(pitch + event.motion.yrel * 0.008f, -1.4f, 1.4f);
+                camera.look(-event.motion.xrel * 0.005f, -event.motion.yrel * 0.005f);
             }
             else if (event.type == SDL_EVENT_MOUSE_WHEEL)
             {
-                distance = std::clamp(distance * (event.wheel.y > 0 ? 0.9f : 1.1f), radius * 0.05f, radius * 12.0f);
+                camera.distance = std::clamp(camera.distance * (event.wheel.y > 0 ? 0.9f : 1.1f), radius * 0.05f,
+                                             radius * 12.0f);
             }
         }
 
         const uint64_t nowTicks = SDL_GetTicksNS();
         const float delta = static_cast<float>(nowTicks - previousTicks) / 1e9f;
         previousTicks = nowTicks;
-        if (spinning)
+        const bool* held = SDL_GetKeyboardState(nullptr);
+        float speed = 12.0f * delta;
+        if (held[SDL_SCANCODE_LSHIFT] || held[SDL_SCANCODE_RSHIFT])
         {
-            orbit += delta * 0.25f;
+            speed *= 5.0f;
         }
+        const float ahead = (held[SDL_SCANCODE_W] ? speed : 0.0f) - (held[SDL_SCANCODE_S] ? speed : 0.0f);
+        const float side = (held[SDL_SCANCODE_D] ? speed : 0.0f) - (held[SDL_SCANCODE_A] ? speed : 0.0f);
+        const float lift = (held[SDL_SCANCODE_SPACE] ? speed : 0.0f) - (held[SDL_SCANCODE_LCTRL] ? speed : 0.0f);
+        camera.walk(ahead, side, lift);
 
         wgpu::SurfaceTexture surfaceTexture;
         surface.GetCurrentTexture(&surfaceTexture);
@@ -512,12 +524,11 @@ int main(int argc, char** argv)
 
         if (indexCount)
         {
-            const pj::Vec3 eye{centre.x + distance * std::cos(pitch) * std::sin(orbit),
-                               centre.y + distance * std::sin(pitch),
-                               centre.z + distance * std::cos(pitch) * std::cos(orbit)};
-            const pj::Mat4 view = pj::lookAt(eye, centre, pj::Vec3{0, 1, 0});
-            const pj::Mat4 projection = pj::perspective(1.05f, static_cast<float>(width) / static_cast<float>(height),
-                                                        radius * 0.01f, radius * 20.0f);
+            const pj::Mat4 view = pj::lookAt(camera.eye(), camera.lookAtPoint(), pj::Vec3{0, 1, 0});
+            // A near plane scaled to the zone puts everything nearby inside it
+            // when standing on the ground, so it is fixed rather than relative.
+            const pj::Mat4 projection =
+                pj::perspective(1.05f, static_cast<float>(width) / static_cast<float>(height), 0.1f, radius * 20.0f);
 
             Uniforms uniforms{};
             const pj::Mat4 viewProjection = projection * view;
