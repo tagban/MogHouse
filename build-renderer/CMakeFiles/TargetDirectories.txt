@@ -1,3 +1,0 @@
-C:/Users/Gaming/Desktop/PortJeuno/build-renderer/CMakeFiles/portjeuno-renderer.dir
-C:/Users/Gaming/Desktop/PortJeuno/build-renderer/CMakeFiles/edit_cache.dir
-C:/Users/Gaming/Desktop/PortJeuno/build-renderer/CMakeFiles/rebuild_cache.dir

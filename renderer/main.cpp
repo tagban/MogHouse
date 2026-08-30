@@ -45,7 +45,12 @@ int main(int, char**)
         return 1;
     }
 
-    SDL_Window* window = SDL_CreateWindow("PortJeuno renderer", kWidth, kHeight, SDL_WINDOW_RESIZABLE);
+    // HIGH_PIXEL_DENSITY opts the window into the display's real backing store
+    // rather than a scaled-up 1x one. Without it a retina Mac hands back a 1x
+    // drawable while surface_metal.mm has already set the layer's contentsScale
+    // from backingScaleFactor, and the two disagree. Windows under display
+    // scaling and Linux under fractional scaling have the same split.
+    SDL_Window* window = SDL_CreateWindow("PortJeuno renderer", kWidth, kHeight, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!window)
     {
         std::printf("SDL_CreateWindow failed: %s\n", SDL_GetError());
@@ -127,7 +132,16 @@ int main(int, char**)
             .device = device, .format = format, .usage = wgpu::TextureUsage::RenderAttachment, .width = width, .height = height, .presentMode = wgpu::PresentMode::Fifo};
         surface.Configure(&configuration);
     };
-    configure(kWidth, kHeight);
+    // kWidth/kHeight are points, which is not the drawable size on any display
+    // with a scale factor. The resize path below is already in pixels, because
+    // SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED reports them - so ask SDL for pixels
+    // here too and the initial configure agrees with every later one. A flat
+    // clear colour looks identical either way, so this cannot be caught by eye
+    // until there is real geometry on screen.
+    int pixel_width = 0;
+    int pixel_height = 0;
+    SDL_GetWindowSizeInPixels(window, &pixel_width, &pixel_height);
+    configure(static_cast<uint32_t>(pixel_width), static_cast<uint32_t>(pixel_height));
 
     wgpu::Queue queue = device.GetQueue();
 

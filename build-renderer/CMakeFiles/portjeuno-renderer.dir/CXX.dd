@@ -1,5 +1,0 @@
-ninja_dyndep_version = 1.0
-build CMakeFiles\portjeuno-renderer.dir\main.cpp.obj: dyndep
-
-build CMakeFiles\portjeuno-renderer.dir\surface_win32.cpp.obj: dyndep
-
