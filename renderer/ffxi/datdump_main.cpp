@@ -3,6 +3,7 @@
 // every zone in ROM/1; this exists so the C++ can be held to the same result.
 
 #include "dat.h"
+#include "mmb.h"
 #include "mzb.h"
 
 #include <cmath>
@@ -10,6 +11,8 @@
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
+#include <stdexcept>
+#include <string>
 
 int main(int argc, char** argv)
 {
@@ -43,6 +46,86 @@ int main(int argc, char** argv)
     for (int arg = 1; arg < argc; ++arg)
     {
         ffxi::DatFile dat{std::filesystem::path{argv[arg]}};
+        // Models. The check that matters is whether vertices land inside the
+        // bounding box the model declares for itself - a wrong stride or offset
+        // scatters them outside it immediately.
+        const char* key2Path = std::getenv("PORTJEUNO_FFXI_KEYTABLE2");
+        if (key2Path)
+        {
+            if (auto keys2 = ffxi::KeyTable::load(key2Path))
+            {
+                size_t models = 0, meshes = 0, verts = 0, tris = 0, outside = 0, badIndex = 0, offNormal = 0;
+                std::string sample;
+                size_t failed = 0;
+                std::string firstFailure;
+                for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkMmb))
+                {
+                    ffxi::Model m;
+                    try
+                    {
+                        m = ffxi::parseMmb(chunk, *keys, *keys2);
+                    }
+                    catch (const std::exception& e)
+                    {
+                        // One malformed model should not stop the survey - the
+                        // point is to find out how many are wrong and why.
+                        ++failed;
+                        if (firstFailure.empty())
+                        {
+                            firstFailure = std::string(chunk.id, 4) + ": " + e.what();
+                        }
+                        continue;
+                    }
+                    ++models;
+                    meshes += m.meshes.size();
+                    verts += m.vertexCount();
+                    tris += m.triangleCount();
+                    if (sample.empty() && !m.meshes.empty())
+                    {
+                        sample = m.name + " tex=" + m.meshes.front().texture;
+                    }
+                    for (const ffxi::ModelMesh& mesh : m.meshes)
+                    {
+                        for (const ffxi::ModelVertex& v : mesh.vertices)
+                        {
+                            for (int a = 0; a < 3; ++a)
+                            {
+                                if (v.position[a] < m.boundsMin[a] - 0.5f || v.position[a] > m.boundsMax[a] + 0.5f)
+                                {
+                                    ++outside;
+                                    break;
+                                }
+                            }
+                            const float len = std::sqrt(v.normal[0] * v.normal[0] + v.normal[1] * v.normal[1] +
+                                                        v.normal[2] * v.normal[2]);
+                            if (std::fabs(len - 1.0f) > 0.05f)
+                            {
+                                ++offNormal;
+                            }
+                        }
+                        for (uint16_t index : mesh.indices)
+                        {
+                            if (index >= mesh.vertices.size())
+                            {
+                                ++badIndex;
+                            }
+                        }
+                    }
+                }
+                if (models)
+                {
+                    std::printf("models %zu  meshes %zu  vertices %zu  triangles %zu\n", models, meshes, verts, tris);
+                    std::printf("  e.g. %s\n", sample.c_str());
+                    std::printf("  vertices outside their own bounds: %zu   bad indices: %zu   non-unit normals: %zu\n",
+                                outside, badIndex, offNormal);
+                    if (failed)
+                    {
+                        std::printf("  models that failed to parse: %zu, first %s\n", failed, firstFailure.c_str());
+                    }
+                }
+            }
+        }
+
         for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkMzb))
         {
             ffxi::Zone zone = ffxi::parseMzb(chunk, *keys);

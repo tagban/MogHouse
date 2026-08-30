@@ -57,9 +57,57 @@ Names end in `_h`, `_m` or `_l` - high, medium and low detail. `_sal_w01_h`,
 gets to choose, and a naive one that draws all three will draw everything three
 times.
 
+## Mesh data
+
+After the header at offset 60 comes either a single block, or - when that field
+is non-zero - a table of offsets to several.
+
+**Block header**, 32 bytes: a mesh count, the block's own bounding box as six
+floats, and a face count.
+
+**Mesh header**, 20 bytes:
+
+| offset | type | field |
+| --- | --- | --- |
+| 0 | char[16] | texture name |
+| 16 | u16 | vertex count |
+| 18 | u16 | blending mode |
+
+**Vertices**, either 36 or 48 bytes each. **Byte 4 of the chunk selects which**:
+2 means the longer layout, which carries an extra displacement vector between
+position and normal.
+
+| | 36-byte | 48-byte |
+| --- | --- | --- |
+| position | 0 | 0 |
+| displacement | - | 12 |
+| normal | 12 | 24 |
+| colour (u32) | 24 | 36 |
+| uv | 28 | 40 |
+
+**Indices** follow: a `u16` count in a 4-byte field, then that many `u16`.
+
+They are a **triangle strip** unless the chunk id begins `MMB` or the chunk uses
+the 48-byte layout, in which case they are a plain list. Strips use degenerate
+triangles to jump between pieces, and every other triangle is wound the opposite
+way - both have to be handled or the model comes out with stray faces spanning
+it.
+
+Verified against East Sarutabaruta: 156 models, 167 meshes, 52,532 vertices,
+35,811 triangles, with **zero vertices outside the bounding box each model
+declares for itself** and zero indices out of range. That bounds check is the
+one that matters - a wrong stride scatters vertices outside it immediately. Two
+normals out of 52,532 are not unit length, which is likely genuinely degenerate
+geometry rather than a parsing fault.
+
 ## Still to work out
 
-- The mesh data itself: vertices, indices, and how they are grouped
-- Material and texture references, and how they reach the DXT3 chunks
+- **12 of 168 models in one zone fail to parse**, all named `hit_...`, with
+  offsets running past the end of the chunk. The name suggests hit boxes -
+  collision proxies rather than anything drawn - but that is a guess, and they
+  may simply use a variant layout.
+- Texture names look like two 8-byte halves rather than one 16-byte string:
+  `model   sar_kk2` reads as `model` and `sar_kk2` padded separately.
+- How a texture name reaches the DXT3 chunk that holds the image
 - What the group name at offset 8 selects
-- The fields at 32, 60 and 64
+- The fields at 32 and 64
