@@ -18,6 +18,17 @@
 
 namespace mh
 {
+/// One thing on the radar. Positions are world x and z; height is not shown,
+/// because a radar is a plan view and a dot above you is still a dot.
+struct RadarEntity
+{
+    float x{};
+    float z{};
+
+    /// 0 player, 1 npc, 2 enemy - matching MogHouse.Core's FfxiEntityKind.
+    int kind{};
+};
+
 /// Everything the viewer needs to start. Fields that were environment
 /// variables keep their meaning; an unset optional means the variable was
 /// absent, which for several of them is different from being empty.
@@ -56,6 +67,11 @@ struct ViewerOptions
     /// treated as a printf format and one file is written per source frame.
     std::optional<std::string> screenshotPath;
     int screenshotSequence{};
+
+    /// Entities to show on the radar before anything is connected, as
+    /// "x,z,kind;x,z,kind". The radar is most of the way to useless without
+    /// something on it, and this is how it gets checked without a server.
+    std::vector<RadarEntity> testEntities;
 
     /// Writes the baked top-down map out as a BMP, for looking at directly.
     std::optional<std::string> mapPath;

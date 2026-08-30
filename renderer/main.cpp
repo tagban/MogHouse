@@ -7,6 +7,7 @@
 
 #include "viewer.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <optional>
 #include <string>
@@ -51,6 +52,28 @@ ViewerOptions optionsFromEnvironment(int argc, char** argv)
     options.animation = fromEnvironment("MOGHOUSE_ANIMATION");
     options.screenshotPath = fromEnvironment("MOGHOUSE_SCREENSHOT");
     options.mapPath = fromEnvironment("MOGHOUSE_MAP");
+
+    if (const std::optional<std::string> entities = fromEnvironment("MOGHOUSE_ENTITIES"))
+    {
+        size_t at = 0;
+        while (at < entities->size())
+        {
+            const size_t end = entities->find(';', at);
+            const std::string one = entities->substr(at, end == std::string::npos ? std::string::npos : end - at);
+            float x = 0.0f;
+            float z = 0.0f;
+            int kind = 0;
+            if (std::sscanf(one.c_str(), "%f,%f,%d", &x, &z, &kind) == 3)
+            {
+                options.testEntities.push_back(mh::RadarEntity{x, z, kind});
+            }
+            if (end == std::string::npos)
+            {
+                break;
+            }
+            at = end + 1;
+        }
+    }
 
     if (const std::optional<std::string> frame = fromEnvironment("MOGHOUSE_FRAME"))
     {

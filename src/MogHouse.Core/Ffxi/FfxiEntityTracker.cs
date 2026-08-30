@@ -1,0 +1,120 @@
+namespace MogHouse.Core.Ffxi;
+
+/// <summary>One entity the client currently believes is nearby.</summary>
+/// <param name="LastSeen">
+/// When an update last mentioned it. This is what decides whether it is still
+/// there, so it matters that it comes from the caller rather than the clock -
+/// tests need to move time without waiting for it.
+/// </param>
+public sealed record FfxiTrackedEntity(
+    uint UniqueNo,
+    ushort ActIndex,
+    FfxiEntityKind Kind,
+    string? Name,
+    float X,
+    float Vertical,
+    float Depth,
+    byte? HealthPercent,
+    DateTimeOffset LastSeen);
+
+/// <summary>
+/// What is visible right now, assembled from the entity updates the server
+/// sends.
+///
+/// "Visible" is not a decision this makes - it is a decision the server has
+/// already made. A zone holds hundreds of NPCs and the server only sends
+/// updates for the ones in range, so the set of entities we have heard about
+/// *is* the set that can be seen. Nothing here filters by distance.
+/// </summary>
+public sealed class FfxiEntityTracker
+{
+    private readonly Dictionary<uint, FfxiTrackedEntity> _entities = [];
+    private readonly TimeSpan _forgetAfter;
+
+    /// <summary>
+    /// How long an entity survives without being mentioned again.
+    ///
+    /// Deliberately generous. The obvious value is a few seconds - the server
+    /// sends position updates about once a second - but that is only true of
+    /// things that move. A shopkeeper who has not shifted since zone-in may
+    /// never be mentioned a second time, and a short timeout would delete
+    /// every stationary NPC in the zone while they were still standing there.
+    ///
+    /// The real signal is the despawn the server sends, which is not parsed
+    /// yet. Until it is, this is a backstop rather than the mechanism.
+    /// </summary>
+    public static readonly TimeSpan DefaultForgetAfter = TimeSpan.FromMinutes(5);
+
+    public FfxiEntityTracker(TimeSpan? forgetAfter = null)
+    {
+        _forgetAfter = forgetAfter ?? DefaultForgetAfter;
+    }
+
+    /// <summary>
+    /// Our own character, so it can be left off the list of other people. The
+    /// login reply describes us to ourselves before it describes anyone else,
+    /// and a client that does not know this shows itself as another player.
+    /// </summary>
+    public uint SelfUniqueNo { get; set; }
+
+    public int Count => _entities.Count;
+
+    /// <summary>Folds one update into what we know.</summary>
+    public void Observe(FfxiEntityUpdate update, DateTimeOffset now)
+    {
+        if (update.UniqueNo == 0 || update.UniqueNo == SelfUniqueNo)
+        {
+            return;
+        }
+
+        _entities.TryGetValue(update.UniqueNo, out FfxiTrackedEntity? known);
+
+        // A short update carries no allegiance and no name. Taking its Kind
+        // would turn a known enemy into an NPC - green - the moment it moved,
+        // because a movement-only update has nothing past the position block.
+        FfxiEntityKind kind = update.Allegiance is null && known is not null ? known.Kind : update.Kind;
+
+        _entities[update.UniqueNo] = new FfxiTrackedEntity(
+            UniqueNo: update.UniqueNo,
+            ActIndex: update.ActIndex,
+            Kind: kind,
+            Name: update.Name ?? known?.Name,
+            X: update.X,
+            Vertical: update.Vertical,
+            Depth: update.Depth,
+            HealthPercent: update.HealthPercent ?? known?.HealthPercent,
+            LastSeen: now);
+    }
+
+    /// <summary>
+    /// Everything still believed to be nearby, forgetting anything that has
+    /// gone quiet for too long.
+    /// </summary>
+    public IReadOnlyList<FfxiTrackedEntity> Visible(DateTimeOffset now)
+    {
+        if (_forgetAfter > TimeSpan.Zero)
+        {
+            List<uint> stale = [];
+            foreach ((uint id, FfxiTrackedEntity entity) in _entities)
+            {
+                if (now - entity.LastSeen > _forgetAfter)
+                {
+                    stale.Add(id);
+                }
+            }
+            foreach (uint id in stale)
+            {
+                _entities.Remove(id);
+            }
+        }
+
+        return [.. _entities.Values];
+    }
+
+    /// <summary>
+    /// Forgets everything. Zoning invalidates the whole list at once - target
+    /// indices are reused per zone, so carrying one across would attach an old
+    /// entity's name and kind to a new one at the same index.
+    /// </summary>
+    public void Clear() => _entities.Clear();
+}

@@ -23,6 +23,7 @@
 #include "viewer.h"
 #include "coverage.h"
 #include "linalg.h"
+#include "radar_shader.h"
 #include "scene.h"
 #include "surface.h"
 #include "sky_shader.h"
@@ -60,6 +61,16 @@ struct Uniforms
     float fogColour[4];
     float fogRange[4];
     float eye[4];
+};
+
+/// Matches RadarUniforms in radar_shader.h.
+struct RadarUniforms
+{
+    float placement[4];
+    float mapExtent[4];
+    float viewer[4];
+    float counts[4];
+    float entities[mh::kRadarMaxEntities][4];
 };
 
 struct SkyUniforms
@@ -966,6 +977,114 @@ int mh::runViewer(const ViewerOptions& options)
         }
     }
 
+    // --- the radar -----------------------------------------------------------
+    wgpu::Texture maskTexture;
+    wgpu::Buffer radarUniformBuffer;
+    wgpu::RenderPipeline radarPipeline;
+    wgpu::BindGroup radarBindGroup;
+    float mapCentreX = 0.0f;
+    float mapCentreZ = 0.0f;
+    float mapHalf = 1.0f;
+
+    if (mapTexture && !collision.empty())
+    {
+        constexpr uint32_t kMaskSize = 1024;
+        const mh::Vec3 middle = zone->centre();
+        const float half = std::max(zone->boundsMax.x - zone->boundsMin.x, zone->boundsMax.z - zone->boundsMin.z) * 0.5f;
+        mapCentreX = middle.x;
+        mapCentreZ = middle.z;
+        mapHalf = half;
+
+        const std::vector<uint8_t> mask = collision.rasteriseWalkable(kMaskSize, middle, half);
+
+        wgpu::TextureDescriptor maskDescriptor{.usage = wgpu::TextureUsage::TextureBinding |
+                                                        wgpu::TextureUsage::CopyDst,
+                                               .dimension = wgpu::TextureDimension::e2D,
+                                               .size = {kMaskSize, kMaskSize, 1},
+                                               .format = wgpu::TextureFormat::R8Unorm,
+                                               .mipLevelCount = 1,
+                                               .sampleCount = 1};
+        maskTexture = device.CreateTexture(&maskDescriptor);
+
+        wgpu::TexelCopyTextureInfo maskDestination{.texture = maskTexture};
+        wgpu::TexelCopyBufferLayout maskLayout{.bytesPerRow = kMaskSize, .rowsPerImage = kMaskSize};
+        const wgpu::Extent3D maskExtent{kMaskSize, kMaskSize, 1};
+        queue.WriteTexture(&maskDestination, mask.data(), mask.size(), &maskLayout, &maskExtent);
+
+        wgpu::BufferDescriptor radarBufferDescriptor{.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
+                                                     .size = sizeof(RadarUniforms)};
+        radarUniformBuffer = device.CreateBuffer(&radarBufferDescriptor);
+
+        wgpu::ShaderSourceWGSL radarWgsl;
+        radarWgsl.code = mh::kRadarShader;
+        wgpu::ShaderModuleDescriptor radarModuleDescriptor{.nextInChain = &radarWgsl};
+        wgpu::ShaderModule radarModule = device.CreateShaderModule(&radarModuleDescriptor);
+
+        wgpu::BindGroupLayoutEntry radarLayoutEntries[4] = {};
+        radarLayoutEntries[0].binding = 0;
+        radarLayoutEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+        radarLayoutEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
+        radarLayoutEntries[1].binding = 1;
+        radarLayoutEntries[1].visibility = wgpu::ShaderStage::Fragment;
+        radarLayoutEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
+        radarLayoutEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+        radarLayoutEntries[2].binding = 2;
+        radarLayoutEntries[2].visibility = wgpu::ShaderStage::Fragment;
+        radarLayoutEntries[2].texture.sampleType = wgpu::TextureSampleType::Float;
+        radarLayoutEntries[2].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+        radarLayoutEntries[3].binding = 3;
+        radarLayoutEntries[3].visibility = wgpu::ShaderStage::Fragment;
+        radarLayoutEntries[3].sampler.type = wgpu::SamplerBindingType::Filtering;
+
+        wgpu::BindGroupLayoutDescriptor radarLayoutDescriptor{.entryCount = 4, .entries = radarLayoutEntries};
+        wgpu::BindGroupLayout radarBindGroupLayout = device.CreateBindGroupLayout(&radarLayoutDescriptor);
+        wgpu::PipelineLayoutDescriptor radarPipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
+                                                                     .bindGroupLayouts = &radarBindGroupLayout};
+        wgpu::PipelineLayout radarPipelineLayout = device.CreatePipelineLayout(&radarPipelineLayoutDescriptor);
+
+        wgpu::BlendState radarBlend{
+            .color = {.operation = wgpu::BlendOperation::Add,
+                      .srcFactor = wgpu::BlendFactor::SrcAlpha,
+                      .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
+            .alpha = {.operation = wgpu::BlendOperation::Add,
+                      .srcFactor = wgpu::BlendFactor::One,
+                      .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha}};
+        wgpu::ColorTargetState radarTarget{.format = surfaceFormat, .blend = &radarBlend};
+        wgpu::FragmentState radarFragment{
+            .module = radarModule, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &radarTarget};
+
+        // Drawn over everything, so the depth test always passes and nothing is
+        // written back.
+        wgpu::DepthStencilState radarDepth{.format = kDepthFormat,
+                                           .depthWriteEnabled = false,
+                                           .depthCompare = wgpu::CompareFunction::Always};
+
+        wgpu::RenderPipelineDescriptor radarPipelineDescriptor{
+            .layout = radarPipelineLayout,
+            .vertex = {.module = radarModule, .entryPoint = "vertexMain"},
+            .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
+            .depthStencil = &radarDepth,
+            .fragment = &radarFragment};
+        radarPipeline = device.CreateRenderPipeline(&radarPipelineDescriptor);
+
+        wgpu::BindGroupEntry radarEntries[4] = {};
+        radarEntries[0].binding = 0;
+        radarEntries[0].buffer = radarUniformBuffer;
+        radarEntries[0].size = sizeof(RadarUniforms);
+        radarEntries[1].binding = 1;
+        radarEntries[1].textureView = mapTexture.CreateView();
+        radarEntries[2].binding = 2;
+        radarEntries[2].textureView = maskTexture.CreateView();
+        radarEntries[3].binding = 3;
+        radarEntries[3].sampler = sampler;
+
+        wgpu::BindGroupDescriptor radarBindGroupDescriptor{
+            .layout = radarBindGroupLayout, .entryCount = 4, .entries = radarEntries};
+        radarBindGroup = device.CreateBindGroup(&radarBindGroupDescriptor);
+
+        std::printf("radar: ready, %zu entities to show\n", options.testEntities.size());
+    }
+
     // `characterPath` is a semicolon-separated list of DATs to assemble
     // one character from, and MOGHOUSE_CHARACTER_AT is where to stand it.
     std::optional<LoadedCharacter> character;
@@ -1235,6 +1354,12 @@ int mh::runViewer(const ViewerOptions& options)
 
     // `frame` pins the animation clock so a screenshot of a moving
     // character lands on the same pose every time.
+    // What the radar shows. Fed from options until something is connected,
+      // and replaced wholesale rather than merged - the list is already the
+      // answer to "what can be seen right now".
+    std::vector<mh::RadarEntity> radarEntities = options.testEntities;
+    float radarRange = 120.0f;
+
     const float pinnedFrame = options.frame.value_or(-1.0f);
     const float shaderMode = options.shaderMode;
     const int cutoutMode = options.cutoutMode;
@@ -1543,6 +1668,42 @@ int mh::runViewer(const ViewerOptions& options)
                     pass.SetBindGroup(0, characterBindGroups[i]);
                     pass.DrawIndexed(batch.indexCount, 1, batch.indexOffset, 0, 0);
                 }
+            }
+
+            if (radarPipeline && radarBindGroup)
+            {
+                RadarUniforms radar{};
+                // Top right, a fifth of the shorter side across.
+                radar.placement[0] = 0.78f;
+                radar.placement[1] = 0.70f;
+                radar.placement[2] = 0.26f;
+                radar.placement[3] = static_cast<float>(width) / static_cast<float>(height);
+
+                radar.mapExtent[0] = mapCentreX;
+                radar.mapExtent[1] = mapCentreZ;
+                radar.mapExtent[2] = mapHalf;
+
+                // The character if there is one, otherwise wherever the camera
+                // is - a radar centred on nothing is worse than no radar.
+                const mh::Vec3 eyePosition = camera.eye();
+                radar.viewer[0] = character ? characterAt.x : eyePosition.x;
+                radar.viewer[1] = character ? characterAt.z : eyePosition.z;
+                radar.viewer[2] = character ? characterFacing : camera.yaw;
+                radar.viewer[3] = radarRange;
+
+                const size_t shown = std::min(radarEntities.size(), static_cast<size_t>(mh::kRadarMaxEntities));
+                radar.counts[0] = static_cast<float>(shown);
+                for (size_t i = 0; i < shown; ++i)
+                {
+                    radar.entities[i][0] = radarEntities[i].x;
+                    radar.entities[i][1] = radarEntities[i].z;
+                    radar.entities[i][2] = static_cast<float>(radarEntities[i].kind);
+                }
+                queue.WriteBuffer(radarUniformBuffer, 0, &radar, sizeof(radar));
+
+                pass.SetPipeline(radarPipeline);
+                pass.SetBindGroup(0, radarBindGroup);
+                pass.Draw(3);
             }
 
             if (waterIndexCount && waterPipeline)
