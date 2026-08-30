@@ -112,3 +112,7 @@ skinning and the mirroring are all correct together.
 - The item table, which is what maps an item to a model id.
 - Blending between animations, so a walk does not snap into an idle.
 - Standing on the ground: nothing yet asks the collision mesh how high it is.
+- A blended pass. Some headgear carries a dark eye slot that reads as a flat
+  black bar. Both cutout modes render it identically and no texture is missing,
+  so it is genuinely opaque in the sheet - but the retail client may blend it,
+  which characters currently have no path for.

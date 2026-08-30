@@ -1003,7 +1003,15 @@ int main(int argc, char** argv)
     // there is no way to check what the renderer actually produced except by
     // looking at the window, which rules out checking anything unattended.
     const char* screenshotPath = std::getenv("PORTJEUNO_SCREENSHOT");
-    int framesBeforeShot = 5; // let the first frames settle
+
+    // PORTJEUNO_SCREENSHOT_SEQUENCE captures a whole animation in one run,
+    // one file per source frame, with the path taken as a printf format. The
+    // alternative is relaunching for each frame, which for a walk cycle is
+    // eighteen launches of a program that spends most of its time loading a
+    // zone.
+    const char* sequenceEnv = std::getenv("PORTJEUNO_SCREENSHOT_SEQUENCE");
+    const int sequenceCount = sequenceEnv ? std::atoi(sequenceEnv) : 0;
+    int shotIndex = -5; // let the first frames settle
     wgpu::Buffer readbackBuffer;
 
     // PORTJEUNO_ANIMATION names one of the character's own animations - idl0
@@ -1132,8 +1140,11 @@ int main(int argc, char** argv)
         const float lift = (held[SDL_SCANCODE_SPACE] ? speed : 0.0f) - (held[SDL_SCANCODE_LCTRL] ? speed : 0.0f);
         camera.walk(ahead, side, lift);
 
+        // A capture walks the animation a frame at a time; otherwise the clock
+        // is either pinned or real.
         const float animationSeconds =
-            pinnedFrame >= 0.0f && playing
+            sequenceCount > 0 && playing ? static_cast<float>(std::max(shotIndex, 0)) * playing->frameSeconds()
+            : pinnedFrame >= 0.0f && playing
                 ? pinnedFrame * playing->frameSeconds()
                 : static_cast<float>(SDL_GetTicksNS() / 1000000ull) / 1000.0f;
 
@@ -1302,7 +1313,19 @@ int main(int argc, char** argv)
         // A texture copy has to start on a 256-byte row, so the readback is
         // padded and the padding is skipped when the rows are written out.
         const uint32_t bytesPerRow = (width * 4 + 255) / 256 * 256;
-        const bool takingShot = screenshotPath && --framesBeforeShot == 0;
+        const bool takingShot = screenshotPath && ++shotIndex >= 0 && (sequenceCount == 0 || shotIndex < sequenceCount);
+        char shotPath[1024] = {};
+        if (takingShot)
+        {
+            if (sequenceCount > 0)
+            {
+                std::snprintf(shotPath, sizeof(shotPath), screenshotPath, shotIndex);
+            }
+            else
+            {
+                std::snprintf(shotPath, sizeof(shotPath), "%s", screenshotPath);
+            }
+        }
         if (takingShot)
         {
             wgpu::BufferDescriptor readbackDescriptor{.usage = wgpu::BufferUsage::CopyDst |
@@ -1334,13 +1357,13 @@ int main(int argc, char** argv)
             if (mapped)
             {
                 const auto* pixels = static_cast<const uint8_t*>(readbackBuffer.GetConstMappedRange());
-                if (pixels && writeBmp(screenshotPath, pixels, width, height, bytesPerRow))
+                if (pixels && writeBmp(shotPath, pixels, width, height, bytesPerRow))
                 {
-                    std::printf("wrote %s (%ux%u)\n", screenshotPath, width, height);
+                    std::printf("wrote %s (%ux%u)\n", shotPath, width, height);
                 }
                 else
                 {
-                    std::printf("could not write %s\n", screenshotPath);
+                    std::printf("could not write %s\n", shotPath);
                 }
                 readbackBuffer.Unmap();
             }
@@ -1348,7 +1371,11 @@ int main(int argc, char** argv)
             {
                 std::printf("could not read the frame back\n");
             }
-            break;
+
+            if (sequenceCount == 0 || shotIndex + 1 >= sequenceCount)
+            {
+                break;
+            }
         }
     }
 
