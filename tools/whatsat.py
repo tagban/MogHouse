@@ -29,6 +29,8 @@ def parse_model(buf):
 
     Mirrors renderer/ffxi/mmb.cpp. Returns (meshes, textures) or raises.
     """
+    if len(buf) <= 64:
+        return 0, set()  # header only - a hit box, empty rather than broken
     layout = buf[4]
     stride = 48 if layout == 2 else 36
     pieces = struct.unpack_from("<i", buf, 32)[0]
@@ -66,6 +68,8 @@ def parse_model(buf):
             if offset + indices * 2 > len(buf):
                 raise ValueError("index data past end")
             offset += indices * 2
+            # Index data is padded so the next mesh header is 4-byte aligned.
+            offset = (offset + 3) & ~3
             meshes += 1
     return meshes, textures
 
