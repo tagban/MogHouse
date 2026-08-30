@@ -839,11 +839,16 @@ sealed class LiveRadar : IDisposable
             KeyTablePath = keys,
             KeyTable2Path = keys2,
             Look = Environment.GetEnvironmentVariable("MOGHOUSE_LOOK") ?? "1,0,0,1,1,1,1",
-            // The renderer works in Y-up; the protocol reports FFXI's Y-down
-            // vertical, so it is negated on the way across. The horizontal axes
-            // need no conversion, which the radar dots already demonstrated.
+            // The renderer works in Y-up. Turning FFXI's Y-down frame the
+            // right way up is a half turn about X, so the depth axis flips
+            // along with the vertical - see renderer/zonemesh.cpp.
+            //
+            // Negating the vertical alone looked right for a long time, because
+            // the world was built the same wrong way and the two agreed with
+            // each other. The radar dots landing where they should proved only
+            // that; a mirror is self-consistent.
             CharacterAt = string.Create(System.Globalization.CultureInfo.InvariantCulture,
-                $"{x},{-vertical},{depth}"),
+                $"{x},{-vertical},{-depth}"),
 
             // Set MOGHOUSE_SCREENSHOT to check the live radar without watching
             // it. The wait is in frames, and it has to outlast the first few
@@ -861,9 +866,9 @@ sealed class LiveRadar : IDisposable
 
     /// <summary>
     /// Where the renderer has walked the character, in the protocol's own
-    /// terms: FFXI's vertical points down, so it is the negation of the
-    /// renderer's, and direction is a byte over the full circle rather than
-    /// radians.
+    /// terms: the inverse of the half turn about X that the world is built
+    /// with, so both the vertical and the depth axis flip back, and direction
+    /// is a byte over the full circle rather than radians.
     /// </summary>
     public (float X, float Vertical, float Depth, sbyte Direction)? Position()
     {
@@ -874,7 +879,7 @@ sealed class LiveRadar : IDisposable
 
         double turns = heading / (Math.PI * 2);
         turns -= Math.Floor(turns);
-        return (x, -y, z, (sbyte)(byte)Math.Round(turns * 256) );
+        return (x, -y, -z, (sbyte)(byte)Math.Round(turns * 256));
     }
 
     /// <summary>Pushes what the tracker currently believes is nearby.</summary>
@@ -892,7 +897,10 @@ sealed class LiveRadar : IDisposable
             entities[i] = new NativeRadarEntity
             {
                 X = visible[i].X,
-                Z = visible[i].Depth,
+                // Depth flips into the renderer's frame, the same as the
+                // character's own position - anything else puts the dots on
+                // the wrong side of the map they are drawn over.
+                Z = -visible[i].Depth,
                 Kind = (int)visible[i].Kind,
             };
         }

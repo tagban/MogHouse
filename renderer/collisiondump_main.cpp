@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
+#include <string>
 
 int main(int argc, char** argv)
 {
@@ -47,6 +48,36 @@ int main(int argc, char** argv)
         const mh::Vec3 lo = collision.boundsMin();
         const mh::Vec3 hi = collision.boundsMax();
         std::printf("  bounds x %.1f..%.1f  y %.1f..%.1f  z %.1f..%.1f\n", lo.x, hi.x, lo.y, hi.y, lo.z, hi.z);
+
+        // Batch ground probes, read from stdin as "x z" a line.
+        //
+        // The point is to test our geometry against something that is not our
+        // geometry: the server's own NPC coordinates. Every check up to now
+        // compared our map to our collision, which agree with each other
+        // whatever frame they are both wrong in.
+        if (argc >= 3 && std::string{argv[2]} == "--probe")
+        {
+            // Each line is "x z y": where something stands, and how high it
+            // claims to be. The floor wanted is the one nearest that height
+            // rather than the topmost - half a city is indoors, and asking for
+            // the highest surface answers with the roof over its head.
+            float px = 0.0f;
+            float pz = 0.0f;
+            float py = 0.0f;
+            while (std::scanf("%f %f %f", &px, &pz, &py) == 3)
+            {
+                const std::optional<float> hit = collision.closestGroundAt(px, pz, py);
+                if (hit)
+                {
+                    std::printf("%.3f %.3f %.3f\n", px, pz, *hit);
+                }
+                else
+                {
+                    std::printf("%.3f %.3f none\n", px, pz);
+                }
+            }
+            continue;
+        }
 
         // Walk from a point in a straight line, the way the renderer does, and
         // report where the ground goes and where a wall stops it.

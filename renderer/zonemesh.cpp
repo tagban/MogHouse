@@ -58,8 +58,14 @@ Mat4 placementTransform(const ffxi::Placement& placement)
     return m;
 }
 
-/// Applies a transform and flips Y. FFXI's Y axis points down; everything past
-/// this point can assume Y is up.
+/// Applies a transform and turns FFXI's frame the right way up.
+///
+/// FFXI's Y axis points down. Turning that into a Y-up frame is a half turn
+/// about X, which negates the vertical *and* the depth axis. Negating only the
+/// vertical is a reflection: it mirrors the whole world, which reads as
+/// completely plausible - a mirrored city is still a city - and is only
+/// visible against an outside reference. In Bastok Markets it put the water on
+/// the wrong side of the auction house.
 Vec3 toWorld(const float* m, float x, float y, float z, bool translate)
 {
     const float tx = translate ? m[12] : 0.0f;
@@ -67,7 +73,7 @@ Vec3 toWorld(const float* m, float x, float y, float z, bool translate)
     const float tz = translate ? m[14] : 0.0f;
     return Vec3{m[0] * x + m[4] * y + m[8] * z + tx,
                 -(m[1] * x + m[5] * y + m[9] * z + ty),
-                m[2] * x + m[6] * y + m[10] * z + tz};
+                -(m[2] * x + m[6] * y + m[10] * z + tz)};
 }
 } // namespace
 

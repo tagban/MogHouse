@@ -8,13 +8,13 @@ namespace mh
 {
 namespace
 {
-/// Applies an instance transform and flips Y, matching buildZoneMesh exactly.
-/// FFXI's Y axis points down; everything past this point assumes Y is up.
+/// Applies an instance transform and turns FFXI's frame the right way up,
+/// matching buildZoneMesh exactly - see there for why both axes flip.
 Vec3 toWorld(const float* m, float x, float y, float z)
 {
     return Vec3{m[0] * x + m[4] * y + m[8] * z + m[12],
                 -(m[1] * x + m[5] * y + m[9] * z + m[13]),
-                m[2] * x + m[6] * y + m[10] * z + m[14]};
+                -(m[2] * x + m[6] * y + m[10] * z + m[14])};
 }
 
 /// Steeper than this is a wall rather than a floor. About 50 degrees, which

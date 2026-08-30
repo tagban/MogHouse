@@ -176,13 +176,15 @@ template <typename Fn> void forEachCorner(const std::vector<ffxi::SkinnedModel>&
 Vertex toVertex(const Skinned& s, const ffxi::SkinCorner& corner)
 {
     Vertex vertex{};
-    // FFXI points Y down, and the zone is flipped to match, so a character
-    // built without this stands on its head in an otherwise correct world.
+    // The same half turn about X the zone gets - see zonemesh.cpp. Without it
+    // a character stands on its head; with only the vertical negated it is
+    // mirrored, which on a roughly symmetric body is invisible until it is
+    // wearing something that is not.
     vertex.position[0] = s.position.x;
     vertex.position[1] = -s.position.y;
-    vertex.position[2] = s.position.z;
+    vertex.position[2] = -s.position.z;
 
-    const Vec3 unit = normalise(Vec3{s.normal.x, -s.normal.y, s.normal.z});
+    const Vec3 unit = normalise(Vec3{s.normal.x, -s.normal.y, -s.normal.z});
     vertex.normal[0] = unit.x;
     vertex.normal[1] = unit.y;
     vertex.normal[2] = unit.z;
