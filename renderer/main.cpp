@@ -149,6 +149,10 @@ std::optional<pj::ZoneMesh> loadZone(const char* datPath, const char* keyPath, c
                 const pj::Coverage c = pj::measureCoverage(collision);
                 std::printf("  collision footprint: %.1f%% any, %.1f%% horizontal (%zu triangles)\n",
                             c.anyGeometry * 100.0f, c.groundLike * 100.0f, collision.indices.size() / 3);
+                if (std::getenv("PORTJEUNO_COVERAGE_MAP"))
+                {
+                    pj::printCoverageDiff(collision, mesh);
+                }
             }
         }
 

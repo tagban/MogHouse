@@ -110,4 +110,66 @@ inline Coverage measureCoverage(const ZoneMesh& mesh, uint32_t resolution = 256)
     result.groundLike = static_cast<float>(groundCount) / static_cast<float>(result.cells);
     return result;
 }
+
+/// Prints where one mesh covers ground the other does not.
+///
+/// The question is whether the difference is a coherent region - a missing
+/// terrain layer - or scattered cells, which would mean the two simply
+/// tessellate differently. A picture answers that; a percentage does not.
+inline void printCoverageDiff(const ZoneMesh& reference, const ZoneMesh& subject, uint32_t resolution = 64)
+{
+    auto rasterise = [&](const ZoneMesh& mesh, const Vec3& lo, const Vec3& hi)
+    {
+        std::vector<uint8_t> grid(static_cast<size_t>(resolution) * resolution, 0);
+        const float spanX = hi.x - lo.x;
+        const float spanZ = hi.z - lo.z;
+        if (spanX <= 0.0f || spanZ <= 0.0f)
+        {
+            return grid;
+        }
+        for (size_t i = 0; i + 2 < mesh.indices.size(); i += 3)
+        {
+            for (int corner = 0; corner < 3; ++corner)
+            {
+                const Vertex& v = mesh.vertices[mesh.indices[i + corner]];
+                const int x = static_cast<int>((v.position[0] - lo.x) / spanX * static_cast<float>(resolution));
+                const int z = static_cast<int>((v.position[2] - lo.z) / spanZ * static_cast<float>(resolution));
+                if (x >= 0 && z >= 0 && x < static_cast<int>(resolution) && z < static_cast<int>(resolution))
+                {
+                    grid[static_cast<size_t>(z) * resolution + static_cast<size_t>(x)] = 1;
+                }
+            }
+        }
+        return grid;
+    };
+
+    // Both rasterised over the same extent, or the maps do not line up.
+    const Vec3 lo{std::min(reference.boundsMin.x, subject.boundsMin.x), 0.0f,
+                  std::min(reference.boundsMin.z, subject.boundsMin.z)};
+    const Vec3 hi{std::max(reference.boundsMax.x, subject.boundsMax.x), 0.0f,
+                  std::max(reference.boundsMax.z, subject.boundsMax.z)};
+
+    const std::vector<uint8_t> a = rasterise(reference, lo, hi);
+    const std::vector<uint8_t> b = rasterise(subject, lo, hi);
+
+    uint32_t both = 0, onlyReference = 0, onlySubject = 0;
+    std::printf("  map: # both, R collision only, M models only, . neither\n");
+    for (uint32_t z = 0; z < resolution; ++z)
+    {
+        std::printf("  ");
+        for (uint32_t x = 0; x < resolution; ++x)
+        {
+            const size_t cell = static_cast<size_t>(z) * resolution + x;
+            const bool inA = a[cell] != 0;
+            const bool inB = b[cell] != 0;
+            char c = '.';
+            if (inA && inB) { c = '#'; ++both; }
+            else if (inA) { c = 'R'; ++onlyReference; }
+            else if (inB) { c = 'M'; ++onlySubject; }
+            std::printf("%c", c);
+        }
+        std::printf("\n");
+    }
+    std::printf("  both %u, collision only %u, models only %u\n", both, onlyReference, onlySubject);
+}
 } // namespace pj
