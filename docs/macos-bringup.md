@@ -278,11 +278,23 @@ parsers actually need; the compression tables are a separate problem.
 
 Two things noticed in passing, neither acted on:
 
-- **`PortJeuno.App` is not in `PortJeuno.slnx`.** Only Console, Core and
-  Core.Tests are listed, so a solution-level build skips the app. It targets
-  plain `net10.0` and uses Avalonia 12.1.1, which is cross-platform - its
-  `WinExe` output type only suppresses a console window. It is a strong
-  candidate to run on macOS and has not been tried.
+- **`PortJeuno.App` runs on macOS - but is not in `PortJeuno.slnx`.** Only
+  Console, Core and Core.Tests are listed, so a solution-level build skips the
+  app entirely. Built directly, it succeeds in 1.4s with 0 errors (one
+  `AVLN5001` warning: `TextBox.Watermark` is obsolete, use `PlaceholderText`,
+  at `Views/LoginView.axaml:32`). Launched, it renders the login view correctly
+  in a native macOS window - saved-servers dropdown, host/port, credential
+  fields, buttons - with no crash and nothing on stderr. Avalonia 12.1.1 is
+  genuinely cross-platform here; the `WinExe` output type only suppresses a
+  console window. **It should be added to the solution.**
+
+  Two things noticed while it was running. Its own status bar reports
+  "Compression tables not found - set PORTJEUNO_FFXI_RES...", which is the app
+  surfacing the same gap the 12 skipped tests do - good behaviour, worth
+  keeping. And the macOS menu bar shows "Avalonia Application" rather than
+  "PortJeuno", because the app is not packaged as a `.app` bundle with an
+  `Info.plist`. Cosmetic now, but it needs solving before anyone ships a Mac
+  build.
 - **`native/portjeuno_interop` has still never been compiled.** Its README says
   the authoring machine had no CMake or Ninja. This machine now has both, so
   that claim can finally be tested. `Core/Interop/NativeEngine.cs` declares
