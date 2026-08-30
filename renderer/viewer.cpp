@@ -1251,26 +1251,40 @@ int mh::runViewer(const ViewerOptions& options)
     // wants none at all. Sharing one value is what let a step off a ledge
     // teleport into the water sixty units away, which is not falling and is
     // not blocking either.
+    // Where the character is drawn. Everything that moves them has to call
+    // this - the position and the heading only reach the GPU through here, so
+    // anything that updates characterAt and forgets leaves the character
+    // standing still while the camera follows the place they should be.
+    auto writeCharacterInstance = [&]() {
+        if (!characterInstanceBuffer)
+        {
+            return;
+        }
+        // characterFacing is a compass heading: 0 is +z, and the direction is
+        // (sin, cos) - the same convention camera.yaw and the radar notch use.
+        // The model faces +x when unrotated, so the rotation that points it
+        // along the heading is a quarter turn less.
+        const float turn = 1.57079633f - characterFacing;
+        const float c = std::cos(turn);
+        const float sn = std::sin(turn);
+        const float instance[16] = {c,  0, -sn, 0, 0, 1, 0, 0, sn, 0, c, 0,
+                                    characterAt.x, characterAt.y, characterAt.z, 1};
+        queue.WriteBuffer(characterInstanceBuffer, 0, instance, sizeof(instance));
+    };
+
     auto placeCharacter = [&](const mh::Vec3& where, float search) {
-        characterAt = where;
+        // Copied, not referenced. Every caller so far happened to pass
+        // characterAt itself, which made the aliasing invisible; the one that
+        // does not - dropping the character at the camera - would have written
+        // the unsnapped height.
+        const mh::Vec3 target = where;
+        characterAt = target;
         if (const std::optional<mh::Vec3> ground =
-                collision.nearestGround(where.x, where.z, where.y + 1.0f, search))
+                collision.nearestGround(target.x, target.z, target.y + 1.0f, search))
         {
             characterAt = *ground;
         }
-        if (characterInstanceBuffer)
-        {
-            // characterFacing is a compass heading: 0 is +z, and the
-            // direction is (sin, cos) - the same convention camera.yaw and the
-            // radar notch use. The model faces +x when unrotated, so the
-            // rotation that points it along the heading is a quarter turn less.
-            const float turn = 1.57079633f - characterFacing;
-            const float c = std::cos(turn);
-            const float sn = std::sin(turn);
-            const float instance[16] = {c,       0, -sn,      0, 0,       1, 0,       0,
-                                        sn,      0, c,        0, where.x, where.y, where.z, 1};
-            queue.WriteBuffer(characterInstanceBuffer, 0, instance, sizeof(instance));
-        }
+        writeCharacterInstance();
     };
     placeCharacter(characterAt, 60.0f);
     if (character)
@@ -1512,6 +1526,7 @@ int mh::runViewer(const ViewerOptions& options)
                 // direction from the movement delta means sliding along a wall
                 // turns you to face it.
                 characterFacing = camera.yaw;
+                writeCharacterInstance();
             }
 
             // The camera sits behind and above the character, at head height.
