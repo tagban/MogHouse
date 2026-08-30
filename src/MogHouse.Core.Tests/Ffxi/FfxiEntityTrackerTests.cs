@@ -7,8 +7,9 @@ public class FfxiEntityTrackerTests
 {
     private static readonly DateTimeOffset Now = new(2026, 8, 30, 12, 0, 0, TimeSpan.Zero);
 
-    /// <summary>An 0x00E long enough to carry the HP block, so allegiance is present.</summary>
-    private static FfxiEntityUpdate Npc(uint uniqueNo, byte allegiance, float x = 0, float z = 0)
+    /// <summary>An 0x00E long enough to carry the HP block.</summary>
+    private static FfxiEntityUpdate Npc(uint uniqueNo, byte allegiance, float x = 0, float z = 0,
+                                        bool livingMob = false)
     {
         byte[] packet = new byte[0x48];
         BinaryPrimitives.WriteUInt16LittleEndian(packet, (ushort)(0x00E | (packet.Length / 4) << 9));
@@ -17,6 +18,7 @@ public class FfxiEntityTrackerTests
         BinaryPrimitives.WriteSingleLittleEndian(packet.AsSpan(20), z);
         packet[0x1E] = 100;
         packet[0x29] = allegiance;
+        packet[0x25] = livingMob ? FfxiEntityUpdate.MobAliveFlag : (byte)0;
         return FfxiEntityUpdate.TryParse(packet)!;
     }
 
@@ -35,7 +37,7 @@ public class FfxiEntityTrackerTests
     public void AnObservedEntityBecomesVisible()
     {
         FfxiEntityTracker tracker = new();
-        tracker.Observe(Npc(uniqueNo: 100, allegiance: 0, x: 12, z: -4), Now);
+        tracker.Observe(Npc(uniqueNo: 100, allegiance: 0, x: 12, z: -4, livingMob: true), Now);
 
         FfxiTrackedEntity entity = Assert.Single(tracker.Visible(Now));
         Assert.Equal(100u, entity.UniqueNo);
@@ -64,7 +66,7 @@ public class FfxiEntityTrackerTests
     public void AMovementUpdateDoesNotTurnAnEnemyIntoAnNpc()
     {
         FfxiEntityTracker tracker = new();
-        tracker.Observe(Npc(uniqueNo: 100, allegiance: 0), Now);
+        tracker.Observe(Npc(uniqueNo: 100, allegiance: 0, livingMob: true), Now);
         Assert.Equal(FfxiEntityKind.Enemy, Assert.Single(tracker.Visible(Now)).Kind);
 
         tracker.Observe(ShortNpc(uniqueNo: 100, x: 5, z: 5), Now.AddSeconds(1));
@@ -72,6 +74,20 @@ public class FfxiEntityTrackerTests
         FfxiTrackedEntity entity = Assert.Single(tracker.Visible(Now.AddSeconds(1)));
         Assert.Equal(FfxiEntityKind.Enemy, entity.Kind);
         Assert.Equal(5, entity.X);
+    }
+
+    /// <summary>
+    /// The mob flag literally means "a mob that is alive", so killing one
+    /// clears it and the next full update looks exactly like an NPC.
+    /// </summary>
+    [Fact]
+    public void KillingAMobDoesNotTurnItIntoAnNpc()
+    {
+        FfxiEntityTracker tracker = new();
+        tracker.Observe(Npc(uniqueNo: 100, allegiance: 0, livingMob: true), Now);
+        tracker.Observe(Npc(uniqueNo: 100, allegiance: 0, livingMob: false), Now.AddSeconds(5));
+
+        Assert.Equal(FfxiEntityKind.Enemy, Assert.Single(tracker.Visible(Now.AddSeconds(5))).Kind);
     }
 
     [Fact]
@@ -87,7 +103,7 @@ public class FfxiEntityTrackerTests
     public void SilenceEventuallyForgetsAnEntity()
     {
         FfxiEntityTracker tracker = new(TimeSpan.FromSeconds(30));
-        tracker.Observe(Npc(uniqueNo: 100, allegiance: 0), Now);
+        tracker.Observe(Npc(uniqueNo: 100, allegiance: 0, livingMob: true), Now);
 
         Assert.Single(tracker.Visible(Now.AddSeconds(29)));
         Assert.Empty(tracker.Visible(Now.AddSeconds(31)));

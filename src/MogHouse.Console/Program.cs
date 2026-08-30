@@ -405,6 +405,19 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                     bool trace = flags.ContainsKey("zone-trace");
                     var seen = new Dictionary<ushort, int>();
                     var entitiesSeen = new Dictionary<uint, (ushort PacketId, bool IsSelf, int Count)>();
+
+                    // The same updates, through the tracker that will feed the
+                    // radar - so what the radar would show is what gets
+                    // reported here, rather than a second count that could
+                    // agree by accident.
+                    var tracker = new FfxiEntityTracker { SelfUniqueNo = handoff.ServerId };
+
+                    // The first sighting of each entity, raw. Which byte says
+                    // "this is a shopkeeper, not a crab" is not derivable from
+                    // the struct - bitfield blocks and a misaligned uint8 sit
+                    // between the fields - so it gets found by diffing packets
+                    // whose answer is already known from the server data.
+                    var rawFirstSeen = new Dictionary<uint, byte[]>();
                     var lastFlags = new Dictionary<uint, (uint Flags0, uint Flags1)>();
 
                     // Lets two test clients be parked next to each other
@@ -471,6 +484,11 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                                     bool isSelf = entity.UniqueNo == handoff.ContentId;
                                     int count = entitiesSeen.GetValueOrDefault(entity.UniqueNo).Count + 1;
                                     entitiesSeen[entity.UniqueNo] = (entity.PacketId, isSelf, count);
+                                    tracker.Observe(entity, DateTimeOffset.UtcNow);
+                                    if (!rawFirstSeen.ContainsKey(entity.UniqueNo))
+                                    {
+                                        rawFirstSeen[entity.UniqueNo] = reply.Plaintext.AsSpan(offset, size).ToArray();
+                                    }
 
                                     // Sample another player's reported position
                                     // occasionally. If our axis mapping were
@@ -543,6 +561,37 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
 
                     // The point of this harness: whether we were told about
                     // any player other than ourselves.
+                    if (flags.ContainsKey("dump-entities"))
+                    {
+                        Console.WriteLine();
+                        Console.WriteLine("RAW ENTITY PACKETS (id, size, hex):");
+                        foreach ((uint id, byte[] raw) in rawFirstSeen.OrderBy(kv => kv.Key))
+                        {
+                            Console.WriteLine($"  {id} {raw.Length} {Convert.ToHexString(raw)}");
+                        }
+                        Console.WriteLine();
+                    }
+
+                    IReadOnlyList<FfxiTrackedEntity> visible = tracker.Visible(DateTimeOffset.UtcNow);
+                    Console.WriteLine();
+                    Console.WriteLine($"Radar would show {visible.Count} entities:");
+                    foreach (FfxiEntityKind kind in new[] { FfxiEntityKind.Player, FfxiEntityKind.Npc, FfxiEntityKind.Enemy })
+                    {
+                        var ofKind = visible.Where(e => e.Kind == kind).OrderBy(e => e.ActIndex).ToList();
+                        Console.WriteLine($"  {kind,-6} {ofKind.Count}");
+                        foreach (FfxiTrackedEntity e in ofKind.Take(12))
+                        {
+                            Console.WriteLine($"      targid 0x{e.ActIndex:X3}  id {e.UniqueNo,-10} " +
+                                $"hp {(e.HealthPercent?.ToString() ?? "-"),-4} " +
+                                $"({e.X,8:F1},{e.Depth,8:F1})  {e.Name}");
+                        }
+                        if (ofKind.Count > 12)
+                        {
+                            Console.WriteLine($"      ... and {ofKind.Count - 12} more");
+                        }
+                    }
+                    Console.WriteLine();
+
                     var otherPlayers = entitiesSeen
                         .Where(kv => kv.Value.PacketId == FfxiEntityUpdate.PlayerPacketId && !kv.Value.IsSelf)
                         .ToList();

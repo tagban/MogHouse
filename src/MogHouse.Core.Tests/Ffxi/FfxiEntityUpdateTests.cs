@@ -159,10 +159,10 @@ public class FfxiEntityUpdateAppearanceTests
     }
 
     /// <summary>
-    /// Builds an 0x00E long enough to carry the HP block, so allegiance is
-    /// actually present.
+    /// Builds an 0x00E long enough to carry the HP block, which is where both
+    /// the battle flags and the allegiance live.
     /// </summary>
-    private static byte[] NpcUpdate(byte allegiance, byte healthPercent, ushort actIndex)
+    private static byte[] NpcUpdate(byte allegiance, byte healthPercent, ushort actIndex, bool livingMob = false)
     {
         byte[] packet = new byte[0x48];
         BinaryPrimitives.WriteUInt16LittleEndian(packet, (ushort)(0x00E | (packet.Length / 4) << 9));
@@ -170,27 +170,45 @@ public class FfxiEntityUpdateAppearanceTests
         BinaryPrimitives.WriteUInt16LittleEndian(packet.AsSpan(8), actIndex);
         packet[0x1E] = healthPercent;
         packet[0x29] = allegiance;
+        packet[0x25] = livingMob ? FfxiEntityUpdate.MobAliveFlag : (byte)0;
         return packet;
     }
 
     [Fact]
     public void MobAllegianceReadsAsAnEnemy()
     {
-        FfxiEntityUpdate? update = FfxiEntityUpdate.TryParse(NpcUpdate(allegiance: 0, healthPercent: 87, actIndex: 0x0123));
+        FfxiEntityUpdate? update = FfxiEntityUpdate.TryParse(
+            NpcUpdate(allegiance: 0, healthPercent: 87, actIndex: 0x0123, livingMob: true));
 
         Assert.NotNull(update);
         Assert.Equal(FfxiEntityKind.Enemy, update.Kind);
         Assert.Equal((byte)87, update.HealthPercent);
     }
 
-    [Theory]
-    [InlineData((byte)1)] // Player
-    [InlineData((byte)2)] // San d'Oria
-    [InlineData((byte)3)] // Bastok
-    [InlineData((byte)4)] // Windurst
-    public void NonMobAllegianceReadsAsAnNpc(byte allegiance)
+    /// <summary>
+    /// Allegiance is what this used to classify on, and it was wrong: a plain
+    /// NPC defaults to Mob exactly as a crab does. Measured against Zeruhn
+    /// Mines, that mistake called six of the zone's NPCs enemies.
+    /// </summary>
+    [Fact]
+    public void AllegianceAloneDoesNotMakeSomethingHostile()
     {
-        FfxiEntityUpdate? update = FfxiEntityUpdate.TryParse(NpcUpdate(allegiance, healthPercent: 100, actIndex: 0x0200));
+        FfxiEntityUpdate? update = FfxiEntityUpdate.TryParse(
+            NpcUpdate(allegiance: 0, healthPercent: 100, actIndex: 0x005B, livingMob: false));
+
+        Assert.NotNull(update);
+        Assert.Equal((byte)0, update.Allegiance);
+        Assert.Equal(FfxiEntityKind.Npc, update.Kind);
+    }
+
+    [Theory]
+    [InlineData((byte)0)] // Mob - what a plain NPC actually carries
+    [InlineData((byte)1)] // Player
+    [InlineData((byte)3)] // Bastok
+    public void WithoutTheBattleFlagAnythingIsAnNpc(byte allegiance)
+    {
+        FfxiEntityUpdate? update = FfxiEntityUpdate.TryParse(
+            NpcUpdate(allegiance, healthPercent: 100, actIndex: 0x0200));
 
         Assert.NotNull(update);
         Assert.Equal(FfxiEntityKind.Npc, update.Kind);
@@ -204,8 +222,10 @@ public class FfxiEntityUpdateAppearanceTests
     [Fact]
     public void AnNpcAndAMobCanShareTheSameIndexRange()
     {
-        FfxiEntityUpdate? npc = FfxiEntityUpdate.TryParse(NpcUpdate(allegiance: 3, healthPercent: 100, actIndex: 0x0100));
-        FfxiEntityUpdate? mob = FfxiEntityUpdate.TryParse(NpcUpdate(allegiance: 0, healthPercent: 100, actIndex: 0x0101));
+        FfxiEntityUpdate? npc = FfxiEntityUpdate.TryParse(
+            NpcUpdate(allegiance: 0, healthPercent: 100, actIndex: 0x0100, livingMob: false));
+        FfxiEntityUpdate? mob = FfxiEntityUpdate.TryParse(
+            NpcUpdate(allegiance: 0, healthPercent: 100, actIndex: 0x0101, livingMob: true));
 
         Assert.NotNull(npc);
         Assert.NotNull(mob);
@@ -232,7 +252,7 @@ public class FfxiEntityUpdateAppearanceTests
     /// zero - reading a zero there would call every entity hostile.
     /// </summary>
     [Fact]
-    public void AShortNpcUpdateHasNoAllegiance()
+    public void AShortNpcUpdateHasNoBattleFlags()
     {
         byte[] packet = new byte[FfxiEntityUpdate.MinimumSize];
         BinaryPrimitives.WriteUInt16LittleEndian(packet, (ushort)(0x00E | (packet.Length / 4) << 9));
@@ -241,6 +261,7 @@ public class FfxiEntityUpdateAppearanceTests
 
         Assert.NotNull(update);
         Assert.Null(update.Allegiance);
+        Assert.Null(update.BattleFlags);
         Assert.Equal(FfxiEntityKind.Npc, update.Kind);
     }
 }

@@ -56,7 +56,8 @@ public sealed record FfxiEntityUpdate(
     uint? RawFlags1 = null,
     uint? RawFlags0 = null,
     byte? Allegiance = null,
-    byte? HealthPercent = null)
+    byte? HealthPercent = null,
+    byte? BattleFlags = null)
 {
     public const ushort PlayerPacketId = 0x00D;
     public const ushort NpcPacketId = 0x00E;
@@ -64,22 +65,47 @@ public sealed record FfxiEntityUpdate(
     /// <summary>
     /// Whether this is a player, a friendly NPC or something hostile.
     ///
-    /// Not from the target index, which is the obvious guess and is wrong.
-    /// The widely repeated ranges have it backwards: the server's own dispatch
-    /// in zone_entities.cpp sends targid below 0x400 to the mob *and* NPC
-    /// lists and 0x400-0x6FF to players, so the index cannot separate a
-    /// shopkeeper from a crab at all.
+    /// Three plausible discriminators are wrong, each measured against live
+    /// packets from a zone whose contents the server data already states:
     ///
-    /// What does: both branches of the server's entity_update builder write
-    /// the entity's allegiance to the same byte, and Mob is 0 while players
-    /// and the three nations are 1 to 6.
+    /// - The target index. The widely repeated ranges have it backwards -
+    ///   zone_entities.cpp sends targid below 0x400 to the mob *and* NPC
+    ///   lists - so it cannot separate a shopkeeper from a crab at all.
+    /// - Allegiance. Both packet branches write it, but a plain NPC defaults
+    ///   to Mob just as a crab does. It separates factions, not kinds. This
+    ///   classifier used it and called six Zeruhn Mines NPCs enemies.
+    /// - Status, at 0x20. It is Normal, Update or Disappear - transient
+    ///   state, and a mob standing still reads the same as an NPC.
+    ///
+    /// What does work is <see cref="BattleFlags"/>, which only the mob branch
+    /// of the builder ever writes.
     /// </summary>
     public FfxiEntityKind Kind =>
         PacketId == PlayerPacketId ? FfxiEntityKind.Player
-        : Allegiance == MobAllegiance ? FfxiEntityKind.Enemy
+        : IsLivingMob ? FfxiEntityKind.Enemy
         : FfxiEntityKind.Npc;
 
-    /// <summary>xi::Allegiance - 0 is Mob, 1 Player, 2-6 the nations.</summary>
+    /// <summary>
+    /// The bit the server sets for a mob that is alive, and never for an NPC:
+    /// `ref&lt;uint8&gt;(0x25) = PMob-&gt;health.hp &gt; 0 ? 0x08 : 0`.
+    ///
+    /// Note what it literally means - a mob that is *dead* clears it and reads
+    /// as an NPC. FfxiEntityTracker compensates by remembering: once an entity
+    /// has shown this bit it stays an enemy for the rest of the zone.
+    /// </summary>
+    /// <remarks>
+    /// Pattern-matched rather than written as (BattleFlags &amp; MobAliveFlag) != 0.
+    /// On a nullable byte that reads naturally and is wrong: the lifted !=
+    /// returns true when the operand is null, so every update too short to
+    /// carry the byte would report a mob.
+    /// </remarks>
+    public bool IsLivingMob => BattleFlags is byte flags && (flags & MobAliveFlag) != 0;
+
+    /// <summary>Set on a living mob; NPCs never write this byte at all.</summary>
+    public const byte MobAliveFlag = 0x08;
+
+    /// <summary>xi::Allegiance - 0 is Mob, 1 Player, 2-6 the nations. Kept for
+    /// information; it does not say what kind of entity this is.</summary>
     public const byte MobAllegiance = 0;
 
     private const int Body = 4; // id/size/sync sub-packet header
@@ -100,6 +126,9 @@ public sealed record FfxiEntityUpdate(
 
     /// <summary>Absolute 0x1E - real HP percent for a mob, hardcoded 100 for an NPC.</summary>
     private const int OffsetHealthPercent = 0x1E;
+
+    /// <summary>Absolute 0x25 - see <see cref="IsLivingMob"/>.</summary>
+    private const int OffsetBattleFlags = 0x25;
 
     /// <summary>Minimum bytes needed for the head this parses.</summary>
     public const int MinimumSize = Body + 20;
@@ -144,11 +173,13 @@ public sealed record FfxiEntityUpdate(
         uint? rawFlags0 = null;
         byte? allegiance = null;
         byte? healthPercent = null;
+        byte? battleFlags = null;
 
         if (id == NpcPacketId && subPacket.Length > OffsetAllegiance)
         {
             allegiance = subPacket[OffsetAllegiance];
             healthPercent = subPacket[OffsetHealthPercent];
+            battleFlags = subPacket[OffsetBattleFlags];
         }
 
         if (id == PlayerPacketId && subPacket.Length >= OffsetFlags1 + 4)
@@ -178,7 +209,8 @@ public sealed record FfxiEntityUpdate(
             RawFlags1: rawFlags1,
             RawFlags0: rawFlags0,
             Allegiance: allegiance,
-            HealthPercent: healthPercent);
+            HealthPercent: healthPercent,
+            BattleFlags: battleFlags);
     }
 
     private static string ReadFixedString(ReadOnlySpan<byte> field)

@@ -69,10 +69,15 @@ public sealed class FfxiEntityTracker
 
         _entities.TryGetValue(update.UniqueNo, out FfxiTrackedEntity? known);
 
-        // A short update carries no allegiance and no name. Taking its Kind
-        // would turn a known enemy into an NPC - green - the moment it moved,
-        // because a movement-only update has nothing past the position block.
-        FfxiEntityKind kind = update.Allegiance is null && known is not null ? known.Kind : update.Kind;
+        // Enemies are sticky, for two reasons that look the same from here.
+        //
+        // A movement-only update has nothing past the position block, so it
+        // cannot say what kind of thing moved. And the flag that marks a mob
+        // literally means "a mob that is alive", so killing one clears it.
+        // Either way, taking the new Kind would turn a red dot green.
+        FfxiEntityKind kind = known?.Kind == FfxiEntityKind.Enemy ? FfxiEntityKind.Enemy
+            : update.BattleFlags is null && known is not null ? known.Kind
+            : update.Kind;
 
         _entities[update.UniqueNo] = new FfxiTrackedEntity(
             UniqueNo: update.UniqueNo,
