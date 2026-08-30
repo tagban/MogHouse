@@ -43,22 +43,24 @@ fn fragmentMain(in : WaterOut) -> @location(0) vec4<f32> {
 
     // Two layers, which is how FFXI builds it. effect kaw1 and ike1 are pure
     // white - average RGB (255,255,255) - so they are a foam and ripple sheet,
-    // not a water colour. Used as the base they read as wet concrete. The body
-    // colour lives in effect umna at (12,15,29).
-    let body = vec3<f32>(0.055, 0.115, 0.145);
+    // not a water colour. Used as the base they read as wet concrete.
+    //
+    // The tint is deliberately light. effect umna measures (12,15,29), but that
+    // is the sea; taken literally for a river, with the bed hidden behind an
+    // opaque sheet, it renders as a black void.
+    let body = vec3<f32>(0.16, 0.29, 0.30);
 
     // The ripple sheet, sampled twice drifting at different speeds and angles so
     // it does not read as one sheet sliding.
     let a = textureSample(waterTexture, waterSampler, in.uv + vec2<f32>(time * 0.011, time * 0.007));
     let b = textureSample(waterTexture, waterSampler, in.uv * 0.63 + vec2<f32>(time * -0.008, time * 0.013));
-    // Its alpha is the mask; where both layers agree the highlight is brightest.
-    let foam = clamp(a.a * 0.65 + b.a * 0.5, 0.0, 1.0);
+    let foam = clamp(a.a * 0.7 + b.a * 0.55, 0.0, 1.0);
 
-    // Ambient is clamped: components are scaled 0..128, so it can exceed 1 and
-    // an earlier version let that through and turned the river white.
+    // Ambient is clamped: components are scaled 0..128, so it can exceed 1, and
+    // letting that through once turned the river white.
     let ambient = min(uniforms.ambient.rgb, vec3<f32>(1.0, 1.0, 1.0));
-    var colour = body * (0.5 + 0.5 * ambient);
-    colour = colour + ambient * foam * 0.22;
+    var colour = body * (0.55 + 0.45 * ambient);
+    colour = colour + ambient * foam * 0.40;
 
     let distance = length(in.worldPosition - uniforms.eye.xyz);
     let fogStart = uniforms.fogRange.x;
@@ -66,7 +68,10 @@ fn fragmentMain(in : WaterOut) -> @location(0) vec4<f32> {
     let fog = clamp((distance - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
     colour = mix(colour, uniforms.fogColour.rgb, fog);
 
-    return vec4<f32>(colour, 0.78);
+    // Clear enough to see the bed through it, which is most of what makes water
+    // read as water rather than as a coloured lid.
+    let alpha = clamp(0.42 + foam * 0.30, 0.0, 0.85);
+    return vec4<f32>(colour, alpha);
 }
 )";
 } // namespace pj
