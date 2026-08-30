@@ -27,6 +27,7 @@ else()
 endif()
 
 add_executable(portjeuno-renderer
+    character.cpp
     main.cpp
     scene.cpp
     zonemesh.cpp
@@ -58,9 +59,17 @@ add_library(ffxi-dat STATIC
     ffxi/lighting.cpp
     ffxi/mmb.cpp
     ffxi/mzb.cpp
+    ffxi/os2.cpp
+    ffxi/skeleton.cpp
     ffxi/texture.cpp
 )
 target_include_directories(ffxi-dat PUBLIC ffxi)
 
 add_executable(ffxi-datdump ffxi/datdump_main.cpp)
 target_link_libraries(ffxi-datdump PRIVATE ffxi-dat)
+
+# Skinning a character needs no GPU, so it gets its own CLI and can be checked
+# the same way the zone readers were.
+add_executable(ffxi-chardump chardump_main.cpp character.cpp)
+target_include_directories(ffxi-chardump PRIVATE .)
+target_link_libraries(ffxi-chardump PRIVATE ffxi-dat)

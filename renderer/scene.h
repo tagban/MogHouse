@@ -10,7 +10,7 @@
 #include "ffxi/mmb.h"
 #include "ffxi/mzb.h"
 #include "ffxi/texture.h"
-#include "math.h"
+#include "linalg.h"
 #include "zonemesh.h"
 
 #include <cstdint>

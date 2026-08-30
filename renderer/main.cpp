@@ -10,11 +10,14 @@
 #include "ffxi/mmb.h"
 #include "ffxi/lighting.h"
 #include "ffxi/mzb.h"
+#include "ffxi/os2.h"
+#include "ffxi/skeleton.h"
 #include "ffxi/texture.h"
 #include "gputexture.h"
 #include "camera.h"
+#include "character.h"
 #include "coverage.h"
-#include "math.h"
+#include "linalg.h"
 #include "scene.h"
 #include "surface.h"
 #include "sky_shader.h"
@@ -78,6 +81,83 @@ const char* backendName(wgpu::BackendType backend)
 
 // Loads the largest MZB in a DAT. Largest because the ferry DATs hold both a
 // world and a vessel, and the world is the interesting one.
+/// Reads one character out of a DAT: its skeleton, every mesh hung on it, and
+/// the textures those meshes name.
+///
+/// A DAT like ROM/3/6.DAT holds a whole NPC. Player characters are assembled
+/// from several files instead - one per equipment slot - which is the same
+/// work with more inputs, so this takes a list.
+std::optional<pj::Character> loadCharacter(const std::vector<std::string>& datPaths,
+                                           std::unordered_map<std::string, ffxi::Texture>& textures)
+{
+    ffxi::Skeleton skeleton;
+    bool haveSkeleton = false;
+    std::vector<ffxi::SkinnedModel> meshes;
+
+    for (const std::string& datPath : datPaths)
+    {
+        ffxi::DatFile dat{std::filesystem::path{datPath}};
+
+        // The first skeleton found wins. Everything after it has to be hung on
+        // the same bones, so a second one would be a different character.
+        if (!haveSkeleton)
+        {
+            for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkSkeleton))
+            {
+                try
+                {
+                    skeleton = ffxi::parseSkeleton(chunk);
+                    haveSkeleton = true;
+                    break;
+                }
+                catch (const std::exception& e)
+                {
+                    std::printf("skeleton %.4s: %s\n", chunk.id, e.what());
+                }
+            }
+        }
+
+        for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkTexture))
+        {
+            try
+            {
+                ffxi::Texture texture = ffxi::parseTexture(chunk);
+                textures.insert_or_assign(texture.name, std::move(texture));
+            }
+            catch (const std::exception&)
+            {
+            }
+        }
+
+        for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkSkinnedMesh))
+        {
+            try
+            {
+                ffxi::SkinnedModel model = ffxi::parseOs2(chunk);
+                if (!model.parts.empty())
+                {
+                    meshes.push_back(std::move(model));
+                }
+            }
+            catch (const std::exception& e)
+            {
+                std::printf("skinned %.4s: %s\n", chunk.id, e.what());
+            }
+        }
+    }
+
+    if (!haveSkeleton || meshes.empty())
+    {
+        std::printf("no character in those files\n");
+        return std::nullopt;
+    }
+
+    pj::Character character = pj::buildCharacter(pj::bindPose(skeleton), meshes, textures);
+    std::printf("character: %zu bones, %zu meshes, %zu triangles, %.2f tall\n", skeleton.bones.size(), meshes.size(),
+                character.triangles(), character.height());
+    return character;
+}
+
 std::optional<pj::Scene> loadZone(const char* datPath, const char* keyPath, const char* key2Path, std::string& zoneId,
                                      std::unordered_map<std::string, ffxi::Texture>& textures, ffxi::Lighting& lighting)
 {
@@ -188,6 +268,55 @@ wgpu::Buffer createBuffer(const wgpu::Device& device, const void* data, size_t s
     }
     return buffer;
 }
+/// Writes a 24-bit BMP. Uncompressed and about as simple as an image format
+/// gets, which matters because the alternative is pulling in a PNG encoder to
+/// look at one frame.
+bool writeBmp(const char* path, const uint8_t* bgra, uint32_t width, uint32_t height, uint32_t bytesPerRow)
+{
+    std::FILE* file = std::fopen(path, "wb");
+    if (!file)
+    {
+        return false;
+    }
+
+    const uint32_t rowBytes = width * 3;
+    const uint32_t padding = (4 - (rowBytes % 4)) % 4;
+    const uint32_t imageBytes = (rowBytes + padding) * height;
+    const uint32_t fileBytes = 54 + imageBytes;
+
+    uint8_t header[54] = {};
+    header[0] = 0x42;
+    header[1] = 0x4D;
+    std::memcpy(header + 2, &fileBytes, 4);
+    const uint32_t pixelOffset = 54;
+    std::memcpy(header + 10, &pixelOffset, 4);
+    const uint32_t infoSize = 40;
+    std::memcpy(header + 14, &infoSize, 4);
+    std::memcpy(header + 18, &width, 4);
+    std::memcpy(header + 22, &height, 4);
+    const uint16_t planes = 1;
+    const uint16_t bits = 24;
+    std::memcpy(header + 26, &planes, 2);
+    std::memcpy(header + 28, &bits, 2);
+    std::memcpy(header + 34, &imageBytes, 4);
+    std::fwrite(header, 1, sizeof(header), file);
+
+    // BMP rows run bottom to top.
+    std::vector<uint8_t> row(rowBytes + padding, 0);
+    for (uint32_t y = 0; y < height; ++y)
+    {
+        const uint8_t* source = bgra + static_cast<size_t>(height - 1 - y) * bytesPerRow;
+        for (uint32_t x = 0; x < width; ++x)
+        {
+            row[x * 3 + 0] = source[x * 4 + 0];
+            row[x * 3 + 1] = source[x * 4 + 1];
+            row[x * 3 + 2] = source[x * 4 + 2];
+        }
+        std::fwrite(row.data(), 1, row.size(), file);
+    }
+    std::fclose(file);
+    return true;
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -211,6 +340,9 @@ int main(int argc, char** argv)
         {
             return 1;
         }
+        // The character is loaded after the zone so it can share the texture
+        // map: a PC in a town wears textures the zone never mentions, and a
+        // zone texture the character happens to name should not be read twice.
         std::printf("zone %s: %zu triangles\n", zoneId.c_str(), zone->indices.size() / 3);
         std::printf("  bounds x %.1f..%.1f  y %.1f..%.1f  z %.1f..%.1f\n", zone->boundsMin.x, zone->boundsMax.x,
                     zone->boundsMin.y, zone->boundsMax.y, zone->boundsMin.z, zone->boundsMax.z);
@@ -362,7 +494,9 @@ int main(int argc, char** argv)
     {
         wgpu::SurfaceConfiguration configuration{.device = device,
                                                  .format = surfaceFormat,
-                                                 .usage = wgpu::TextureUsage::RenderAttachment,
+                                                 // CopySrc so a frame can be read back; see writeBmp.
+                                                 .usage = wgpu::TextureUsage::RenderAttachment |
+                                                          wgpu::TextureUsage::CopySrc,
                                                  .width = width,
                                                  .height = height,
                                                  .presentMode = wgpu::PresentMode::Fifo};
@@ -637,6 +771,94 @@ int main(int argc, char** argv)
                     uploaded, untextured);
     }
 
+    // PORTJEUNO_CHARACTER is a semicolon-separated list of DATs to assemble
+    // one character from, and PORTJEUNO_CHARACTER_AT is where to stand it.
+    std::optional<pj::Character> character;
+    pj::Vec3 characterAt{};
+    if (const char* charEnv = std::getenv("PORTJEUNO_CHARACTER"))
+    {
+        std::vector<std::string> paths;
+        std::string current;
+        for (const char* c = charEnv; *c; ++c)
+        {
+            if (*c == ';')
+            {
+                if (!current.empty())
+                {
+                    paths.push_back(current);
+                }
+                current.clear();
+            }
+            else
+            {
+                current.push_back(*c);
+            }
+        }
+        if (!current.empty())
+        {
+            paths.push_back(current);
+        }
+        character = loadCharacter(paths, textures);
+    }
+
+    // The character reuses the zone's pipelines and bind group layout, so it
+    // needs a zone loaded. Its geometry is already in world orientation, so
+    // its one instance is a plain translation rather than a placement matrix.
+    wgpu::Buffer characterVertexBuffer;
+    wgpu::Buffer characterIndexBuffer;
+    wgpu::Buffer characterInstanceBuffer;
+    std::vector<wgpu::Texture> characterTextures;
+    std::vector<wgpu::BindGroup> characterBindGroups;
+    if (character && !character->indices.empty() && pipeline)
+    {
+        characterVertexBuffer =
+            createBuffer(device, character->vertices.data(), character->vertices.size() * sizeof(pj::Vertex),
+                         wgpu::BufferUsage::Vertex);
+        characterIndexBuffer = createBuffer(device, character->indices.data(),
+                                            character->indices.size() * sizeof(uint32_t), wgpu::BufferUsage::Index);
+
+        float instance[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+        wgpu::BufferDescriptor instanceDescriptor{.usage = wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst,
+                                                  .size = sizeof(instance)};
+        characterInstanceBuffer = device.CreateBuffer(&instanceDescriptor);
+        queue.WriteBuffer(characterInstanceBuffer, 0, instance, sizeof(instance));
+
+        for (const pj::Batch& batch : character->batches)
+        {
+            wgpu::TextureView view = whiteTexture.CreateView();
+            auto found = textures.find(batch.texture);
+            if (found != textures.end())
+            {
+                if (wgpu::Texture gpu = pj::uploadTexture(device, found->second))
+                {
+                    characterTextures.push_back(gpu);
+                    view = characterTextures.back().CreateView();
+                }
+            }
+            else
+            {
+                std::printf("character texture %s is in none of those files\n", batch.texture.c_str());
+            }
+
+            wgpu::BindGroupEntry entries[3] = {};
+            entries[0].binding = 0;
+            entries[0].buffer = uniformBuffer;
+            entries[0].size = sizeof(Uniforms);
+            entries[1].binding = 1;
+            entries[1].textureView = view;
+            entries[2].binding = 2;
+            entries[2].sampler = sampler;
+
+            wgpu::BindGroupDescriptor bindGroupDescriptor{
+                .layout = zoneBindGroupLayout, .entryCount = 3, .entries = entries};
+            characterBindGroups.push_back(device.CreateBindGroup(&bindGroupDescriptor));
+        }
+    }
+    else if (character)
+    {
+        std::printf("a character needs a zone loaded: it draws with the zone pipelines\n");
+    }
+
     const pj::Vec3 centre = zone ? zone->centre() : pj::Vec3{};
     const float radius = zone ? std::max(zone->radius(), 1.0f) : 1.0f;
 
@@ -649,10 +871,61 @@ int main(int argc, char** argv)
     // zone being mostly missing rather than as being in the wrong place.
     camera.position = centre;
     camera.pitch = 0.0f;
+
+    // Somewhere visible by default, since nothing yet knows where the ground
+    // is. PORTJEUNO_CHARACTER_AT overrides it, and c drops the character at
+    // wherever the camera is standing.
+    characterAt = centre;
+    if (const char* atEnv = std::getenv("PORTJEUNO_CHARACTER_AT"))
+    {
+        std::sscanf(atEnv, "%f,%f,%f", &characterAt.x, &characterAt.y, &characterAt.z);
+    }
+    // The model faces +x in its own space, so a heading of zero looks east.
+    float characterFacing = 0.0f;
+    if (const char* facingEnv = std::getenv("PORTJEUNO_CHARACTER_FACING"))
+    {
+        characterFacing = static_cast<float>(std::atof(facingEnv)) * 3.14159265f / 180.0f;
+    }
+    auto placeCharacter = [&](const pj::Vec3& where) {
+        characterAt = where;
+        if (characterInstanceBuffer)
+        {
+            const float c = std::cos(characterFacing);
+            const float sn = std::sin(characterFacing);
+            const float instance[16] = {c,       0, -sn,      0, 0,       1, 0,       0,
+                                        sn,      0, c,        0, where.x, where.y, where.z, 1};
+            queue.WriteBuffer(characterInstanceBuffer, 0, instance, sizeof(instance));
+        }
+    };
+    placeCharacter(characterAt);
+
+    // Framing a shot from a script needs the camera to be settable; dragging
+    // it into place by hand cannot be repeated.
+    if (const char* cameraEnv = std::getenv("PORTJEUNO_CAMERA"))
+    {
+        std::sscanf(cameraEnv, "%f,%f,%f", &camera.position.x, &camera.position.y, &camera.position.z);
+    }
+    if (const char* lookEnv = std::getenv("PORTJEUNO_CAMERA_LOOK"))
+    {
+        float yawDegrees = 0.0f;
+        float pitchDegrees = 0.0f;
+        std::sscanf(lookEnv, "%f,%f", &yawDegrees, &pitchDegrees);
+        camera.yaw = yawDegrees * 3.14159265f / 180.0f;
+        camera.pitch = pitchDegrees * 3.14159265f / 180.0f;
+    }
+
     bool dragging = false;
 
     std::printf("wasd to walk, mouse drag to look, space and ctrl for up and down,\n");
-    std::printf("shift to move faster, tab to orbit, p to print position, escape to quit\n");
+    std::printf("shift to move faster, tab to orbit, p to print position, c to place the character,\n");
+    std::printf("escape to quit\n");
+
+    // PORTJEUNO_SCREENSHOT writes one frame to a BMP and quits. Without it
+    // there is no way to check what the renderer actually produced except by
+    // looking at the window, which rules out checking anything unattended.
+    const char* screenshotPath = std::getenv("PORTJEUNO_SCREENSHOT");
+    int framesBeforeShot = 5; // let the first frames settle
+    wgpu::Buffer readbackBuffer;
 
     const char* modeEnv = std::getenv("PORTJEUNO_SHADER_MODE");
     const float shaderMode = modeEnv ? static_cast<float>(std::atof(modeEnv)) : 0.0f;
@@ -696,6 +969,15 @@ int main(int argc, char** argv)
                     const pj::Vec3 at = camera.eye();
                     std::printf("at %.1f %.1f %.1f   zone y runs %.1f to %.1f\n", at.x, at.y, at.z,
                                 zone->boundsMin.y, zone->boundsMax.y);
+                }
+                else if (event.key.key == SDLK_C && character)
+                {
+                    // Stand the character where the camera is. Nothing knows
+                    // where the ground is yet, so putting it somewhere useful
+                    // is a matter of walking there and pressing a key.
+                    const pj::Vec3 at = camera.eye();
+                    placeCharacter(at);
+                    std::printf("character moved to %.1f %.1f %.1f\n", at.x, at.y, at.z);
                 }
             }
             else if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED)
@@ -867,6 +1149,20 @@ int main(int argc, char** argv)
                 pass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
             }
 
+            if (!characterBindGroups.empty())
+            {
+                pass.SetVertexBuffer(0, characterVertexBuffer);
+                pass.SetVertexBuffer(1, characterInstanceBuffer);
+                pass.SetIndexBuffer(characterIndexBuffer, wgpu::IndexFormat::Uint32);
+                for (size_t i = 0; i < character->batches.size() && i < characterBindGroups.size(); ++i)
+                {
+                    const pj::Batch& batch = character->batches[i];
+                    pass.SetPipeline(batch.cutout ? cutoutPipeline : pipeline);
+                    pass.SetBindGroup(0, characterBindGroups[i]);
+                    pass.DrawIndexed(batch.indexCount, 1, batch.indexOffset, 0, 0);
+                }
+            }
+
             if (waterIndexCount && waterPipeline)
             {
                 pass.SetPipeline(waterPipeline);
@@ -878,10 +1174,58 @@ int main(int argc, char** argv)
         }
 
         pass.End();
+
+        // A texture copy has to start on a 256-byte row, so the readback is
+        // padded and the padding is skipped when the rows are written out.
+        const uint32_t bytesPerRow = (width * 4 + 255) / 256 * 256;
+        const bool takingShot = screenshotPath && --framesBeforeShot == 0;
+        if (takingShot)
+        {
+            wgpu::BufferDescriptor readbackDescriptor{.usage = wgpu::BufferUsage::CopyDst |
+                                                               wgpu::BufferUsage::MapRead,
+                                                      .size = static_cast<uint64_t>(bytesPerRow) * height};
+            readbackBuffer = device.CreateBuffer(&readbackDescriptor);
+
+            wgpu::TexelCopyTextureInfo source{.texture = surfaceTexture.texture};
+            wgpu::TexelCopyBufferInfo destination{
+                .layout = {.bytesPerRow = bytesPerRow, .rowsPerImage = height}, .buffer = readbackBuffer};
+            const wgpu::Extent3D extent{width, height, 1};
+            encoder.CopyTextureToBuffer(&source, &destination, &extent);
+        }
+
         wgpu::CommandBuffer commands = encoder.Finish();
         queue.Submit(1, &commands);
         surface.Present();
         instance.ProcessEvents();
+
+        if (takingShot)
+        {
+            bool mapped = false;
+            wgpu::Future future = readbackBuffer.MapAsync(
+                wgpu::MapMode::Read, 0, wgpu::kWholeMapSize, wgpu::CallbackMode::AllowProcessEvents,
+                [&](wgpu::MapAsyncStatus status, wgpu::StringView)
+                { mapped = status == wgpu::MapAsyncStatus::Success; });
+            instance.WaitAny(future, UINT64_MAX);
+
+            if (mapped)
+            {
+                const auto* pixels = static_cast<const uint8_t*>(readbackBuffer.GetConstMappedRange());
+                if (pixels && writeBmp(screenshotPath, pixels, width, height, bytesPerRow))
+                {
+                    std::printf("wrote %s (%ux%u)\n", screenshotPath, width, height);
+                }
+                else
+                {
+                    std::printf("could not write %s\n", screenshotPath);
+                }
+                readbackBuffer.Unmap();
+            }
+            else
+            {
+                std::printf("could not read the frame back\n");
+            }
+            break;
+        }
     }
 
     SDL_DestroyWindow(window);

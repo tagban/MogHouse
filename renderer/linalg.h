@@ -3,6 +3,10 @@
 // Just enough linear algebra to point a camera at something. Deliberately not a
 // dependency - the renderer needs perspective, look-at and a multiply, and
 // nothing else yet.
+//
+// Not called math.h: the moment this directory lands on an include path,
+// <cmath> picks this up instead of the system header and the standard library
+// stops compiling.
 
 #include <cmath>
 

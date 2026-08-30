@@ -4,7 +4,7 @@
 // thing, and standing in it at roughly player height, which is the only view
 // that tells you whether it looks right.
 
-#include "math.h"
+#include "linalg.h"
 
 #include <algorithm>
 #include <cmath>

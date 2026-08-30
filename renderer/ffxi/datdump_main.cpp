@@ -6,6 +6,8 @@
 #include "lighting.h"
 #include "mmb.h"
 #include "mzb.h"
+#include "os2.h"
+#include "skeleton.h"
 #include "texture.h"
 
 #include <cmath>
@@ -172,6 +174,113 @@ int main(int argc, char** argv)
                 if (failed)
                 {
                     std::printf("  first failure %s\n", texFailure.c_str());
+                }
+            }
+        }
+
+        // Skeletons. The checks: parents in range, the root pointing at
+        // itself, and quaternions of unit length.
+        for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkSkeleton))
+        {
+            try
+            {
+                const ffxi::Skeleton skeleton = ffxi::parseSkeleton(chunk);
+                size_t badParent = 0;
+                size_t offUnit = 0;
+                size_t roots = 0;
+                for (size_t i = 0; i < skeleton.bones.size(); ++i)
+                {
+                    const ffxi::Bone& bone = skeleton.bones[i];
+                    if (bone.parent >= skeleton.bones.size())
+                    {
+                        ++badParent;
+                    }
+                    if (bone.parent == i)
+                    {
+                        ++roots;
+                    }
+                    const float length = std::sqrt(bone.rotation[0] * bone.rotation[0] + bone.rotation[1] * bone.rotation[1] +
+                                                   bone.rotation[2] * bone.rotation[2] + bone.rotation[3] * bone.rotation[3]);
+                    if (std::fabs(length - 1.0f) > 0.02f)
+                    {
+                        ++offUnit;
+                    }
+                }
+                std::printf("skeleton %.4s: %zu bones, %zu generator points\n", chunk.id, skeleton.bones.size(),
+                            skeleton.generatorPoints.size());
+                std::printf("  parents out of range: %zu   roots: %zu   non-unit rotations: %zu\n", badParent, roots,
+                            offUnit);
+            }
+            catch (const std::exception& e)
+            {
+                std::printf("skeleton %.4s: %s\n", chunk.id, e.what());
+            }
+        }
+
+        // Skinned meshes. The checks: every corner index inside the vertex
+        // list, weights summing to one, and bones inside the skeleton that
+        // shares the file.
+        {
+            size_t bones = 0;
+            for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkSkeleton))
+            {
+                try
+                {
+                    bones = std::max(bones, ffxi::parseSkeleton(chunk).bones.size());
+                }
+                catch (const std::exception&)
+                {
+                }
+            }
+
+            for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkSkinnedMesh))
+            {
+                try
+                {
+                    const ffxi::SkinnedModel model = ffxi::parseOs2(chunk);
+                    size_t badCorner = 0;
+                    size_t badBone = 0;
+                    size_t offWeight = 0;
+                    std::string texture;
+                    for (const ffxi::SkinnedPart& part : model.parts)
+                    {
+                        if (texture.empty())
+                        {
+                            texture = part.texture;
+                        }
+                        for (const ffxi::SkinCorner& corner : part.corners)
+                        {
+                            if (corner.vertex >= model.vertices.size())
+                            {
+                                ++badCorner;
+                            }
+                        }
+                    }
+                    for (const ffxi::SkinVertex& vertex : model.vertices)
+                    {
+                        float sum = 0.0f;
+                        for (uint8_t i = 0; i < vertex.influences; ++i)
+                        {
+                            sum += vertex.influence[i].weight;
+                            if (bones && vertex.influence[i].bone >= bones)
+                            {
+                                ++badBone;
+                            }
+                        }
+                        if (std::fabs(sum - 1.0f) > 0.01f)
+                        {
+                            ++offWeight;
+                        }
+                    }
+                    std::printf("skinned %.4s: %zu vertices, %zu triangles, %zu parts, tex %s%s\n", chunk.id,
+                                model.vertices.size(), model.triangleCount(), model.parts.size(), texture.c_str(),
+                                model.mirrored ? ", mirrored" : "");
+                    std::printf("  corners out of range: %zu   bones out of range: %zu   weights off one: %zu\n",
+                                badCorner, badBone, offWeight);
+                }
+                catch (const std::exception& e)
+                {
+                    std::printf("skinned %.4s: %s\n", chunk.id, e.what());
                 }
             }
         }
