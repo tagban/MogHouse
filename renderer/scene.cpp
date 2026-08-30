@@ -187,47 +187,42 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
             continue;
         }
 
-        float minX = std::numeric_limits<float>::max();
-        float maxX = std::numeric_limits<float>::lowest();
-        float minZ = std::numeric_limits<float>::max();
-        float maxZ = std::numeric_limits<float>::lowest();
-        for (size_t v = 0; v + 2 < mesh.vertices.size(); v += 3)
+        // The cell's own triangles, flattened to the water height, rather than
+        // a bounding rectangle around them. A rectangle spills past the bed and
+        // leaves translucent squares lying on the grass.
+        const float y = -instance.waterHeight;
+        const size_t vertexCount = mesh.vertexCount();
+        const uint32_t base = static_cast<uint32_t>(scene.waterVertices.size());
+
+        for (size_t v = 0; v < vertexCount; ++v)
         {
             const Vec3 world = transformPoint(instance.transform,
-                                              {mesh.vertices[v], mesh.vertices[v + 1], mesh.vertices[v + 2]});
-            minX = std::min(minX, world.x);
-            maxX = std::max(maxX, world.x);
-            minZ = std::min(minZ, world.z);
-            maxZ = std::max(maxZ, world.z);
-        }
-        if (maxX <= minX || maxZ <= minZ)
-        {
-            continue;
-        }
-
-        // Y is negated on the way out, as everywhere else.
-        const float y = -instance.waterHeight;
-        const uint32_t base = static_cast<uint32_t>(scene.waterVertices.size());
-        const float corners[4][2] = {{minX, minZ}, {maxX, minZ}, {maxX, maxZ}, {minX, maxZ}};
-        for (const auto& corner : corners)
-        {
+                                              {mesh.vertices[v * 3], mesh.vertices[v * 3 + 1], mesh.vertices[v * 3 + 2]});
             Vertex vertex{};
-            vertex.position[0] = corner[0];
+            vertex.position[0] = world.x;
             vertex.position[1] = y;
-            vertex.position[2] = corner[1];
+            vertex.position[2] = world.z;
             vertex.normal[1] = 1.0f;
-            // Tiled generously so a ripple texture would repeat rather than
-            // stretch across a whole cell.
-            vertex.uv[0] = corner[0] * 0.05f;
-            vertex.uv[1] = corner[1] * 0.05f;
+            // World-space UVs, so the texture is continuous across cells rather
+            // than restarting at every seam.
+            vertex.uv[0] = world.x * 0.06f;
+            vertex.uv[1] = world.z * 0.06f;
             scene.waterVertices.push_back(vertex);
 
-            lo = {std::min(lo.x, vertex.position[0]), std::min(lo.y, y), std::min(lo.z, vertex.position[2])};
-            hi = {std::max(hi.x, vertex.position[0]), std::max(hi.y, y), std::max(hi.z, vertex.position[2])};
+            lo = {std::min(lo.x, world.x), std::min(lo.y, y), std::min(lo.z, world.z)};
+            hi = {std::max(hi.x, world.x), std::max(hi.y, y), std::max(hi.z, world.z)};
         }
-        for (uint32_t index : {0u, 1u, 2u, 0u, 2u, 3u})
+
+        for (size_t i = 0; i + 2 < mesh.indices.size(); i += 3)
         {
-            scene.waterIndices.push_back(base + index);
+            const uint16_t ia = mesh.indices[i], ib = mesh.indices[i + 1], ic = mesh.indices[i + 2];
+            if (ia >= vertexCount || ib >= vertexCount || ic >= vertexCount)
+            {
+                continue;
+            }
+            scene.waterIndices.push_back(base + ia);
+            scene.waterIndices.push_back(base + ib);
+            scene.waterIndices.push_back(base + ic);
         }
     }
 

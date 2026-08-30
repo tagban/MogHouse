@@ -163,7 +163,13 @@ shift discarding the top bits at 32 bits, which Python's arbitrary-precision
 integers do not do. Without masking to 32 bits and sign-extending by hand it
 produces plausible-looking values in the thousands.
 
-**No water texture is stored anywhere** - lotus generates one procedurally, and
+**Water is two layers.** The effect textures are pure white - `effect kaw1` and
+`effect ike1` both average RGB (255,255,255) - so they are a foam and ripple
+sheet rather than a water colour. Used as the base they read as wet concrete.
+The body colour is `effect umna` at (12,15,29), a dark blue. So the surface is a
+dark base with a scrolling white highlight over it.
+
+**No single water texture is stored** - lotus generates one procedurally, and
 so does this renderer. That means the *appearance* of water is invented: where
 it is and how high it sits come from the file, but the colour, wave pattern,
 fresnel and specular are all made up. Matching the retail look would be an

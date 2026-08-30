@@ -41,16 +41,24 @@ fn vertexMain(@location(0) position : vec3<f32>,
 fn fragmentMain(in : WaterOut) -> @location(0) vec4<f32> {
     let time = uniforms.eye.w;
 
-    // FFXI's own water texture, scrolled. Two samples drifting at different
-    // speeds and angles, so the surface does not read as one sheet sliding.
-    let a = textureSample(waterTexture, waterSampler, in.uv + vec2<f32>(time * 0.010, time * 0.006));
-    let b = textureSample(waterTexture, waterSampler, in.uv * 0.7 + vec2<f32>(time * -0.007, time * 0.011));
-    var colour = mix(a.rgb, b.rgb, 0.5);
+    // Two layers, which is how FFXI builds it. effect kaw1 and ike1 are pure
+    // white - average RGB (255,255,255) - so they are a foam and ripple sheet,
+    // not a water colour. Used as the base they read as wet concrete. The body
+    // colour lives in effect umna at (12,15,29).
+    let body = vec3<f32>(0.055, 0.115, 0.145);
 
-    // Ambient can exceed 1 because components are scaled 0..128, so it is
-    // clamped - an earlier version let it through and the river turned white.
+    // The ripple sheet, sampled twice drifting at different speeds and angles so
+    // it does not read as one sheet sliding.
+    let a = textureSample(waterTexture, waterSampler, in.uv + vec2<f32>(time * 0.011, time * 0.007));
+    let b = textureSample(waterTexture, waterSampler, in.uv * 0.63 + vec2<f32>(time * -0.008, time * 0.013));
+    // Its alpha is the mask; where both layers agree the highlight is brightest.
+    let foam = clamp(a.a * 0.65 + b.a * 0.5, 0.0, 1.0);
+
+    // Ambient is clamped: components are scaled 0..128, so it can exceed 1 and
+    // an earlier version let that through and turned the river white.
     let ambient = min(uniforms.ambient.rgb, vec3<f32>(1.0, 1.0, 1.0));
-    colour = colour * (0.55 + 0.45 * ambient);
+    var colour = body * (0.5 + 0.5 * ambient);
+    colour = colour + ambient * foam * 0.22;
 
     let distance = length(in.worldPosition - uniforms.eye.xyz);
     let fogStart = uniforms.fogRange.x;
@@ -58,10 +66,7 @@ fn fragmentMain(in : WaterOut) -> @location(0) vec4<f32> {
     let fog = clamp((distance - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
     colour = mix(colour, uniforms.fogColour.rgb, fog);
 
-    // The texture's own alpha, softened - it is drawn as a translucent sheet
-    // over the bed rather than replacing it.
-    let alpha = clamp(mix(a.a, b.a, 0.5) * 1.6, 0.35, 0.85);
-    return vec4<f32>(colour, alpha);
+    return vec4<f32>(colour, 0.78);
 }
 )";
 } // namespace pj
