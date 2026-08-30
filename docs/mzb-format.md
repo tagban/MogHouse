@@ -30,9 +30,18 @@ retail zone checked is.
 | offset | size | field |
 | --- | --- | --- |
 | 0 | 4 | low 24 bits: encrypted length. Byte 3 is the version. |
-| 4 | 4 | low 24 bits: number of placement entries |
-| 8 | 24 | not yet identified |
+| 4 | 4 | low 24 bits: number of placement entries, top 8 flags |
+| 8 | 4 | collision mesh table offset. **0 means the zone has none.** |
+| 12 | 4 | grid width, grid height, bucket width, bucket height - one byte each |
+| 16 | 4 | quadtree offset |
+| 20 | 4 | object end offset |
+| 24 | 4 | short names offset |
+| 28 | 4 | unidentified, signed |
 | 32 | n * 0x64 | placement entries |
+
+Note offset 0 is *not* a four-character id, despite lotus's struct declaring it
+`char id[4]`. The decryption reads the length from those same bytes, so it
+cannot also be a name.
 
 Decryption walks forward from offset 8 in variable-sized runs:
 
@@ -81,9 +90,44 @@ pot, `tubodai` its stand. That is the check that the scheme above is right.
 **`t_atari*` is collision geometry** - *atari* is a hit or contact. Worth knowing
 before rendering a zone and wondering what the invisible walls are.
 
+## Collision meshes
+
+The table at `collisionMeshOffset` starts with a `u32` count and a `u32` offset
+to the first entry. Entries are 16 bytes and run back to back - the next begins
+at `triangle offset + count * 8`.
+
+| offset | type | field |
+| --- | --- | --- |
+| 0x00 | u32 | vertex data offset |
+| 0x04 | u32 | normal data offset |
+| 0x08 | u32 | triangle data offset |
+| 0x0C | u16 | triangle count |
+| 0x0E | u16 | flags |
+
+Vertices run as `vec3` from their offset up to the normal offset, and normals
+likewise up to the triangle offset - the sizes are implied by the next offset
+rather than stored. Triangles are four `u16` each: three indices masked to
+`0x3FFF`, so the top two bits of each carry something not yet identified, plus a
+fourth value.
+
+Verified across the whole of `ROM/1` - **128 zones, 1,821,257 vertices,
+2,105,385 triangles, zero indices out of range and zero non-unit normals**. Those
+last two are the checks worth caring about: 2.1 million indices all landing
+inside their own mesh, and every normal unit length, do not happen by accident
+if an offset or stride is wrong.
+
+Versions observed: `0x1B` on 127 zones and `0x1A` on one. The `0x1A` file is not
+encrypted and parses with the same code, which is what the version check
+predicts.
+
 ## Still to work out
 
-- The 24 bytes between the counts and the placement table
-- The collision mesh table: vertices, normals, indices and their bounds
-- The quadtree used for visibility
-- What the four floats at offset 52 select
+- The quadtree at `quadtreeOffset`, used for visibility
+- What the short names table holds
+- The top two bits of each triangle index
+- The fourth `u16` in each triangle
+- Why normal counts do not match either vertex or triangle counts - 2,354
+  normals against 3,248 vertices and 3,578 triangles in `r_3b`, so they are
+  neither per-vertex nor per-triangle
+- What the four floats at offset 52 of a placement select
+- The `0x1C`-typed chunks appear twice in some DATs (`24.DAT` has two zones)
