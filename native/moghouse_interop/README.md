@@ -25,7 +25,7 @@ own thread**; `MogHouseGame : public FFXIGame` (see `src/moghouse_interop.cpp`)
 overrides `tick()` to call `FFXIGame::tick()` first (so real zone/entity
 simulation still happens), then invokes a registered C function pointer so
 the managed side gets a per-frame hook. The managed side calls the blocking
-`pj_game_run()` from a dedicated background thread, not the UI thread, and
+`mh_game_run()` from a dedicated background thread, not the UI thread, and
 communicates with the rest of the C# app (networking, chat, macros) through
 whatever thread-safe hand-off it needs on top of the tick callback.
 
@@ -70,7 +70,7 @@ reference usage is safer to copy than inventing a different lifecycle.
    `PjErrorCallback` yet.** `lotus::Engine::run()`'s exception behavior
    wasn't confirmed (only the `.cppm` interface was read, not `engine.cpp`'s
    body) - find out whether `run()` can throw, and if so wrap it, before
-   relying on `pj_game_set_error_callback` for anything real.
+   relying on `mh_game_set_error_callback` for anything real.
 
 3. **Threading/marshaling on the C# side.** The tick callback fires on the
    engine's own native thread, not a thread .NET's runtime started - the C#

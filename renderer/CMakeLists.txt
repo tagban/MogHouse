@@ -19,26 +19,34 @@ find_package(Dawn REQUIRED)
 find_package(SDL3 REQUIRED)
 
 if(WIN32)
-    set(PJ_SURFACE_SOURCE surface_win32.cpp)
+    set(MH_SURFACE_SOURCE surface_win32.cpp)
 elseif(APPLE)
-    set(PJ_SURFACE_SOURCE surface_metal.mm)
+    set(MH_SURFACE_SOURCE surface_metal.mm)
 else()
-    set(PJ_SURFACE_SOURCE surface_linux.cpp)
+    set(MH_SURFACE_SOURCE surface_linux.cpp)
 endif()
 
-add_executable(moghouse-renderer
+# The renderer is a library first. MogHouse ships as one application, so the
+# C# client has to be able to load this rather than talk to a second
+# executable over a socket - see renderer/viewer.h.
+add_library(moghouse-render STATIC
     character.cpp
     collision.cpp
-    main.cpp
     scene.cpp
+    viewer.cpp
     zonemesh.cpp
-    ${PJ_SURFACE_SOURCE}
+    ${MH_SURFACE_SOURCE}
 )
+target_include_directories(moghouse-render PUBLIC .)
+target_link_libraries(moghouse-render PUBLIC dawn::webgpu_dawn SDL3::SDL3 ffxi-dat)
 
-target_link_libraries(moghouse-renderer PRIVATE dawn::webgpu_dawn SDL3::SDL3 ffxi-dat)
+# And a thin executable over it, so the renderer can still be exercised
+# without the client.
+add_executable(moghouse-renderer main.cpp)
+target_link_libraries(moghouse-renderer PRIVATE moghouse-render)
 
 if(APPLE)
-    target_link_libraries(moghouse-renderer PRIVATE "-framework QuartzCore" "-framework Cocoa")
+    target_link_libraries(moghouse-render PUBLIC "-framework QuartzCore" "-framework Cocoa")
     # surface_metal.mm uses __bridge casts, which only exist under ARC. Without
     # this the file does not compile.
     set_source_files_properties(surface_metal.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")

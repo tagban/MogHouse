@@ -12,31 +12,31 @@ internal static partial class NativeMethods
     private const string LibraryName = "moghouse_interop";
 
     [LibraryImport(LibraryName)]
-    internal static partial IntPtr pj_game_create(
+    internal static partial IntPtr mh_game_create(
         [MarshalAs(UnmanagedType.LPStr)] string appName,
         uint appVersion);
 
     [LibraryImport(LibraryName)]
-    internal static partial void pj_game_destroy(IntPtr game);
+    internal static partial void mh_game_destroy(IntPtr game);
 
     [LibraryImport(LibraryName)]
-    internal static unsafe partial void pj_game_set_tick_callback(
+    internal static unsafe partial void mh_game_set_tick_callback(
         IntPtr game,
         delegate* unmanaged[Cdecl]<double, IntPtr, void> callback,
         IntPtr userData);
 
     [LibraryImport(LibraryName)]
-    internal static unsafe partial void pj_game_set_error_callback(
+    internal static unsafe partial void mh_game_set_error_callback(
         IntPtr game,
         delegate* unmanaged[Cdecl]<IntPtr, IntPtr, void> callback,
         IntPtr userData);
 
     // Blocking - see the header. Must be called from a dedicated thread.
     [LibraryImport(LibraryName)]
-    internal static partial void pj_game_run(IntPtr game);
+    internal static partial void mh_game_run(IntPtr game);
 
     [LibraryImport(LibraryName)]
-    internal static partial void pj_game_close(IntPtr game);
+    internal static partial void mh_game_close(IntPtr game);
 }
 
 /// <summary>
@@ -58,15 +58,15 @@ public sealed class MogHouseEngine : IDisposable
     private unsafe MogHouseEngine(string appName, uint appVersion)
     {
         _selfHandle = GCHandle.Alloc(this, GCHandleType.Normal);
-        _handle = NativeMethods.pj_game_create(appName, appVersion);
+        _handle = NativeMethods.mh_game_create(appName, appVersion);
         if (_handle == IntPtr.Zero)
         {
             _selfHandle.Free();
-            throw new InvalidOperationException("pj_game_create returned a null handle.");
+            throw new InvalidOperationException("mh_game_create returned a null handle.");
         }
 
-        NativeMethods.pj_game_set_tick_callback(_handle, &OnTick, GCHandle.ToIntPtr(_selfHandle));
-        NativeMethods.pj_game_set_error_callback(_handle, &OnError, GCHandle.ToIntPtr(_selfHandle));
+        NativeMethods.mh_game_set_tick_callback(_handle, &OnTick, GCHandle.ToIntPtr(_selfHandle));
+        NativeMethods.mh_game_set_error_callback(_handle, &OnError, GCHandle.ToIntPtr(_selfHandle));
     }
 
     public static MogHouseEngine Create(string appName, uint appVersion) => new(appName, appVersion);
@@ -75,10 +75,10 @@ public sealed class MogHouseEngine : IDisposable
     /// Blocks the calling thread until <see cref="Close"/> is observed by
     /// the native loop. Call this from a dedicated background thread.
     /// </summary>
-    public void Run() => NativeMethods.pj_game_run(_handle);
+    public void Run() => NativeMethods.mh_game_run(_handle);
 
     /// <summary>Safe to call from any thread, including from a Tick handler.</summary>
-    public void Close() => NativeMethods.pj_game_close(_handle);
+    public void Close() => NativeMethods.mh_game_close(_handle);
 
     [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
     private static void OnTick(double deltaSeconds, IntPtr userData)
@@ -107,7 +107,7 @@ public sealed class MogHouseEngine : IDisposable
         }
 
         _disposed = true;
-        NativeMethods.pj_game_destroy(_handle);
+        NativeMethods.mh_game_destroy(_handle);
         _selfHandle.Free();
     }
 }

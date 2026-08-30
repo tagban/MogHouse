@@ -68,29 +68,29 @@ private:
 
 extern "C"
 {
-    PJ_API PjGameHandle pj_game_create(const char* app_name, uint32_t app_version)
+    MH_API PjGameHandle mh_game_create(const char* app_name, uint32_t app_version)
     {
         return new PjGame(app_name ? std::string(app_name) : std::string("MogHouse"), app_version);
     }
 
-    PJ_API void pj_game_destroy(PjGameHandle game)
+    MH_API void mh_game_destroy(PjGameHandle game)
     {
         delete game;
     }
 
-    PJ_API void pj_game_set_tick_callback(PjGameHandle game, PjTickCallback callback, void* user_data)
+    MH_API void mh_game_set_tick_callback(PjGameHandle game, PjTickCallback callback, void* user_data)
     {
         game->game.tick_callback = callback;
         game->game.tick_user_data = user_data;
     }
 
-    PJ_API void pj_game_set_error_callback(PjGameHandle game, PjErrorCallback callback, void* user_data)
+    MH_API void mh_game_set_error_callback(PjGameHandle game, PjErrorCallback callback, void* user_data)
     {
         game->game.error_callback = callback;
         game->game.error_user_data = user_data;
     }
 
-    PJ_API void pj_game_run(PjGameHandle game)
+    MH_API void mh_game_run(PjGameHandle game)
     {
         // FFXIGame::run() (inherited from lotus::Game) blocks until
         // engine->close() is called - see engine/lotus/engine.cppm. Any
@@ -102,7 +102,7 @@ extern "C"
         game->game.run();
     }
 
-    PJ_API void pj_game_close(PjGameHandle game)
+    MH_API void mh_game_close(PjGameHandle game)
     {
         game->game.engine->close();
     }
