@@ -7,6 +7,11 @@
 #   .\run.ps1 -Look 1,0,49,30,30,30,30         a hume male in samurai armour
 #   .\run.ps1 -ZoneId 235 -Look 8,0,0,5,5,5,5  a galka in Bastok Markets
 #
+# If the machine refuses to run local scripts, this needs no settings
+# change:
+#
+#   powershell -ExecutionPolicy Bypass -File .\run.ps1 -ZoneId 235
+#
 # In the window: wasd walks, drag looks, c drops the character where you are
 # standing, tab orbits, p prints the position, escape quits.
 param(
