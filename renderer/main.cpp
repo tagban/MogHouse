@@ -388,6 +388,7 @@ int main(int argc, char** argv)
     wgpu::Buffer uniformBuffer;
     wgpu::RenderPipeline pipeline;
     wgpu::RenderPipeline cutoutPipeline;
+    wgpu::BindGroupLayout zoneBindGroupLayout;
     wgpu::Sampler sampler;
     wgpu::Texture whiteTexture;
     std::vector<wgpu::Texture> batchTextures;
@@ -421,6 +422,28 @@ int main(int argc, char** argv)
                                               .attributeCount = 3,
                                               .attributes = attributes};
 
+        // An explicit layout shared by both pipelines. Letting each derive its
+        // own default layout makes bind groups built for one incompatible with
+        // the other, which fails at draw time rather than at creation.
+        wgpu::BindGroupLayoutEntry layoutEntries[3] = {};
+        layoutEntries[0].binding = 0;
+        layoutEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+        layoutEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
+        layoutEntries[1].binding = 1;
+        layoutEntries[1].visibility = wgpu::ShaderStage::Fragment;
+        layoutEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
+        layoutEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+        layoutEntries[2].binding = 2;
+        layoutEntries[2].visibility = wgpu::ShaderStage::Fragment;
+        layoutEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
+
+        wgpu::BindGroupLayoutDescriptor bindGroupLayoutDescriptor{.entryCount = 3, .entries = layoutEntries};
+        zoneBindGroupLayout = device.CreateBindGroupLayout(&bindGroupLayoutDescriptor);
+
+        wgpu::PipelineLayoutDescriptor pipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
+                                                                .bindGroupLayouts = &zoneBindGroupLayout};
+        wgpu::PipelineLayout sharedLayout = device.CreatePipelineLayout(&pipelineLayoutDescriptor);
+
         wgpu::ColorTargetState colorTarget{.format = surfaceFormat};
         wgpu::FragmentState fragment{.module = module, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &colorTarget};
         wgpu::DepthStencilState depthStencil{.format = kDepthFormat,
@@ -428,6 +451,7 @@ int main(int argc, char** argv)
                                              .depthCompare = wgpu::CompareFunction::Less};
 
         wgpu::RenderPipelineDescriptor pipelineDescriptor{
+            .layout = sharedLayout,
             .vertex = {.module = module, .entryPoint = "vertexMain", .bufferCount = 1, .buffers = &vertexLayout},
             .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
             .depthStencil = &depthStencil,
@@ -489,7 +513,7 @@ int main(int argc, char** argv)
             entries[2].sampler = sampler;
 
             wgpu::BindGroupDescriptor bindGroupDescriptor{
-                .layout = pipeline.GetBindGroupLayout(0), .entryCount = 3, .entries = entries};
+                .layout = zoneBindGroupLayout, .entryCount = 3, .entries = entries};
             batchBindGroups.push_back(device.CreateBindGroup(&bindGroupDescriptor));
         }
         std::printf("%zu batches, %zu textures uploaded, %zu with no texture in this DAT\n", zone->batches.size(),
