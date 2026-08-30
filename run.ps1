@@ -24,6 +24,10 @@ param(
     # An NPC that lives in one DAT, as a path. Ignored if -Look is given.
     [string]$Character = "",
     [string]$Animation = "idl0",
+    # Entities to show on the radar, as "x,z,kind;x,z,kind" - kind 0 player,
+    # 1 npc, 2 enemy. Until the client feeds the renderer directly, this is how
+    # real positions get onto the radar.
+    [string]$Entities = "",
     # A zone DAT path, or use -ZoneId instead.
     [string]$Zone = "",
     # FFXI zone id. East Sarutabaruta is 116, Bastok Markets 235.

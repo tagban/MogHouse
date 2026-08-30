@@ -94,11 +94,16 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
         let terrain = textureSampleLevel(mapTexture, mapSampler, uv, 0.0).rgb;
         let walkable = textureSampleLevel(maskTexture, mapSampler, uv, 0.0).r;
 
-        // Ground you can stand on keeps its colour and is lifted; everything
-        // else is pushed down and desaturated, so the shape of where you can
-        // go reads at a glance rather than having to be picked out of terrain.
+        // Blocked ground is pushed down and desaturated; walkable ground is
+        // left alone.
+        //
+        // The first attempt lifted the walkable side instead, which looked
+        // right in a field and destroyed a town - almost all of Bastok is
+        // walkable, so tinting it turned the whole map one flat colour and
+        // lost the streets. Darkening the exception keeps the map legible
+        // wherever the balance happens to fall.
         let flat = vec3<f32>(dot(terrain, vec3<f32>(0.299, 0.587, 0.114)));
-        colour = mix(flat * 0.35, terrain * 1.15 + vec3<f32>(0.0, 0.06, 0.0), walkable);
+        colour = mix(flat * 0.30, terrain, walkable);
     }
 
     // Range rings, every quarter of the radar, as a sense of distance.
