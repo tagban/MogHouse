@@ -1246,27 +1246,33 @@ int mh::runViewer(const ViewerOptions& options)
     {
         characterFacing = static_cast<float>(std::atof(facingEnv)) * 3.14159265f / 180.0f;
     }
-    auto placeCharacter = [&](const mh::Vec3& where) {
+    // `search` is how far to look for ground when there is none directly
+    // below. Dropping a character into a zone wants a wide sweep; a footstep
+    // wants none at all. Sharing one value is what let a step off a ledge
+    // teleport into the water sixty units away, which is not falling and is
+    // not blocking either.
+    auto placeCharacter = [&](const mh::Vec3& where, float search) {
         characterAt = where;
-        // Snap to the floor, and if there is none directly below, to the
-        // nearest spot there is. Without collision at all - a zone we could
-        // not parse - the character stays where it was put rather than being
-        // trapped somewhere arbitrary.
         if (const std::optional<mh::Vec3> ground =
-                collision.nearestGround(where.x, where.z, where.y + 1.0f, 60.0f))
+                collision.nearestGround(where.x, where.z, where.y + 1.0f, search))
         {
             characterAt = *ground;
         }
         if (characterInstanceBuffer)
         {
-            const float c = std::cos(characterFacing);
-            const float sn = std::sin(characterFacing);
+            // characterFacing is a compass heading: 0 is +z, and the
+            // direction is (sin, cos) - the same convention camera.yaw and the
+            // radar notch use. The model faces +x when unrotated, so the
+            // rotation that points it along the heading is a quarter turn less.
+            const float turn = 1.57079633f - characterFacing;
+            const float c = std::cos(turn);
+            const float sn = std::sin(turn);
             const float instance[16] = {c,       0, -sn,      0, 0,       1, 0,       0,
                                         sn,      0, c,        0, where.x, where.y, where.z, 1};
             queue.WriteBuffer(characterInstanceBuffer, 0, instance, sizeof(instance));
         }
     };
-    placeCharacter(characterAt);
+    placeCharacter(characterAt, 60.0f);
     if (character)
     {
         std::printf("character stands at %.1f %.1f %.1f%s\n", characterAt.x, characterAt.y, characterAt.z,
@@ -1417,7 +1423,7 @@ int mh::runViewer(const ViewerOptions& options)
                     // where the ground is yet, so putting it somewhere useful
                     // is a matter of walking there and pressing a key.
                     const mh::Vec3 at = camera.eye();
-                    placeCharacter(at);
+                    placeCharacter(at, 60.0f);
                     std::printf("character moved to %.1f %.1f %.1f\n", at.x, at.y, at.z);
                 }
             }
@@ -1478,16 +1484,26 @@ int mh::runViewer(const ViewerOptions& options)
             if (wanted.x != characterAt.x || wanted.z != characterAt.z)
             {
                 const mh::Vec3 stepped = collision.empty() ? wanted : collision.move(characterAt, wanted, 0.5f);
-                const float dx = stepped.x - characterAt.x;
-                const float dz = stepped.z - characterAt.z;
-                moved = std::sqrt(dx * dx + dz * dz);
-                if (moved > 1e-5f)
+
+                // A step needs ground directly under it. Searching outward for
+                // some, the way an initial drop does, turns walking off a ledge
+                // into a jump to wherever the nearest surface happens to be.
+                const bool footing =
+                    collision.empty() || collision.groundAt(stepped.x, stepped.z, characterAt.y + 1.0f).has_value();
+
+                if (footing)
                 {
-                    // Face the way we are actually going, not the way we
-                    // asked to go - sliding along a wall should turn you.
-                    characterFacing = std::atan2(dz, dx);
+                    const float dx = stepped.x - characterAt.x;
+                    const float dz = stepped.z - characterAt.z;
+                    moved = std::sqrt(dx * dx + dz * dz);
+                    placeCharacter(stepped, 0.0f);
                 }
-                placeCharacter(stepped);
+
+                // Facing follows the camera, not the step. Walking backwards or
+                // strafing should not spin the character round, and taking the
+                // direction from the movement delta means sliding along a wall
+                // turns you to face it.
+                characterFacing = camera.yaw;
             }
 
             // The camera sits behind and above the character, at head height.

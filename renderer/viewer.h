@@ -50,7 +50,7 @@ struct ViewerOptions
     std::optional<std::string> characterPath;
 
     std::optional<std::string> characterAt;      ///< "x,y,z"
-    std::optional<std::string> characterFacing;  ///< degrees
+    std::optional<std::string> characterFacing;  ///< compass degrees, 0 is north (+z)
     std::optional<std::string> camera;           ///< "x,y,z"
     std::optional<std::string> cameraLook;       ///< "yaw,pitch" in degrees
 
