@@ -9,7 +9,7 @@ public class FfxiEntityTrackerTests
 
     /// <summary>An 0x00E long enough to carry the HP block.</summary>
     private static FfxiEntityUpdate Npc(uint uniqueNo, byte allegiance, float x = 0, float z = 0,
-                                        bool livingMob = false)
+                                        bool livingMob = false, bool despawn = false)
     {
         byte[] packet = new byte[0x48];
         BinaryPrimitives.WriteUInt16LittleEndian(packet, (ushort)(0x00E | (packet.Length / 4) << 9));
@@ -19,6 +19,7 @@ public class FfxiEntityTrackerTests
         packet[0x1E] = 100;
         packet[0x29] = allegiance;
         packet[0x25] = livingMob ? FfxiEntityUpdate.MobAliveFlag : (byte)0;
+        packet[0x0A] = despawn ? FfxiEntityUpdate.DespawnFlag : (byte)0;
         return FfxiEntityUpdate.TryParse(packet)!;
     }
 
@@ -88,6 +89,48 @@ public class FfxiEntityTrackerTests
         tracker.Observe(Npc(uniqueNo: 100, allegiance: 0, livingMob: false), Now.AddSeconds(5));
 
         Assert.Equal(FfxiEntityKind.Enemy, Assert.Single(tracker.Visible(Now.AddSeconds(5))).Kind);
+    }
+
+    /// <summary>
+    /// The exact answer to "is it still there", as opposed to the timeout,
+    /// which is only a backstop.
+    /// </summary>
+    [Fact]
+    public void ADespawnRemovesAnEntityAtOnce()
+    {
+        FfxiEntityTracker tracker = new();
+        tracker.Observe(Npc(uniqueNo: 100, allegiance: 0, livingMob: true), Now);
+        tracker.Observe(Npc(uniqueNo: 101, allegiance: 3), Now);
+        Assert.Equal(2, tracker.Count);
+
+        tracker.Observe(Npc(uniqueNo: 100, allegiance: 0, despawn: true), Now.AddSeconds(1));
+
+        FfxiTrackedEntity left = Assert.Single(tracker.Visible(Now.AddSeconds(1)));
+        Assert.Equal(101u, left.UniqueNo);
+    }
+
+    /// <summary>
+    /// Enemies are sticky so a dead mob stays red, and that must not outrank a
+    /// despawn - a killed mob should leave the radar, not sit on it in red
+    /// forever.
+    /// </summary>
+    [Fact]
+    public void ADespawnBeatsTheStickyEnemyRule()
+    {
+        FfxiEntityTracker tracker = new();
+        tracker.Observe(Npc(uniqueNo: 100, allegiance: 0, livingMob: true), Now);
+        tracker.Observe(Npc(uniqueNo: 100, allegiance: 0, despawn: true), Now.AddSeconds(1));
+
+        Assert.Empty(tracker.Visible(Now.AddSeconds(1)));
+    }
+
+    [Fact]
+    public void ADespawnForSomethingUnknownIsHarmless()
+    {
+        FfxiEntityTracker tracker = new();
+        tracker.Observe(Npc(uniqueNo: 999, allegiance: 0, despawn: true), Now);
+
+        Assert.Empty(tracker.Visible(Now));
     }
 
     [Fact]

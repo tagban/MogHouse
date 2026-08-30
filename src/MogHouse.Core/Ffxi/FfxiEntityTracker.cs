@@ -40,8 +40,9 @@ public sealed class FfxiEntityTracker
     /// never be mentioned a second time, and a short timeout would delete
     /// every stationary NPC in the zone while they were still standing there.
     ///
-    /// The real signal is the despawn the server sends, which is not parsed
-    /// yet. Until it is, this is a backstop rather than the mechanism.
+    /// The despawn packet is the exact signal and is parsed now, so this is
+    /// only a backstop - for an entity that goes away without one, or a
+    /// despawn lost to the transport.
     /// </summary>
     public static readonly TimeSpan DefaultForgetAfter = TimeSpan.FromMinutes(5);
 
@@ -64,6 +65,15 @@ public sealed class FfxiEntityTracker
     {
         if (update.UniqueNo == 0 || update.UniqueNo == SelfUniqueNo)
         {
+            return;
+        }
+
+        // A despawn is the real answer to "is it still there", and the only
+        // exact one. The timeout below is a backstop for entities that leave
+        // without one.
+        if (update.IsDespawn)
+        {
+            _entities.Remove(update.UniqueNo);
             return;
         }
 

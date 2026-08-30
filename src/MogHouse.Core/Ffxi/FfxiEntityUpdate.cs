@@ -57,7 +57,8 @@ public sealed record FfxiEntityUpdate(
     uint? RawFlags0 = null,
     byte? Allegiance = null,
     byte? HealthPercent = null,
-    byte? BattleFlags = null)
+    byte? BattleFlags = null,
+    byte SendFlags = 0)
 {
     public const ushort PlayerPacketId = 0x00D;
     public const ushort NpcPacketId = 0x00E;
@@ -104,6 +105,23 @@ public sealed record FfxiEntityUpdate(
     /// <summary>Set on a living mob; NPCs never write this byte at all.</summary>
     public const byte MobAliveFlag = 0x08;
 
+    /// <summary>
+    /// This update says the entity has gone - killed, walked out of range,
+    /// logged out.
+    ///
+    /// Both packet types carry it the same way, which is worth knowing because
+    /// almost nothing else about them is shared past the position block: the
+    /// server sets SendFlg.Despawn in char_update.cpp for players and in
+    /// entity_update.cpp for everything else, and SendFlg is in the block they
+    /// do share.
+    /// </summary>
+    public bool IsDespawn => (SendFlags & DespawnFlag) != 0;
+
+    /// <summary>sendflags_t bit 5. The whole byte reads 0x30 on an NPC despawn
+    /// - the despawn bit and the model bit together - so testing the bit rather
+    /// than the byte is what makes this work for players too.</summary>
+    public const byte DespawnFlag = 0x20;
+
     /// <summary>xi::Allegiance - 0 is Mob, 1 Player, 2-6 the nations. Kept for
     /// information; it does not say what kind of entity this is.</summary>
     public const byte MobAllegiance = 0;
@@ -111,6 +129,9 @@ public sealed record FfxiEntityUpdate(
     private const int Body = 4; // id/size/sync sub-packet header
     private const int OffsetUniqueNo = Body + 0;
     private const int OffsetActIndex = Body + 4;
+
+    /// <summary>Absolute 0x0A - sendflags_t, in the shared position block.</summary>
+    private const int OffsetSendFlags = 0x0A;
     private const int OffsetDirection = Body + 7;
     private const int OffsetX = Body + 8;
     private const int OffsetVertical = Body + 12; // engine Y - see FfxiPositionPacket
@@ -197,6 +218,7 @@ public sealed record FfxiEntityUpdate(
         }
 
         return new FfxiEntityUpdate(
+            SendFlags: subPacket[OffsetSendFlags],
             PacketId: id,
             UniqueNo: BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(OffsetUniqueNo, 4)),
             ActIndex: BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(OffsetActIndex, 2)),

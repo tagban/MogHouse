@@ -233,6 +233,54 @@ public class FfxiEntityUpdateAppearanceTests
         Assert.NotEqual(npc.Kind, mob.Kind);
     }
 
+    /// <summary>
+    /// Players and NPCs signal a despawn the same way, which is not true of
+    /// much else past the position block.
+    /// </summary>
+    [Theory]
+    [InlineData((ushort)0x00D)]
+    [InlineData((ushort)0x00E)]
+    public void TheDespawnFlagIsReadForBothPacketTypes(ushort id)
+    {
+        byte[] packet = new byte[0x48];
+        BinaryPrimitives.WriteUInt16LittleEndian(packet, (ushort)(id | (packet.Length / 4) << 9));
+        packet[0x0A] = FfxiEntityUpdate.DespawnFlag;
+
+        FfxiEntityUpdate? update = FfxiEntityUpdate.TryParse(packet);
+
+        Assert.NotNull(update);
+        Assert.True(update.IsDespawn);
+    }
+
+    /// <summary>
+    /// The flag has to be tested as a bit. An NPC despawn sets the whole byte
+    /// to 0x30 - despawn plus model - so a byte comparison would work there and
+    /// quietly miss the player case.
+    /// </summary>
+    [Fact]
+    public void TheDespawnBitIsReadAlongsideOtherFlags()
+    {
+        byte[] packet = new byte[0x48];
+        BinaryPrimitives.WriteUInt16LittleEndian(packet, (ushort)(0x00E | (packet.Length / 4) << 9));
+        packet[0x0A] = 0x30;
+
+        Assert.True(FfxiEntityUpdate.TryParse(packet)!.IsDespawn);
+    }
+
+    [Fact]
+    public void AnOrdinaryUpdateIsNotADespawn()
+    {
+        // 0x57 and 0x0F are both real SendFlg values captured from the server.
+        foreach (byte flags in new byte[] { 0x0F, 0x57 })
+        {
+            byte[] packet = new byte[0x48];
+            BinaryPrimitives.WriteUInt16LittleEndian(packet, (ushort)(0x00E | (packet.Length / 4) << 9));
+            packet[0x0A] = flags;
+
+            Assert.False(FfxiEntityUpdate.TryParse(packet)!.IsDespawn);
+        }
+    }
+
     [Fact]
     public void APlayerUpdateIsAPlayerWhateverElseItCarries()
     {

@@ -433,6 +433,7 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                     // between the fields - so it gets found by diffing packets
                     // whose answer is already known from the server data.
                     var rawFirstSeen = new Dictionary<uint, byte[]>();
+                    var despawned = new List<(uint Id, ushort ActIndex, ushort PacketId)>();
                     var lastFlags = new Dictionary<uint, (uint Flags0, uint Flags1)>();
 
                     // Lets two test clients be parked next to each other
@@ -499,7 +500,17 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                                     bool isSelf = entity.UniqueNo == handoff.ContentId;
                                     int count = entitiesSeen.GetValueOrDefault(entity.UniqueNo).Count + 1;
                                     entitiesSeen[entity.UniqueNo] = (entity.PacketId, isSelf, count);
+                                    int before = tracker.Count;
                                     tracker.Observe(entity, DateTimeOffset.UtcNow);
+                                    if (entity.IsDespawn)
+                                    {
+                                        despawned.Add((entity.UniqueNo, entity.ActIndex, entity.PacketId));
+                                        // Before and after, so the log says the
+                                        // tracker acted rather than just that the
+                                        // flag parsed.
+                                        Console.WriteLine($"    DESPAWN {entity.PacketId:X3} id {entity.UniqueNo} " +
+                                            $"targid 0x{entity.ActIndex:X3} - tracked {before} -> {tracker.Count}");
+                                    }
                                     liveRadar?.Publish(tracker);
                                     if (!rawFirstSeen.ContainsKey(entity.UniqueNo))
                                     {
@@ -589,6 +600,8 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                     }
 
                     liveRadar?.Dispose();
+
+                    Console.WriteLine($"Despawns seen: {despawned.Count}");
 
                     IReadOnlyList<FfxiTrackedEntity> visible = tracker.Visible(DateTimeOffset.UtcNow);
                     Console.WriteLine();
