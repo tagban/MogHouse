@@ -17,10 +17,13 @@ struct Uniforms {
 };
 
 @group(0) @binding(0) var<uniform> uniforms : Uniforms;
+@group(0) @binding(1) var waterTexture : texture_2d<f32>;
+@group(0) @binding(2) var waterSampler : sampler;
 
 struct WaterOut {
     @builtin(position) clipPosition : vec4<f32>,
     @location(0) worldPosition : vec3<f32>,
+    @location(1) uv : vec2<f32>,
 };
 
 @vertex
@@ -30,55 +33,34 @@ fn vertexMain(@location(0) position : vec3<f32>,
     var out : WaterOut;
     out.clipPosition = uniforms.viewProjection * vec4<f32>(position, 1.0);
     out.worldPosition = position;
+    out.uv = uv;
     return out;
 }
 
 @fragment
 fn fragmentMain(in : WaterOut) -> @location(0) vec4<f32> {
-    // No water texture is stored anywhere - lotus generates one - so the
-    // surface is procedural: crossed waves of different wavelengths and speeds
-    // so the pattern does not visibly repeat.
     let time = uniforms.eye.w;
-    let p = in.worldPosition.xz;
 
-    let wave1 = sin(p.x * 0.35 + time * 1.1) * cos(p.y * 0.29 - time * 0.8);
-    let wave2 = sin((p.x + p.y) * 0.17 - time * 0.6);
-    let wave3 = sin(p.y * 0.55 + time * 1.7) * 0.5;
-    let height = wave1 * 0.5 + wave2 * 0.35 + wave3 * 0.25;
+    // FFXI's own water texture, scrolled. Two samples drifting at different
+    // speeds and angles, so the surface does not read as one sheet sliding.
+    let a = textureSample(waterTexture, waterSampler, in.uv + vec2<f32>(time * 0.010, time * 0.006));
+    let b = textureSample(waterTexture, waterSampler, in.uv * 0.7 + vec2<f32>(time * -0.007, time * 0.011));
+    var colour = mix(a.rgb, b.rgb, 0.5);
 
-    // A normal derived from the wave slopes, so the light moves across the
-    // surface rather than the colour just pulsing.
-    let slopeX = cos(p.x * 0.35 + time * 1.1) * 0.35 * 0.5 + cos((p.x + p.y) * 0.17 - time * 0.6) * 0.17 * 0.35;
-    let slopeZ = -sin(p.y * 0.29 - time * 0.8) * 0.29 * 0.5 + cos(p.y * 0.55 + time * 1.7) * 0.55 * 0.125;
-    let n = normalize(vec3<f32>(-slopeX, 1.0, -slopeZ));
+    // Ambient can exceed 1 because components are scaled 0..128, so it is
+    // clamped - an earlier version let it through and the river turned white.
+    let ambient = min(uniforms.ambient.rgb, vec3<f32>(1.0, 1.0, 1.0));
+    colour = colour * (0.55 + 0.45 * ambient);
 
-    let toEye = normalize(uniforms.eye.xyz - in.worldPosition);
-    // Water seen edge-on reflects; seen from above it shows its depth.
-    let facing = clamp(dot(n, toEye), 0.0, 1.0);
-    let fresnel = pow(1.0 - facing, 3.0);
-
-    let deep = vec3<f32>(0.06, 0.19, 0.24);
-    let shallow = vec3<f32>(0.16, 0.35, 0.38);
-    var colour = mix(deep, shallow, height * 0.5 + 0.5);
-
-    // Sky colour standing in for a reflection at glancing angles.
-    let skyish = uniforms.ambient.rgb * 0.9;
-    colour = mix(colour, skyish, fresnel * 0.65);
-
-    // A specular glint that travels with the waves.
-    let specular = pow(clamp(dot(reflect(-toEye, n), normalize(uniforms.lightDirection.xyz)), 0.0, 1.0), 48.0);
-    colour = colour * (uniforms.ambient.rgb + uniforms.sunlight.rgb * 0.5) + uniforms.sunlight.rgb * specular * 0.6;
-
-    // Fogged like everything else, or distant water sits oddly in front of a
-    // fogged shore.
     let distance = length(in.worldPosition - uniforms.eye.xyz);
     let fogStart = uniforms.fogRange.x;
     let fogEnd = max(uniforms.fogRange.y, fogStart + 0.001);
     let fog = clamp((distance - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
     colour = mix(colour, uniforms.fogColour.rgb, fog);
 
-    // More opaque edge-on, clearer looking straight down, as water is.
-    let alpha = mix(0.62, 0.9, fresnel);
+    // The texture's own alpha, softened - it is drawn as a translucent sheet
+    // over the bed rather than replacing it.
+    let alpha = clamp(mix(a.a, b.a, 0.5) * 1.6, 0.35, 0.85);
     return vec4<f32>(colour, alpha);
 }
 )";

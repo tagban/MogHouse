@@ -525,11 +525,38 @@ int main(int argc, char** argv)
                                                .depthWriteEnabled = wgpu::OptionalBool::False,
                                                .depthCompare = wgpu::CompareFunction::Less};
 
-            wgpu::BindGroupLayoutEntry waterLayoutEntry{};
-            waterLayoutEntry.binding = 0;
-            waterLayoutEntry.visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
-            waterLayoutEntry.buffer.type = wgpu::BufferBindingType::Uniform;
-            wgpu::BindGroupLayoutDescriptor waterBglDescriptor{.entryCount = 1, .entries = &waterLayoutEntry};
+            // FFXI's own water texture, scrolled, rather than an invented
+            // colour. The models nothing places - kw01 for rivers, ike for
+            // ponds, umi1 for sea - all carry one of these.
+            wgpu::TextureView waterView = whiteTexture.CreateView();
+            for (const char* candidate : {"effect  kaw1", "effect  ike1", "effect  ike2", "effect  umna", "effect  nami"})
+            {
+                auto found = textures.find(candidate);
+                if (found != textures.end())
+                {
+                    wgpu::Texture gpu = pj::uploadTexture(device, found->second);
+                    if (gpu)
+                    {
+                        batchTextures.push_back(gpu);
+                        waterView = batchTextures.back().CreateView();
+                        std::printf("water texture: %s\n", candidate);
+                        break;
+                    }
+                }
+            }
+
+            wgpu::BindGroupLayoutEntry waterLayoutEntries[3] = {};
+            waterLayoutEntries[0].binding = 0;
+            waterLayoutEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+            waterLayoutEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
+            waterLayoutEntries[1].binding = 1;
+            waterLayoutEntries[1].visibility = wgpu::ShaderStage::Fragment;
+            waterLayoutEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
+            waterLayoutEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+            waterLayoutEntries[2].binding = 2;
+            waterLayoutEntries[2].visibility = wgpu::ShaderStage::Fragment;
+            waterLayoutEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
+            wgpu::BindGroupLayoutDescriptor waterBglDescriptor{.entryCount = 3, .entries = waterLayoutEntries};
             wgpu::BindGroupLayout waterBgl = device.CreateBindGroupLayout(&waterBglDescriptor);
             wgpu::PipelineLayoutDescriptor waterPlDescriptor{.bindGroupLayoutCount = 1, .bindGroupLayouts = &waterBgl};
             wgpu::PipelineLayout waterPl = device.CreatePipelineLayout(&waterPlDescriptor);
@@ -542,8 +569,15 @@ int main(int argc, char** argv)
                 .fragment = &waterFragment};
             waterPipeline = device.CreateRenderPipeline(&waterPipelineDescriptor);
 
-            wgpu::BindGroupEntry waterEntry{.binding = 0, .buffer = uniformBuffer, .size = sizeof(Uniforms)};
-            wgpu::BindGroupDescriptor waterBgDescriptor{.layout = waterBgl, .entryCount = 1, .entries = &waterEntry};
+            wgpu::BindGroupEntry waterEntries[3] = {};
+            waterEntries[0].binding = 0;
+            waterEntries[0].buffer = uniformBuffer;
+            waterEntries[0].size = sizeof(Uniforms);
+            waterEntries[1].binding = 1;
+            waterEntries[1].textureView = waterView;
+            waterEntries[2].binding = 2;
+            waterEntries[2].sampler = sampler;
+            wgpu::BindGroupDescriptor waterBgDescriptor{.layout = waterBgl, .entryCount = 3, .entries = waterEntries};
             waterBindGroup = device.CreateBindGroup(&waterBgDescriptor);
 
             std::printf("water: %zu quads\n", zone->waterIndices.size() / 6);
