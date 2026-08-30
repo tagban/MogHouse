@@ -1298,7 +1298,12 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         if (const std::optional<mh::Vec3> ground =
                 collision.nearestGround(target.x, target.z, target.y + 1.0f, search))
         {
-            characterAt = *ground;
+            // Snapping up is what a caller wants: a spawn point given a
+            // slightly-too-low height belongs on the floor above it. Snapping
+            // *down* is not - a position well clear of the ground is a request
+            // to be in the air, and gravity is a better answer to that than a
+            // teleport.
+            characterAt = target.y > ground->y + 1.0f ? mh::Vec3{ground->x, target.y, ground->z} : *ground;
         }
         writeCharacterInstance();
     };
@@ -1395,6 +1400,21 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
       // answer to "what can be seen right now".
     std::vector<mh::RadarEntity> radarEntities = options.testEntities;
     float radarRange = 120.0f;
+
+    /// How fast a fall accelerates, in units per second squared. Not measured
+    /// against anything - FFXI's own value is not in the DATs - so it is
+    /// tuned to look right at this scale, where a character is 1.8 units tall.
+    constexpr float kGravity = 26.0f;
+
+    /// How far below the feet still counts as standing on something. Slopes
+    /// and the discrete steps of a walk both leave small gaps, and treating
+    /// those as falling makes a character jitter downhill.
+    constexpr float kGroundSnap = 0.25f;
+
+    /// How far down to look for the floor while falling.
+    constexpr float kFallReach = 500.0f;
+
+    float fallSpeed = 0.0f;
 
     const float pinnedFrame = options.frame.value_or(-1.0f);
     const float shaderMode = options.shaderMode;
@@ -1515,26 +1535,25 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             {
                 const mh::Vec3 stepped = collision.empty() ? wanted : collision.move(characterAt, wanted, 0.5f);
 
-                // A step needs ground directly under it, within reach both
-                // ways. Rising is bounded by the step height; falling is
-                // bounded here, because without a limit a step finds whatever
-                // is below and takes it - through a staircase, off a quay,
-                // into the water.
+                // Horizontal only. Whether there is anything to stand on is
+                // settled below, by falling - a step off a ledge is a step, not
+                // a refusal.
                 //
-                // Blocking rather than falling is a stand-in. There is no
-                // gravity yet, and stopping at an edge is the wrong behaviour
-                // that is easiest to see and hardest to get stuck in.
-                constexpr float kMaxStepDrop = 1.5f;
-                const std::optional<float> footing =
-                    collision.empty() ? std::optional<float>{characterAt.y}
-                                      : collision.groundAt(stepped.x, stepped.z, characterAt.y, kMaxStepDrop);
+                // The exception is a step onto nothing at all: no surface
+                // anywhere below, which means the edge of the world rather
+                // than a drop. Falling out of a zone is not a behaviour worth
+                // having.
+                const bool intoTheVoid =
+                    !collision.empty() &&
+                    !collision.groundAt(stepped.x, stepped.z, characterAt.y, kFallReach).has_value();
 
-                if (footing)
+                if (!intoTheVoid)
                 {
                     const float dx = stepped.x - characterAt.x;
                     const float dz = stepped.z - characterAt.z;
                     moved = std::sqrt(dx * dx + dz * dz);
-                    characterAt = {stepped.x, *footing, stepped.z};
+                    characterAt.x = stepped.x;
+                    characterAt.z = stepped.z;
                 }
 
                 // Facing follows the camera, not the step. Walking backwards or
@@ -1542,8 +1561,38 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                 // direction from the movement delta means sliding along a wall
                 // turns you to face it.
                 characterFacing = camera.yaw;
-                writeCharacterInstance();
             }
+
+            // Stand on the floor, or fall towards it.
+            //
+            // groundAt allows a little above the feet - the step height - so
+            // walking up a stair tread reads as standing on it rather than as
+            // rising through it.
+            if (!collision.empty())
+            {
+                const std::optional<float> ground =
+                    collision.groundAt(characterAt.x, characterAt.z, characterAt.y, kFallReach);
+
+                if (ground && *ground >= characterAt.y - kGroundSnap)
+                {
+                    characterAt.y = *ground;
+                    fallSpeed = 0.0f;
+                }
+                else if (ground)
+                {
+                    fallSpeed += kGravity * delta;
+                    const float next = characterAt.y - fallSpeed * delta;
+
+                    // Land rather than pass through: at speed a single frame
+                    // can cover more than the remaining distance.
+                    characterAt.y = next <= *ground ? *ground : next;
+                    if (next <= *ground)
+                    {
+                        fallSpeed = 0.0f;
+                    }
+                }
+            }
+            writeCharacterInstance();
 
             // The camera sits behind and above the character, at head height.
             camera.orbiting = true;
@@ -1834,7 +1883,10 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                 const auto* pixels = static_cast<const uint8_t*>(readbackBuffer.GetConstMappedRange());
                 if (pixels && writeBmp(shotPath, pixels, width, height, bytesPerRow))
                 {
-                    std::printf("wrote %s (%ux%u)\n", shotPath, width, height);
+                    // The character height goes with it: a fall is far easier to
+                    // read as a column of numbers than as a strip of pictures.
+                    std::printf("wrote %s (%ux%u) characterY=%.2f\n", shotPath, width, height,
+                                characterAt.y);
                 }
                 else
                 {
