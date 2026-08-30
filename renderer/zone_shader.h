@@ -34,22 +34,33 @@ fn vertexMain(@location(0) position : vec3<f32>,
 
 @fragment
 fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
+    return shade(in, false);
+}
+
+// Same shading, but alpha is treated as a cutout. Used only for the surfaces
+// whose mesh header asks for it.
+@fragment
+fn fragmentCutout(in : VertexOut) -> @location(0) vec4<f32> {
+    return shade(in, true);
+}
+
+fn shade(in : VertexOut, cutout : bool) -> vec4<f32> {
     let n = normalize(in.normal);
     // Two-sided: FFXI geometry is not consistently wound, and single-sided
     // lighting turns half of a zone into pure shadow.
     let lambert = abs(dot(n, normalize(uniforms.lightDirection.xyz)));
-    let shade = 0.35 + 0.65 * lambert;
+    let lit = 0.35 + 0.65 * lambert;
 
     let sampled = textureSample(zoneTexture, zoneSampler, in.uv);
-    // FFXI's alpha is not 0..255. Measured across a zone's textures, 34% of
-    // texels are exactly 0 and 57% sit at 7 or 8 out of 15 - that cluster is
-    // what "opaque" means here, the same 0..128 scaling the vertex colours use.
-    // Only 2.4% ever reach 15. So anything but a near-zero test throws away most
-    // of the world: a 0.35 cutoff discarded 39.5% of all texels.
-    if (sampled.a < 0.03) {
+
+    // Alpha is only a cutout on surfaces that ask for it. On terrain it is a
+    // blend factor - sar_kk2, the flat ground, is 60.5% alpha-zero while its
+    // RGB is never black - so testing against it punched the ground full of
+    // holes and left a checkerboard with the background showing through.
+    if (cutout && sampled.a < 0.03) {
         discard;
     }
-    return vec4<f32>(sampled.rgb * shade, 1.0);
+    return vec4<f32>(sampled.rgb * lit, 1.0);
 }
 )";
 } // namespace pj

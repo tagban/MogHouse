@@ -59,8 +59,27 @@ colours use, where lotus divides by 128 rather than 255.
 
 The practical consequence: any alpha cutoff above about 0.4 throws away most of
 the world. A 0.35 threshold discards 39.5% of all texels, including the entire
-opaque population, and the zone renders full of holes. Only a near-zero test is
-safe, because the genuinely transparent texels really are exactly 0.
+opaque population.
+
+**And on most surfaces alpha is not a cutout at all.** Terrain textures are half
+or more alpha-zero while their RGB is never black:
+
+| texture | alpha-zero | blocks with near-black colour |
+| --- | --- | --- |
+| `sar_kk2` (flat ground) | 60.5% | 0.0% |
+| `sar_w1` (rock) | 51.0% | 0.0% |
+| `sal_w02c` | 24.5% | 9.7% |
+
+Testing against alpha on those removes most of the ground and leaves a
+checkerboard of holes. The colour is meaningful everywhere, so terrain is simply
+drawn opaque and its alpha ignored.
+
+Which surfaces do want a cutout comes from **the mesh header's `blending`
+field**, not from the texture: bit `0x8000` is set on 212 of a zone's 480
+meshes, and those are the ones - foliage and similar - that need discarding.
+Without the split, one choice is wrong for half the world either way: cut out
+everything and the ground disappears, cut out nothing and every tree is a black
+rectangle.
 
 ## Still to work out
 

@@ -387,6 +387,7 @@ int main(int argc, char** argv)
     wgpu::Buffer indexBuffer;
     wgpu::Buffer uniformBuffer;
     wgpu::RenderPipeline pipeline;
+    wgpu::RenderPipeline cutoutPipeline;
     wgpu::Sampler sampler;
     wgpu::Texture whiteTexture;
     std::vector<wgpu::Texture> batchTextures;
@@ -432,6 +433,14 @@ int main(int argc, char** argv)
             .depthStencil = &depthStencil,
             .fragment = &fragment};
         pipeline = device.CreateRenderPipeline(&pipelineDescriptor);
+
+        // Same pipeline, alpha-cutout fragment shader. Which one a batch uses
+        // comes from its mesh header rather than from one global choice.
+        wgpu::FragmentState cutoutFragment{
+            .module = module, .entryPoint = "fragmentCutout", .targetCount = 1, .targets = &colorTarget};
+        wgpu::RenderPipelineDescriptor cutoutDescriptor = pipelineDescriptor;
+        cutoutDescriptor.fragment = &cutoutFragment;
+        cutoutPipeline = device.CreateRenderPipeline(&cutoutDescriptor);
 
         // WebGPU has no bindless arrays, so each texture needs its own bind
         // group and its own draw. Fine at a zone's few dozen textures; this is
@@ -503,6 +512,9 @@ int main(int argc, char** argv)
 
     std::printf("wasd to walk, mouse drag to look, space and ctrl for up and down,\n");
     std::printf("shift to move faster, tab to orbit, p to print position, escape to quit\n");
+
+    const char* modeEnv = std::getenv("PORTJEUNO_SHADER_MODE");
+    const float shaderMode = modeEnv ? static_cast<float>(std::atof(modeEnv)) : 0.0f;
 
     uint64_t previousTicks = SDL_GetTicksNS();
     bool running = true;
@@ -624,7 +636,10 @@ int main(int argc, char** argv)
             // A near plane scaled to the zone puts everything nearby inside it
             // when standing on the ground, so it is fixed rather than relative.
             const pj::Mat4 projection =
-                pj::perspective(1.05f, static_cast<float>(width) / static_cast<float>(height), 0.1f, radius * 20.0f);
+                // A far plane 20x the zone radius wastes most of the depth
+                // buffer's precision on space nothing occupies, which is what
+                // makes coplanar layers fight in the first place.
+                pj::perspective(1.05f, static_cast<float>(width) / static_cast<float>(height), 0.25f, radius * 4.0f);
 
             Uniforms uniforms{};
             const pj::Mat4 viewProjection = projection * view;
@@ -633,15 +648,22 @@ int main(int argc, char** argv)
             uniforms.lightDirection[0] = light.x;
             uniforms.lightDirection[1] = light.y;
             uniforms.lightDirection[2] = light.z;
+            // PORTJEUNO_SHADER_MODE: 0 draws colour with no alpha discard,
+            // 2 draws alpha as greyscale, unset is normal rendering.
+            uniforms.lightDirection[3] = shaderMode;
             queue.WriteBuffer(uniformBuffer, 0, &uniforms, sizeof(uniforms));
 
-            pass.SetPipeline(pipeline);
             pass.SetVertexBuffer(0, vertexBuffer);
             pass.SetIndexBuffer(indexBuffer, wgpu::IndexFormat::Uint32);
             for (size_t i = 0; i < zone->batches.size() && i < batchBindGroups.size(); ++i)
             {
+                const pj::Batch& batch = zone->batches[i];
+                // 0x8000 marks the surfaces that want a cutout. Terrain does
+                // not, and testing its alpha removes most of the ground.
+                const bool cutout = (batch.blending & 0x8000) != 0;
+                pass.SetPipeline(cutout ? cutoutPipeline : pipeline);
                 pass.SetBindGroup(0, batchBindGroups[i]);
-                pass.DrawIndexed(zone->batches[i].indexCount, 1, zone->batches[i].indexOffset);
+                pass.DrawIndexed(batch.indexCount, 1, batch.indexOffset);
             }
         }
 

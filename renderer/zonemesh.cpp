@@ -3,11 +3,17 @@
 #include <algorithm>
 #include <limits>
 #include <map>
+#include <utility>
 
 namespace pj
 {
 namespace
 {
+/// How far apart to push each successive coplanar layer of a model. Small
+/// enough to be invisible, large enough to survive depth buffer precision at
+/// the distances a zone spans.
+constexpr float kLayerSeparation = 0.004f;
+
 struct Bounds
 {
     Vec3 lo{std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
@@ -107,7 +113,7 @@ ZoneMesh buildZoneMesh(const ffxi::Zone& zone)
     out.boundsMax = bounds.hi;
     if (!out.indices.empty())
     {
-        out.batches.push_back(Batch{"", 0, static_cast<uint32_t>(out.indices.size())});
+        out.batches.push_back(Batch{"", 0, static_cast<uint32_t>(out.indices.size()), 0});
     }
     return out;
 }
@@ -125,7 +131,9 @@ ZoneMesh buildPlacedMesh(const ffxi::Zone& zone, const std::unordered_map<std::s
         std::vector<Vertex> vertices;
         std::vector<uint32_t> indices;
     };
-    std::map<std::string, Group> groups;
+    // Keyed by texture and blending together: one draw needs both a single
+    // texture and a single alpha treatment.
+    std::map<std::pair<std::string, uint16_t>, Group> groups;
     Bounds bounds;
 
     for (const ffxi::Placement& placement : zone.placements)
@@ -141,17 +149,29 @@ ZoneMesh buildPlacedMesh(const ffxi::Zone& zone, const std::unordered_map<std::s
         const Mat4 transform = placementTransform(placement);
         const float* m = transform.m;
 
+        uint32_t meshIndex = 0;
         for (const ffxi::ModelMesh& mesh : found->second.meshes)
         {
-            Group& group = groups[mesh.texture];
+            Group& group = groups[{mesh.texture, mesh.blending}];
             const uint32_t base = static_cast<uint32_t>(group.vertices.size());
+
+            // A model's meshes are layered and coplanar - a base surface with
+            // overlays on top - and the game resolves them by draw order within
+            // the model. Grouping by texture for the sampler destroys that
+            // order, so each layer is nudged along its normal instead. Without
+            // this the depth test rejects whichever layer loses the race and
+            // whole tiles render as holes.
+            const float layerOffset = static_cast<float>(meshIndex) * kLayerSeparation;
 
             for (const ffxi::ModelVertex& source : mesh.vertices)
             {
-                const Vec3 world = toWorld(m, source.position[0], source.position[1], source.position[2], true);
+                const Vec3 placed = toWorld(m, source.position[0], source.position[1], source.position[2], true);
                 // Normals rotate but do not translate.
                 const Vec3 normal =
                     normalise(toWorld(m, source.normal[0], source.normal[1], source.normal[2], false));
+
+                const Vec3 world{placed.x + normal.x * layerOffset, placed.y + normal.y * layerOffset,
+                                 placed.z + normal.z * layerOffset};
 
                 group.vertices.push_back(
                     Vertex{{world.x, world.y, world.z}, {normal.x, normal.y, normal.z}, {source.uv[0], source.uv[1]}});
@@ -165,6 +185,7 @@ ZoneMesh buildPlacedMesh(const ffxi::Zone& zone, const std::unordered_map<std::s
                     group.indices.push_back(base + index);
                 }
             }
+            ++meshIndex;
         }
     }
 
@@ -172,7 +193,7 @@ ZoneMesh buildPlacedMesh(const ffxi::Zone& zone, const std::unordered_map<std::s
     out.boundsMin = bounds.lo;
     out.boundsMax = bounds.hi;
 
-    for (auto& [texture, group] : groups)
+    for (auto& [key, group] : groups)
     {
         if (group.indices.empty())
         {
@@ -188,7 +209,8 @@ ZoneMesh buildPlacedMesh(const ffxi::Zone& zone, const std::unordered_map<std::s
             out.indices.push_back(vertexBase + index);
         }
 
-        out.batches.push_back(Batch{texture, indexStart, static_cast<uint32_t>(out.indices.size()) - indexStart});
+        out.batches.push_back(
+            Batch{key.first, indexStart, static_cast<uint32_t>(out.indices.size()) - indexStart, key.second});
     }
 
     return out;

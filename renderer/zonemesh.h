@@ -28,6 +28,10 @@ struct Batch
     std::string texture; ///< empty means untextured, e.g. collision geometry
     uint32_t indexOffset{};
     uint32_t indexCount{};
+    /// From the mesh header. Bit 0x8000 marks the surfaces that want an alpha
+    /// cutout - foliage and the like - as against terrain, where alpha is a
+    /// blend factor and testing against it punches holes in the ground.
+    uint16_t blending{};
 };
 
 struct ZoneMesh
