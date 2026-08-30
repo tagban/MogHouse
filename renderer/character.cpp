@@ -1,6 +1,7 @@
 #include "character.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace pj
@@ -25,6 +26,56 @@ Mat4 rotationOf(const float q[4])
     out.m[9] = 2.0f * (y * z - x * w);
     out.m[10] = 1.0f - 2.0f * (x * x + y * y);
     return out;
+}
+
+/// Hamilton product, in x y z w order to match the file.
+void multiplyQuaternions(const float a[4], const float b[4], float out[4])
+{
+    out[0] = a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1];
+    out[1] = a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0];
+    out[2] = a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3];
+    out[3] = a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
+}
+
+/// Shortest-arc interpolation between two frames.
+void slerp(const float a[4], const float b[4], float t, float out[4])
+{
+    float dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+
+    // A quaternion and its negation are the same rotation, so flipping one
+    // when they point apart takes the short way round rather than swinging the
+    // limb most of the way through a circle.
+    float sign = 1.0f;
+    if (dot < 0.0f)
+    {
+        dot = -dot;
+        sign = -1.0f;
+    }
+
+    float weightA = 1.0f - t;
+    float weightB = t * sign;
+    if (dot < 0.9995f)
+    {
+        const float angle = std::acos(dot);
+        const float invSin = 1.0f / std::sin(angle);
+        weightA = std::sin((1.0f - t) * angle) * invSin;
+        weightB = std::sin(t * angle) * invSin * sign;
+    }
+
+    float length = 0.0f;
+    for (int i = 0; i < 4; ++i)
+    {
+        out[i] = a[i] * weightA + b[i] * weightB;
+        length += out[i] * out[i];
+    }
+    length = std::sqrt(length);
+    if (length > 0.0f)
+    {
+        for (int i = 0; i < 4; ++i)
+        {
+            out[i] /= length;
+        }
+    }
 }
 
 Vec3 rotate(const Mat4& m, const Vec3& v)
@@ -76,13 +127,69 @@ Skinned skin(const ffxi::SkinVertex& vertex, const std::vector<BonePose>& pose, 
         }
 
         const BonePose& b = pose[bone];
-        const Vec3 p{influence.position[0], influence.position[1], influence.position[2]};
+        const Vec3 p{influence.position[0] * b.scale.x, influence.position[1] * b.scale.y,
+                     influence.position[2] * b.scale.z};
         const Vec3 n{influence.normal[0], influence.normal[1], influence.normal[2]};
 
         out.position = out.position + rotate(b.rotation, mirrored(p, axis)) + b.translation * influence.weight;
         out.normal = out.normal + rotate(b.rotation, mirrored(n, axis));
     }
     return out;
+}
+
+/// Walks every triangle corner a character draws, in the order it is drawn.
+///
+/// Building the geometry and re-skinning it each frame have to agree on that
+/// order exactly, and the surest way to make them agree is for there to be
+/// only one walk.
+template <typename Fn> void forEachCorner(const std::vector<ffxi::SkinnedModel>& meshes, Fn&& fn)
+{
+    for (const ffxi::SkinnedModel& mesh : meshes)
+    {
+        // A mirrored mesh is half a body: the second pass reflects every
+        // vertex onto its opposite bone. Nothing marks which half is stored,
+        // because both come from the same triangles.
+        const int passes = mesh.mirrored ? 2 : 1;
+
+        for (const ffxi::SkinnedPart& part : mesh.parts)
+        {
+            if (part.corners.empty())
+            {
+                continue;
+            }
+            for (int pass = 0; pass < passes; ++pass)
+            {
+                for (const ffxi::SkinCorner& corner : part.corners)
+                {
+                    if (corner.vertex >= mesh.vertices.size())
+                    {
+                        continue;
+                    }
+                    fn(mesh.vertices[corner.vertex], corner, part, pass == 1);
+                }
+            }
+        }
+    }
+}
+
+/// Turns one skinned corner into the vertex the GPU sees.
+Vertex toVertex(const Skinned& s, const ffxi::SkinCorner& corner)
+{
+    Vertex vertex{};
+    // FFXI points Y down, and the zone is flipped to match, so a character
+    // built without this stands on its head in an otherwise correct world.
+    vertex.position[0] = s.position.x;
+    vertex.position[1] = -s.position.y;
+    vertex.position[2] = s.position.z;
+
+    const Vec3 unit = normalise(Vec3{s.normal.x, -s.normal.y, s.normal.z});
+    vertex.normal[0] = unit.x;
+    vertex.normal[1] = unit.y;
+    vertex.normal[2] = unit.z;
+
+    vertex.uv[0] = corner.uv[0];
+    vertex.uv[1] = corner.uv[1];
+    return vertex;
 }
 } // namespace
 
@@ -142,6 +249,88 @@ std::vector<BonePose> bindPose(const ffxi::Skeleton& skeleton)
     return pose;
 }
 
+std::vector<BonePose> animatedPose(const ffxi::Skeleton& skeleton, const ffxi::Animation& animation, float frame)
+{
+    const size_t boneCount = skeleton.bones.size();
+
+    // Start from the rest pose. Bones the animation says nothing about keep
+    // it, which is most of them - an idle touches sixteen of ninety-four.
+    std::vector<std::array<float, 4>> localRotation(boneCount);
+    std::vector<Vec3> localTranslation(boneCount);
+    std::vector<Vec3> localScale(boneCount, Vec3{1.0f, 1.0f, 1.0f});
+    for (size_t i = 0; i < boneCount; ++i)
+    {
+        const ffxi::Bone& bone = skeleton.bones[i];
+        localRotation[i] = {bone.rotation[0], bone.rotation[1], bone.rotation[2], bone.rotation[3]};
+        localTranslation[i] = {bone.translation[0], bone.translation[1], bone.translation[2]};
+    }
+
+    if (animation.frames > 0)
+    {
+        // Wrap into the animation and split into the two frames either side,
+        // so playback is smooth rather than stepping at the source frame rate
+        // - an idle runs at seven and a half frames a second.
+        const float wrapped = frame - std::floor(frame / animation.frames) * animation.frames;
+        const auto first = static_cast<size_t>(wrapped);
+        const size_t second = (first + 1) % animation.frames;
+        const float blend = wrapped - static_cast<float>(first);
+
+        for (const ffxi::AnimationTrack& track : animation.tracks)
+        {
+            if (track.bone >= boneCount || track.rotation.size() < (second + 1) * 4)
+            {
+                continue;
+            }
+
+            float rotation[4];
+            slerp(&track.rotation[first * 4], &track.rotation[second * 4], blend, rotation);
+
+            Vec3 translation{};
+            Vec3 scale{};
+            for (int c = 0; c < 3; ++c)
+            {
+                const float a = track.translation[first * 3 + c];
+                const float b = track.translation[second * 3 + c];
+                (&translation.x)[c] = a + (b - a) * blend;
+                const float sa = track.scale[first * 3 + c];
+                const float sb = track.scale[second * 3 + c];
+                (&scale.x)[c] = sa + (sb - sa) * blend;
+            }
+
+            // The animation turns the bone from where it rests rather than
+            // replacing it, and moves it from where it sits.
+            float composed[4];
+            multiplyQuaternions(rotation, localRotation[track.bone].data(), composed);
+            localRotation[track.bone] = {composed[0], composed[1], composed[2], composed[3]};
+            localTranslation[track.bone] = localTranslation[track.bone] + translation;
+            localScale[track.bone] = scale;
+        }
+    }
+
+    std::vector<BonePose> pose(boneCount);
+    for (size_t i = 0; i < boneCount; ++i)
+    {
+        const ffxi::Bone& bone = skeleton.bones[i];
+        const Mat4 local = rotationOf(localRotation[i].data());
+
+        if (bone.parent == i)
+        {
+            pose[i].rotation = local;
+            pose[i].translation = localTranslation[i];
+            pose[i].scale = localScale[i];
+        }
+        else
+        {
+            const BonePose& parent = pose[bone.parent];
+            pose[i].rotation = parent.rotation * local;
+            pose[i].translation = parent.translation + rotate(parent.rotation, localTranslation[i]);
+            pose[i].scale = {parent.scale.x * localScale[i].x, parent.scale.y * localScale[i].y,
+                             parent.scale.z * localScale[i].z};
+        }
+    }
+    return pose;
+}
+
 Character buildCharacter(const std::vector<BonePose>& pose, const std::vector<ffxi::SkinnedModel>& meshes,
                          const std::unordered_map<std::string, ffxi::Texture>& textures)
 {
@@ -166,55 +355,13 @@ Character buildCharacter(const std::vector<BonePose>& pose, const std::vector<ff
                                std::max(character.boundsMax.z, p.z)};
     };
 
-    for (const ffxi::SkinnedModel& mesh : meshes)
-    {
-        // A mirrored mesh is half a body: the second pass reflects every
-        // vertex onto its opposite bone. Nothing marks which half is stored,
-        // because both come from the same triangles.
-        const int passes = mesh.mirrored ? 2 : 1;
-
-        for (const ffxi::SkinnedPart& part : mesh.parts)
-        {
-            if (part.corners.empty())
-            {
-                continue;
-            }
-            std::vector<uint32_t>& into = byTexture[part.texture];
-
-            for (int pass = 0; pass < passes; ++pass)
-            {
-                for (const ffxi::SkinCorner& corner : part.corners)
-                {
-                    if (corner.vertex >= mesh.vertices.size())
-                    {
-                        continue;
-                    }
-
-                    const Skinned s = skin(mesh.vertices[corner.vertex], pose, pass == 1);
-
-                    Vertex vertex{};
-                    // FFXI points Y down, and the zone is flipped to match, so
-                    // a character built without this stands on its head in an
-                    // otherwise correct world.
-                    vertex.position[0] = s.position.x;
-                    vertex.position[1] = -s.position.y;
-                    vertex.position[2] = s.position.z;
-
-                    const Vec3 unit = normalise(Vec3{s.normal.x, -s.normal.y, s.normal.z});
-                    vertex.normal[0] = unit.x;
-                    vertex.normal[1] = unit.y;
-                    vertex.normal[2] = unit.z;
-
-                    vertex.uv[0] = corner.uv[0];
-                    vertex.uv[1] = corner.uv[1];
-
-                    into.push_back(static_cast<uint32_t>(character.vertices.size()));
-                    character.vertices.push_back(vertex);
-                    grow({vertex.position[0], vertex.position[1], vertex.position[2]});
-                }
-            }
-        }
-    }
+    forEachCorner(meshes, [&](const ffxi::SkinVertex& source, const ffxi::SkinCorner& corner,
+                              const ffxi::SkinnedPart& part, bool mirrorPass) {
+        const Vertex vertex = toVertex(skin(source, pose, mirrorPass), corner);
+        byTexture[part.texture].push_back(static_cast<uint32_t>(character.vertices.size()));
+        character.vertices.push_back(vertex);
+        grow({vertex.position[0], vertex.position[1], vertex.position[2]});
+    });
 
     for (auto& [texture, indices] : byTexture)
     {
@@ -231,5 +378,18 @@ Character buildCharacter(const std::vector<BonePose>& pose, const std::vector<ff
     }
 
     return character;
+}
+
+void reskin(Character& character, const std::vector<BonePose>& pose, const std::vector<ffxi::SkinnedModel>& meshes)
+{
+    size_t index = 0;
+    forEachCorner(meshes, [&](const ffxi::SkinVertex& source, const ffxi::SkinCorner& corner, const ffxi::SkinnedPart&,
+                              bool mirrorPass) {
+        if (index < character.vertices.size())
+        {
+            character.vertices[index] = toVertex(skin(source, pose, mirrorPass), corner);
+        }
+        ++index;
+    });
 }
 } // namespace pj

@@ -60,6 +60,7 @@ add_library(ffxi-dat STATIC
     ffxi/lighting.cpp
     ffxi/look.cpp
     ffxi/mmb.cpp
+    ffxi/mo2.cpp
     ffxi/mzb.cpp
     ffxi/os2.cpp
     ffxi/skeleton.cpp

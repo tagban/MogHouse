@@ -9,6 +9,7 @@
 // result drops straight into the pipeline the zone already uses, and it keeps
 // the bone maths somewhere it can be inspected.
 
+#include "ffxi/mo2.h"
 #include "ffxi/os2.h"
 #include "ffxi/skeleton.h"
 #include "ffxi/texture.h"
@@ -51,6 +52,7 @@ struct BonePose
 {
     Mat4 rotation{Mat4::identity()};
     Vec3 translation{};
+    Vec3 scale{1.0f, 1.0f, 1.0f};
 };
 
 /// The skeleton evaluated into one world pose per bone.
@@ -58,6 +60,18 @@ struct BonePose
 /// Animation is the same walk with the local rotations replaced, so nothing
 /// downstream has to change to make this move.
 std::vector<BonePose> bindPose(const ffxi::Skeleton& skeleton);
+
+/// The same walk with one frame of an animation composed onto it.
+///
+/// The animation does not replace the rest pose, it turns from it: the local
+/// rotation is the animated one applied to the bone's own, and the local
+/// translation is the sum. Treating the animation as the whole local transform
+/// collapses the skeleton, because most animated bones carry no translation of
+/// their own and would lose the offset that holds the body together.
+///
+/// `frame` is in frames and wraps, so a caller can pass elapsed time divided
+/// by the animation's frame length without worrying about the length.
+std::vector<BonePose> animatedPose(const ffxi::Skeleton& skeleton, const ffxi::Animation& animation, float frame);
 
 /// Everything needed to draw one character.
 struct Character
@@ -80,4 +94,9 @@ struct Character
 /// appears with different UVs and would have to be split anyway.
 Character buildCharacter(const std::vector<BonePose>& pose, const std::vector<ffxi::SkinnedModel>& meshes,
                          const std::unordered_map<std::string, ffxi::Texture>& textures);
+
+/// Rewrites an already-built character's vertices for a new pose, leaving the
+/// indices and batches alone. Skinning is the only part of the work that
+/// changes between frames.
+void reskin(Character& character, const std::vector<BonePose>& pose, const std::vector<ffxi::SkinnedModel>& meshes);
 } // namespace pj

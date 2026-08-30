@@ -11,6 +11,8 @@ param(
     [string]$Facing = "",
     [string]$Camera = "",
     [string]$CameraLook = "",
+    [string]$Animation = "",
+    [string]$Frame = "",
     [string]$Time = "1200"
 )
 
@@ -23,10 +25,12 @@ if ($Character) { $env:PORTJEUNO_CHARACTER = $Character } else { Remove-Item env
 if ($Look) { $env:PORTJEUNO_LOOK = $Look } else { Remove-Item env:PORTJEUNO_LOOK -EA SilentlyContinue }
 if ($CharacterAt) { $env:PORTJEUNO_CHARACTER_AT = $CharacterAt } else { Remove-Item env:PORTJEUNO_CHARACTER_AT -EA SilentlyContinue }
 if ($Facing) { $env:PORTJEUNO_CHARACTER_FACING = $Facing } else { Remove-Item env:PORTJEUNO_CHARACTER_FACING -EA SilentlyContinue }
+if ($Animation) { $env:PORTJEUNO_ANIMATION = $Animation } else { Remove-Item env:PORTJEUNO_ANIMATION -EA SilentlyContinue }
+if ($Frame) { $env:PORTJEUNO_FRAME = $Frame } else { Remove-Item env:PORTJEUNO_FRAME -EA SilentlyContinue }
 if ($Camera) { $env:PORTJEUNO_CAMERA = $Camera } else { Remove-Item env:PORTJEUNO_CAMERA -EA SilentlyContinue }
 if ($CameraLook) { $env:PORTJEUNO_CAMERA_LOOK = $CameraLook } else { Remove-Item env:PORTJEUNO_CAMERA_LOOK -EA SilentlyContinue }
 
-& "$PSScriptRoot\build-renderer\portjeuno-renderer.exe" $Zone 2>&1 | Select-String "character|wrote|could not|webgpu error"
+& "$PSScriptRoot\build-renderer\portjeuno-renderer.exe" $Zone 2>&1 | Select-String "character|playing|no animation|wrote|could not|webgpu error"
 
 Add-Type -AssemblyName System.Drawing
 $image = [System.Drawing.Bitmap]::FromFile($bmp)

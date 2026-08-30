@@ -11,6 +11,7 @@
 #include "ffxi/look.h"
 #include "ffxi/mmb.h"
 #include "ffxi/lighting.h"
+#include "ffxi/mo2.h"
 #include "ffxi/mzb.h"
 #include "ffxi/os2.h"
 #include "ffxi/skeleton.h"
@@ -36,6 +37,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
@@ -89,12 +91,24 @@ const char* backendName(wgpu::BackendType backend)
 /// A DAT like ROM/3/6.DAT holds a whole NPC. Player characters are assembled
 /// from several files instead - one per equipment slot - which is the same
 /// work with more inputs, so this takes a list.
-std::optional<pj::Character> loadCharacter(const std::vector<std::string>& datPaths,
-                                           std::unordered_map<std::string, ffxi::Texture>& textures)
+/// A character kept in a form that can still be posed. The geometry is what
+/// gets drawn; the skeleton, meshes and animations are what it is rebuilt from
+/// every frame.
+struct LoadedCharacter
 {
     ffxi::Skeleton skeleton;
-    bool haveSkeleton = false;
     std::vector<ffxi::SkinnedModel> meshes;
+    std::map<std::string, ffxi::Animation> animations;
+    pj::Character geometry;
+};
+
+std::optional<LoadedCharacter> loadCharacter(const std::vector<std::string>& datPaths,
+                                             std::unordered_map<std::string, ffxi::Texture>& textures)
+{
+    LoadedCharacter loaded;
+    ffxi::Skeleton& skeleton = loaded.skeleton;
+    bool haveSkeleton = false;
+    std::vector<ffxi::SkinnedModel>& meshes = loaded.meshes;
 
     for (const std::string& datPath : datPaths)
     {
@@ -146,6 +160,22 @@ std::optional<pj::Character> loadCharacter(const std::vector<std::string>& datPa
                 std::printf("skinned %.4s: %s\n", chunk.id, e.what());
             }
         }
+
+        // Animations. The race's own file carries most of them; a piece of
+        // equipment can bring its own, which is why they are collected from
+        // every file rather than only the first.
+        for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkAnimation))
+        {
+            try
+            {
+                ffxi::Animation animation = ffxi::parseMo2(chunk);
+                loaded.animations.insert_or_assign(animation.name, std::move(animation));
+            }
+            catch (const std::exception&)
+            {
+                // Eye and mouth tracks share the chunk type and are not poses.
+            }
+        }
     }
 
     if (!haveSkeleton || meshes.empty())
@@ -154,10 +184,11 @@ std::optional<pj::Character> loadCharacter(const std::vector<std::string>& datPa
         return std::nullopt;
     }
 
-    pj::Character character = pj::buildCharacter(pj::bindPose(skeleton), meshes, textures);
-    std::printf("character: %zu bones, %zu meshes, %zu triangles, %.2f tall\n", skeleton.bones.size(), meshes.size(),
-                character.triangles(), character.height());
-    return character;
+    loaded.geometry = pj::buildCharacter(pj::bindPose(skeleton), meshes, textures);
+    std::printf("character: %zu bones, %zu meshes, %zu triangles, %.2f tall, %zu animations\n",
+                skeleton.bones.size(), meshes.size(), loaded.geometry.triangles(), loaded.geometry.height(),
+                loaded.animations.size());
+    return loaded;
 }
 
 std::optional<pj::Scene> loadZone(const char* datPath, const char* keyPath, const char* key2Path, std::string& zoneId,
@@ -775,7 +806,7 @@ int main(int argc, char** argv)
 
     // PORTJEUNO_CHARACTER is a semicolon-separated list of DATs to assemble
     // one character from, and PORTJEUNO_CHARACTER_AT is where to stand it.
-    std::optional<pj::Character> character;
+    std::optional<LoadedCharacter> character;
     pj::Vec3 characterAt{};
 
     // PORTJEUNO_LOOK is what a player character actually is:
@@ -857,13 +888,13 @@ int main(int argc, char** argv)
     wgpu::Buffer characterInstanceBuffer;
     std::vector<wgpu::Texture> characterTextures;
     std::vector<wgpu::BindGroup> characterBindGroups;
-    if (character && !character->indices.empty() && pipeline)
+    if (character && !character->geometry.indices.empty() && pipeline)
     {
-        characterVertexBuffer =
-            createBuffer(device, character->vertices.data(), character->vertices.size() * sizeof(pj::Vertex),
-                         wgpu::BufferUsage::Vertex);
-        characterIndexBuffer = createBuffer(device, character->indices.data(),
-                                            character->indices.size() * sizeof(uint32_t), wgpu::BufferUsage::Index);
+        characterVertexBuffer = createBuffer(device, character->geometry.vertices.data(),
+                                             character->geometry.vertices.size() * sizeof(pj::Vertex),
+                                             wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst);
+        characterIndexBuffer = createBuffer(device, character->geometry.indices.data(),
+                                            character->geometry.indices.size() * sizeof(uint32_t), wgpu::BufferUsage::Index);
 
         float instance[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
         wgpu::BufferDescriptor instanceDescriptor{.usage = wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst,
@@ -871,7 +902,7 @@ int main(int argc, char** argv)
         characterInstanceBuffer = device.CreateBuffer(&instanceDescriptor);
         queue.WriteBuffer(characterInstanceBuffer, 0, instance, sizeof(instance));
 
-        for (const pj::Batch& batch : character->batches)
+        for (const pj::Batch& batch : character->geometry.batches)
         {
             wgpu::TextureView view = whiteTexture.CreateView();
             auto found = textures.find(batch.texture);
@@ -975,6 +1006,38 @@ int main(int argc, char** argv)
     int framesBeforeShot = 5; // let the first frames settle
     wgpu::Buffer readbackBuffer;
 
+    // PORTJEUNO_ANIMATION names one of the character's own animations - idl0
+    // for a standing idle, wlk0 to walk, run0 to run. Skinning runs on the CPU
+    // and the vertices are rewritten each frame: a couple of thousand
+    // triangles is nothing next to a zone, and it keeps the pose maths
+    // somewhere it can be read.
+    const ffxi::Animation* playing = nullptr;
+    if (character && !character->animations.empty())
+    {
+        const char* wanted = std::getenv("PORTJEUNO_ANIMATION");
+        auto found = character->animations.find(wanted ? wanted : "idl0");
+        if (found == character->animations.end() && wanted)
+        {
+            std::printf("no animation called %s; this character has:", wanted);
+            for (const auto& [name, unused] : character->animations)
+            {
+                std::printf(" %s", name.c_str());
+            }
+            std::printf("\n");
+        }
+        if (found != character->animations.end())
+        {
+            playing = &found->second;
+            std::printf("playing %s: %u frames at %.1f a second\n", playing->name.c_str(), playing->frames,
+                        1.0f / playing->frameSeconds());
+        }
+    }
+
+    // PORTJEUNO_FRAME pins the animation clock so a screenshot of a moving
+    // character lands on the same pose every time.
+    const char* frameEnv = std::getenv("PORTJEUNO_FRAME");
+    const float pinnedFrame = frameEnv ? static_cast<float>(std::atof(frameEnv)) : -1.0f;
+
     const char* modeEnv = std::getenv("PORTJEUNO_SHADER_MODE");
     const float shaderMode = modeEnv ? static_cast<float>(std::atof(modeEnv)) : 0.0f;
     const char* cutoutEnv = std::getenv("PORTJEUNO_CUTOUT");
@@ -1068,6 +1131,11 @@ int main(int argc, char** argv)
         const float side = (held[SDL_SCANCODE_D] ? speed : 0.0f) - (held[SDL_SCANCODE_A] ? speed : 0.0f);
         const float lift = (held[SDL_SCANCODE_SPACE] ? speed : 0.0f) - (held[SDL_SCANCODE_LCTRL] ? speed : 0.0f);
         camera.walk(ahead, side, lift);
+
+        const float animationSeconds =
+            pinnedFrame >= 0.0f && playing
+                ? pinnedFrame * playing->frameSeconds()
+                : static_cast<float>(SDL_GetTicksNS() / 1000000ull) / 1000.0f;
 
         wgpu::SurfaceTexture surfaceTexture;
         surface.GetCurrentTexture(&surfaceTexture);
@@ -1166,7 +1234,7 @@ int main(int argc, char** argv)
             uniforms.eye[1] = eyePoint.y;
             uniforms.eye[2] = eyePoint.z;
             // Seconds since start, for the water surface.
-            uniforms.eye[3] = static_cast<float>(SDL_GetTicksNS() / 1000000ull) / 1000.0f;
+            uniforms.eye[3] = animationSeconds;
 
             // With no lighting data, fall back to a plain lit look rather than
             // a black zone.
@@ -1199,12 +1267,20 @@ int main(int argc, char** argv)
 
             if (!characterBindGroups.empty())
             {
+                if (playing)
+                {
+                    const float frame = animationSeconds / playing->frameSeconds();
+                    pj::reskin(character->geometry, pj::animatedPose(character->skeleton, *playing, frame),
+                               character->meshes);
+                    queue.WriteBuffer(characterVertexBuffer, 0, character->geometry.vertices.data(),
+                                      character->geometry.vertices.size() * sizeof(pj::Vertex));
+                }
                 pass.SetVertexBuffer(0, characterVertexBuffer);
                 pass.SetVertexBuffer(1, characterInstanceBuffer);
                 pass.SetIndexBuffer(characterIndexBuffer, wgpu::IndexFormat::Uint32);
-                for (size_t i = 0; i < character->batches.size() && i < characterBindGroups.size(); ++i)
+                for (size_t i = 0; i < character->geometry.batches.size() && i < characterBindGroups.size(); ++i)
                 {
-                    const pj::Batch& batch = character->batches[i];
+                    const pj::Batch& batch = character->geometry.batches[i];
                     pass.SetPipeline(batch.cutout ? cutoutPipeline : pipeline);
                     pass.SetBindGroup(0, characterBindGroups[i]);
                     pass.DrawIndexed(batch.indexCount, 1, batch.indexOffset, 0, 0);
