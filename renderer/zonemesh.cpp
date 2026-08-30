@@ -5,7 +5,7 @@
 #include <map>
 #include <utility>
 
-namespace pj
+namespace mh
 {
 namespace
 {
@@ -235,4 +235,4 @@ ZoneMesh buildPlacedMesh(const ffxi::Zone& zone, const std::unordered_map<std::s
 
     return out;
 }
-} // namespace pj
+} // namespace mh

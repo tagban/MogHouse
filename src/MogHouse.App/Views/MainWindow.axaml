@@ -1,0 +1,22 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:MogHouse.App.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="600"
+        x:Class="MogHouse.App.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Width="900" Height="600"
+        Title="MogHouse">
+
+  <Design.DataContext>
+    <vm:MainViewModel />
+  </Design.DataContext>
+
+  <Grid RowDefinitions="*,Auto">
+    <ContentControl Grid.Row="0" Content="{Binding CurrentPage}"/>
+    <Border Grid.Row="1" Background="#181818" Padding="8,4">
+      <TextBlock Text="{Binding Status}" FontSize="12" Opacity="0.75" TextWrapping="NoWrap"/>
+    </Border>
+  </Grid>
+</Window>

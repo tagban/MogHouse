@@ -9,8 +9,8 @@ initialisers, which is where this reads them from.
 
 Then point the renderer at them:
 
-    PORTJEUNO_FFXI_KEYTABLE=keys/mzb_key_table.bin
-    PORTJEUNO_FFXI_KEYTABLE2=keys/mmb_key_table2.bin
+    MOGHOUSE_FFXI_KEYTABLE=keys/mzb_key_table.bin
+    MOGHOUSE_FFXI_KEYTABLE2=keys/mmb_key_table2.bin
 """
 
 import argparse

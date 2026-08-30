@@ -18,7 +18,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace pj
+namespace mh
 {
 /// One mesh, drawn once per placement of the model it belongs to.
 struct InstancedDraw
@@ -57,4 +57,4 @@ struct Scene
 Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, ffxi::Model>& models,
                  const std::unordered_map<std::string, ffxi::Texture>& textures, size_t& placementsResolved,
                  size_t& placementsMissing);
-} // namespace pj
+} // namespace mh

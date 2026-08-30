@@ -1,4 +1,4 @@
-// PortJeuno's renderer. Opens a window on WebGPU - Metal on macOS, D3D12 on
+// MogHouse's renderer. Opens a window on WebGPU - Metal on macOS, D3D12 on
 // Windows, Vulkan on Linux - and draws FFXI zone geometry read from the retail
 // DATs.
 //
@@ -100,7 +100,7 @@ struct LoadedCharacter
     ffxi::Skeleton skeleton;
     std::vector<ffxi::SkinnedModel> meshes;
     std::map<std::string, ffxi::Animation> animations;
-    pj::Character geometry;
+    mh::Character geometry;
 };
 
 std::optional<LoadedCharacter> loadCharacter(const std::vector<std::string>& datPaths,
@@ -185,16 +185,16 @@ std::optional<LoadedCharacter> loadCharacter(const std::vector<std::string>& dat
         return std::nullopt;
     }
 
-    loaded.geometry = pj::buildCharacter(pj::bindPose(skeleton), meshes, textures);
+    loaded.geometry = mh::buildCharacter(mh::bindPose(skeleton), meshes, textures);
     std::printf("character: %zu bones, %zu meshes, %zu triangles, %.2f tall, %zu animations\n",
                 skeleton.bones.size(), meshes.size(), loaded.geometry.triangles(), loaded.geometry.height(),
                 loaded.animations.size());
     return loaded;
 }
 
-std::optional<pj::Scene> loadZone(const char* datPath, const char* keyPath, const char* key2Path, std::string& zoneId,
+std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, const char* key2Path, std::string& zoneId,
                                      std::unordered_map<std::string, ffxi::Texture>& textures, ffxi::Lighting& lighting,
-                                     pj::Collision& collision)
+                                     mh::Collision& collision)
 {
     auto keys = ffxi::KeyTable::load(keyPath);
     if (!keys)
@@ -247,19 +247,19 @@ std::optional<pj::Scene> loadZone(const char* datPath, const char* keyPath, cons
         }
     }
 
-    std::optional<pj::Scene> best;
+    std::optional<mh::Scene> best;
     for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkMzb))
     {
         ffxi::Zone zone = ffxi::parseMzb(chunk, *keys);
 
         // Placed models are the visible world; collision geometry is the
         // fallback when the model key table is not available.
-        pj::Scene mesh;
+        mh::Scene mesh;
         if (!models.empty())
         {
             size_t resolved = 0;
             size_t missing = 0;
-            mesh = pj::buildScene(zone, models, textures, resolved, missing);
+            mesh = mh::buildScene(zone, models, textures, resolved, missing);
             if (!mesh.vertices.empty())
             {
                 std::printf("  %zu models (%zu unreadable), %zu placements drawn, %zu with no model\n", models.size(),
@@ -279,7 +279,7 @@ std::optional<pj::Scene> loadZone(const char* datPath, const char* keyPath, cons
             zoneId = zone.id;
             // The same chunk that produced the visible world produces the
             // ground to stand on, so they cannot disagree.
-            collision = pj::Collision{zone};
+            collision = mh::Collision{zone};
         }
     }
     return best;
@@ -362,19 +362,19 @@ int main(int argc, char** argv)
     std::setvbuf(stdout, nullptr, _IONBF, 0);
 
     std::string zoneId;
-    std::optional<pj::Scene> zone;
-    pj::Collision collision;
+    std::optional<mh::Scene> zone;
+    mh::Collision collision;
     std::unordered_map<std::string, ffxi::Texture> textures;
     ffxi::Lighting lighting;
     if (argc > 1)
     {
-        const char* keyPath = std::getenv("PORTJEUNO_FFXI_KEYTABLE");
+        const char* keyPath = std::getenv("MOGHOUSE_FFXI_KEYTABLE");
         if (!keyPath)
         {
-            std::printf("set PORTJEUNO_FFXI_KEYTABLE to the 256-byte MZB key table to load a zone\n");
+            std::printf("set MOGHOUSE_FFXI_KEYTABLE to the 256-byte MZB key table to load a zone\n");
             return 2;
         }
-        zone = loadZone(argv[1], keyPath, std::getenv("PORTJEUNO_FFXI_KEYTABLE2"), zoneId, textures, lighting,
+        zone = loadZone(argv[1], keyPath, std::getenv("MOGHOUSE_FFXI_KEYTABLE2"), zoneId, textures, lighting,
                         collision);
         if (!zone)
         {
@@ -399,7 +399,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    SDL_Window* window = SDL_CreateWindow("PortJeuno renderer", kWidth, kHeight,
+    SDL_Window* window = SDL_CreateWindow("MogHouse renderer", kWidth, kHeight,
                                           SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!window)
     {
@@ -420,7 +420,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    wgpu::Surface surface = pj::CreateSurface(instance, window);
+    wgpu::Surface surface = mh::CreateSurface(instance, window);
     if (!surface)
     {
         std::printf("could not create a surface for this window\n");
@@ -489,7 +489,7 @@ int main(int argc, char** argv)
     // The sky is drawn before anything else, at the far plane, with no depth
     // writes - it is a backdrop rather than a surface.
     wgpu::ShaderSourceWGSL skyWgsl;
-    skyWgsl.code = pj::kSkyShader;
+    skyWgsl.code = mh::kSkyShader;
     wgpu::ShaderModuleDescriptor skyModuleDescriptor{.nextInChain = &skyWgsl};
     wgpu::ShaderModule skyModule = device.CreateShaderModule(&skyModuleDescriptor);
 
@@ -573,7 +573,7 @@ int main(int argc, char** argv)
 
     if (zone && !zone->indices.empty())
     {
-        vertexBuffer = createBuffer(device, zone->vertices.data(), zone->vertices.size() * sizeof(pj::Vertex),
+        vertexBuffer = createBuffer(device, zone->vertices.data(), zone->vertices.size() * sizeof(mh::Vertex),
                                     wgpu::BufferUsage::Vertex);
         indexBuffer = createBuffer(device, zone->indices.data(), zone->indices.size() * sizeof(uint32_t),
                                    wgpu::BufferUsage::Index);
@@ -587,7 +587,7 @@ int main(int argc, char** argv)
         uniformBuffer = device.CreateBuffer(&uniformDescriptor);
 
         wgpu::ShaderSourceWGSL wgsl;
-        wgsl.code = pj::kZoneShader;
+        wgsl.code = mh::kZoneShader;
         wgpu::ShaderModuleDescriptor moduleDescriptor{.nextInChain = &wgsl};
         wgpu::ShaderModule module = device.CreateShaderModule(&moduleDescriptor);
 
@@ -602,7 +602,7 @@ int main(int argc, char** argv)
             {.format = wgpu::VertexFormat::Float32x4, .offset = 12 * sizeof(float), .shaderLocation = 6}};
 
         wgpu::VertexBufferLayout vertexLayout{.stepMode = wgpu::VertexStepMode::Vertex,
-                                              .arrayStride = sizeof(pj::Vertex),
+                                              .arrayStride = sizeof(mh::Vertex),
                                               .attributeCount = 3,
                                               .attributes = attributes};
         // Stepping per instance rather than per vertex is the whole trick: one
@@ -667,19 +667,19 @@ int main(int argc, char** argv)
         samplerDescriptor.minFilter = wgpu::FilterMode::Linear;
         sampler = device.CreateSampler(&samplerDescriptor);
 
-        whiteTexture = pj::createWhiteTexture(device);
+        whiteTexture = mh::createWhiteTexture(device);
         const wgpu::TextureView whiteView = whiteTexture.CreateView();
 
         if (!zone->waterIndices.empty())
         {
             waterVertexBuffer = createBuffer(device, zone->waterVertices.data(),
-                                             zone->waterVertices.size() * sizeof(pj::Vertex), wgpu::BufferUsage::Vertex);
+                                             zone->waterVertices.size() * sizeof(mh::Vertex), wgpu::BufferUsage::Vertex);
             waterIndexBuffer = createBuffer(device, zone->waterIndices.data(),
                                             zone->waterIndices.size() * sizeof(uint32_t), wgpu::BufferUsage::Index);
             waterIndexCount = static_cast<uint32_t>(zone->waterIndices.size());
 
             wgpu::ShaderSourceWGSL waterWgsl;
-            waterWgsl.code = pj::kWaterShader;
+            waterWgsl.code = mh::kWaterShader;
             wgpu::ShaderModuleDescriptor waterModuleDescriptor{.nextInChain = &waterWgsl};
             wgpu::ShaderModule waterModule = device.CreateShaderModule(&waterModuleDescriptor);
 
@@ -709,7 +709,7 @@ int main(int argc, char** argv)
                 auto found = textures.find(candidate);
                 if (found != textures.end())
                 {
-                    wgpu::Texture gpu = pj::uploadTexture(device, found->second);
+                    wgpu::Texture gpu = mh::uploadTexture(device, found->second);
                     if (gpu)
                     {
                         batchTextures.push_back(gpu);
@@ -761,7 +761,7 @@ int main(int argc, char** argv)
         std::unordered_map<std::string, wgpu::TextureView> uploadedViews;
         size_t uploaded = 0;
         size_t untextured = 0;
-        for (const pj::InstancedDraw& batch : zone->draws)
+        for (const mh::InstancedDraw& batch : zone->draws)
         {
             // Cached by name: instancing produces one draw per mesh, and many
             // meshes share a texture. Uploading per draw meant 397 GPU textures
@@ -779,7 +779,7 @@ int main(int argc, char** argv)
                     auto found = textures.find(batch.texture);
                     if (found != textures.end())
                     {
-                        wgpu::Texture gpu = pj::uploadTexture(device, found->second);
+                        wgpu::Texture gpu = mh::uploadTexture(device, found->second);
                         if (gpu)
                         {
                             batchTextures.push_back(gpu);
@@ -812,21 +812,21 @@ int main(int argc, char** argv)
                     uploaded, untextured);
     }
 
-    // PORTJEUNO_CHARACTER is a semicolon-separated list of DATs to assemble
-    // one character from, and PORTJEUNO_CHARACTER_AT is where to stand it.
+    // MOGHOUSE_CHARACTER is a semicolon-separated list of DATs to assemble
+    // one character from, and MOGHOUSE_CHARACTER_AT is where to stand it.
     std::optional<LoadedCharacter> character;
-    pj::Vec3 characterAt{};
+    mh::Vec3 characterAt{};
 
-    // PORTJEUNO_LOOK is what a player character actually is:
+    // MOGHOUSE_LOOK is what a player character actually is:
     // race,face,head,body,hands,legs,feet, all model ids. The skeleton comes
     // from the race and each slot from its own file, which is how a change of
     // outfit is one number rather than a different character.
-    if (const char* lookEnv = std::getenv("PORTJEUNO_LOOK"))
+    if (const char* lookEnv = std::getenv("MOGHOUSE_LOOK"))
     {
         ffxi::Look look;
         if (!ffxi::parseLook(lookEnv, look))
         {
-            std::printf("PORTJEUNO_LOOK wants race,face,head,body,hands,legs,feet\n");
+            std::printf("MOGHOUSE_LOOK wants race,face,head,body,hands,legs,feet\n");
         }
         else
         {
@@ -862,7 +862,7 @@ int main(int argc, char** argv)
             }
         }
     }
-    else if (const char* charEnv = std::getenv("PORTJEUNO_CHARACTER"))
+    else if (const char* charEnv = std::getenv("MOGHOUSE_CHARACTER"))
     {
         std::vector<std::string> paths;
         std::string current;
@@ -899,7 +899,7 @@ int main(int argc, char** argv)
     if (character && !character->geometry.indices.empty() && pipeline)
     {
         characterVertexBuffer = createBuffer(device, character->geometry.vertices.data(),
-                                             character->geometry.vertices.size() * sizeof(pj::Vertex),
+                                             character->geometry.vertices.size() * sizeof(mh::Vertex),
                                              wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst);
         characterIndexBuffer = createBuffer(device, character->geometry.indices.data(),
                                             character->geometry.indices.size() * sizeof(uint32_t), wgpu::BufferUsage::Index);
@@ -910,13 +910,13 @@ int main(int argc, char** argv)
         characterInstanceBuffer = device.CreateBuffer(&instanceDescriptor);
         queue.WriteBuffer(characterInstanceBuffer, 0, instance, sizeof(instance));
 
-        for (const pj::Batch& batch : character->geometry.batches)
+        for (const mh::Batch& batch : character->geometry.batches)
         {
             wgpu::TextureView view = whiteTexture.CreateView();
             auto found = textures.find(batch.texture);
             if (found != textures.end())
             {
-                if (wgpu::Texture gpu = pj::uploadTexture(device, found->second))
+                if (wgpu::Texture gpu = mh::uploadTexture(device, found->second))
                 {
                     characterTextures.push_back(gpu);
                     view = characterTextures.back().CreateView();
@@ -946,10 +946,10 @@ int main(int argc, char** argv)
         std::printf("a character needs a zone loaded: it draws with the zone pipelines\n");
     }
 
-    const pj::Vec3 centre = zone ? zone->centre() : pj::Vec3{};
+    const mh::Vec3 centre = zone ? zone->centre() : mh::Vec3{};
     const float radius = zone ? std::max(zone->radius(), 1.0f) : 1.0f;
 
-    pj::Camera camera;
+    mh::Camera camera;
     camera.target = centre;
     camera.distance = radius * 2.4f;
     // Start at the middle of the zone in all three axes. Starting from the
@@ -960,26 +960,26 @@ int main(int argc, char** argv)
     camera.pitch = 0.0f;
 
     // Somewhere visible by default, since nothing yet knows where the ground
-    // is. PORTJEUNO_CHARACTER_AT overrides it, and c drops the character at
+    // is. MOGHOUSE_CHARACTER_AT overrides it, and c drops the character at
     // wherever the camera is standing.
     characterAt = centre;
-    if (const char* atEnv = std::getenv("PORTJEUNO_CHARACTER_AT"))
+    if (const char* atEnv = std::getenv("MOGHOUSE_CHARACTER_AT"))
     {
         std::sscanf(atEnv, "%f,%f,%f", &characterAt.x, &characterAt.y, &characterAt.z);
     }
     // The model faces +x in its own space, so a heading of zero looks east.
     float characterFacing = 0.0f;
-    if (const char* facingEnv = std::getenv("PORTJEUNO_CHARACTER_FACING"))
+    if (const char* facingEnv = std::getenv("MOGHOUSE_CHARACTER_FACING"))
     {
         characterFacing = static_cast<float>(std::atof(facingEnv)) * 3.14159265f / 180.0f;
     }
-    auto placeCharacter = [&](const pj::Vec3& where) {
+    auto placeCharacter = [&](const mh::Vec3& where) {
         characterAt = where;
         // Snap to the floor, and if there is none directly below, to the
         // nearest spot there is. Without collision at all - a zone we could
         // not parse - the character stays where it was put rather than being
         // trapped somewhere arbitrary.
-        if (const std::optional<pj::Vec3> ground =
+        if (const std::optional<mh::Vec3> ground =
                 collision.nearestGround(where.x, where.z, where.y + 1.0f, 60.0f))
         {
             characterAt = *ground;
@@ -1002,11 +1002,11 @@ int main(int argc, char** argv)
 
     // Framing a shot from a script needs the camera to be settable; dragging
     // it into place by hand cannot be repeated.
-    if (const char* cameraEnv = std::getenv("PORTJEUNO_CAMERA"))
+    if (const char* cameraEnv = std::getenv("MOGHOUSE_CAMERA"))
     {
         std::sscanf(cameraEnv, "%f,%f,%f", &camera.position.x, &camera.position.y, &camera.position.z);
     }
-    if (const char* lookEnv = std::getenv("PORTJEUNO_CAMERA_LOOK"))
+    if (const char* lookEnv = std::getenv("MOGHOUSE_CAMERA_LOOK"))
     {
         float yawDegrees = 0.0f;
         float pitchDegrees = 0.0f;
@@ -1022,22 +1022,22 @@ int main(int argc, char** argv)
     std::printf("f to swap between driving the character and flying the camera,\n");
     std::printf("escape to quit\n");
 
-    // PORTJEUNO_SCREENSHOT writes one frame to a BMP and quits. Without it
+    // MOGHOUSE_SCREENSHOT writes one frame to a BMP and quits. Without it
     // there is no way to check what the renderer actually produced except by
     // looking at the window, which rules out checking anything unattended.
-    const char* screenshotPath = std::getenv("PORTJEUNO_SCREENSHOT");
+    const char* screenshotPath = std::getenv("MOGHOUSE_SCREENSHOT");
 
-    // PORTJEUNO_SCREENSHOT_SEQUENCE captures a whole animation in one run,
+    // MOGHOUSE_SCREENSHOT_SEQUENCE captures a whole animation in one run,
     // one file per source frame, with the path taken as a printf format. The
     // alternative is relaunching for each frame, which for a walk cycle is
     // eighteen launches of a program that spends most of its time loading a
     // zone.
-    const char* sequenceEnv = std::getenv("PORTJEUNO_SCREENSHOT_SEQUENCE");
+    const char* sequenceEnv = std::getenv("MOGHOUSE_SCREENSHOT_SEQUENCE");
     const int sequenceCount = sequenceEnv ? std::atoi(sequenceEnv) : 0;
     int shotIndex = -5; // let the first frames settle
     wgpu::Buffer readbackBuffer;
 
-    // PORTJEUNO_ANIMATION names one of the character's own animations - idl0
+    // MOGHOUSE_ANIMATION names one of the character's own animations - idl0
     // for a standing idle, wlk0 to walk, run0 to run. Skinning runs on the CPU
     // and the vertices are rewritten each frame: a couple of thousand
     // triangles is nothing next to a zone, and it keeps the pose maths
@@ -1046,8 +1046,8 @@ int main(int argc, char** argv)
     const ffxi::Animation* idleClip = nullptr;
     const ffxi::Animation* walkClip = nullptr;
     const ffxi::Animation* runClip = nullptr;
-    // PORTJEUNO_ANIMATION pins one clip; without it, movement picks.
-    const bool pinnedClip = std::getenv("PORTJEUNO_ANIMATION") != nullptr;
+    // MOGHOUSE_ANIMATION pins one clip; without it, movement picks.
+    const bool pinnedClip = std::getenv("MOGHOUSE_ANIMATION") != nullptr;
     float animationOffset = 0.0f;
     bool driving = character.has_value();
 
@@ -1061,7 +1061,7 @@ int main(int argc, char** argv)
         walkClip = find("wlk0");
         runClip = find("run0");
 
-        const char* wanted = std::getenv("PORTJEUNO_ANIMATION");
+        const char* wanted = std::getenv("MOGHOUSE_ANIMATION");
         auto found = character->animations.find(wanted ? wanted : "idl0");
         if (found == character->animations.end() && wanted)
         {
@@ -1080,19 +1080,19 @@ int main(int argc, char** argv)
         }
     }
 
-    // PORTJEUNO_FRAME pins the animation clock so a screenshot of a moving
+    // MOGHOUSE_FRAME pins the animation clock so a screenshot of a moving
     // character lands on the same pose every time.
-    const char* frameEnv = std::getenv("PORTJEUNO_FRAME");
+    const char* frameEnv = std::getenv("MOGHOUSE_FRAME");
     const float pinnedFrame = frameEnv ? static_cast<float>(std::atof(frameEnv)) : -1.0f;
 
-    const char* modeEnv = std::getenv("PORTJEUNO_SHADER_MODE");
+    const char* modeEnv = std::getenv("MOGHOUSE_SHADER_MODE");
     const float shaderMode = modeEnv ? static_cast<float>(std::atof(modeEnv)) : 0.0f;
-    const char* cutoutEnv = std::getenv("PORTJEUNO_CUTOUT");
+    const char* cutoutEnv = std::getenv("MOGHOUSE_CUTOUT");
     const int cutoutMode = cutoutEnv ? std::atoi(cutoutEnv) : 2;
 
-    // PORTJEUNO_TIME=1830 pins the clock; otherwise a Vana'diel day passes in
+    // MOGHOUSE_TIME=1830 pins the clock; otherwise a Vana'diel day passes in
     // one real minute, which is fast but makes the whole cycle visible.
-    const char* timeEnv = std::getenv("PORTJEUNO_TIME");
+    const char* timeEnv = std::getenv("MOGHOUSE_TIME");
     const bool timeFixed = timeEnv != nullptr;
     const int fixedMinutes = timeFixed ? (std::atoi(timeEnv) / 100) * 60 + (std::atoi(timeEnv) % 100) : 0;
     if (!lighting.empty())
@@ -1124,7 +1124,7 @@ int main(int argc, char** argv)
                 }
                 else if (event.key.key == SDLK_P)
                 {
-                    const pj::Vec3 at = camera.eye();
+                    const mh::Vec3 at = camera.eye();
                     std::printf("at %.1f %.1f %.1f   zone y runs %.1f to %.1f\n", at.x, at.y, at.z,
                                 zone->boundsMin.y, zone->boundsMax.y);
                 }
@@ -1143,7 +1143,7 @@ int main(int argc, char** argv)
                     // Stand the character where the camera is. Nothing knows
                     // where the ground is yet, so putting it somewhere useful
                     // is a matter of walking there and pressing a key.
-                    const pj::Vec3 at = camera.eye();
+                    const mh::Vec3 at = camera.eye();
                     placeCharacter(at);
                     std::printf("character moved to %.1f %.1f %.1f\n", at.x, at.y, at.z);
                 }
@@ -1197,14 +1197,14 @@ int main(int argc, char** argv)
             // Movement is relative to where the camera is looking, which is
             // what makes it read as steering a person rather than nudging a
             // point on a map.
-            const pj::Vec3 forward = pj::normalise(pj::Vec3{std::sin(camera.yaw), 0.0f, std::cos(camera.yaw)});
-            const pj::Vec3 right = pj::normalise(pj::cross(forward, pj::Vec3{0.0f, 1.0f, 0.0f}));
+            const mh::Vec3 forward = mh::normalise(mh::Vec3{std::sin(camera.yaw), 0.0f, std::cos(camera.yaw)});
+            const mh::Vec3 right = mh::normalise(mh::cross(forward, mh::Vec3{0.0f, 1.0f, 0.0f}));
 
-            const pj::Vec3 wanted{characterAt.x + forward.x * ahead + right.x * side, characterAt.y,
+            const mh::Vec3 wanted{characterAt.x + forward.x * ahead + right.x * side, characterAt.y,
                                   characterAt.z + forward.z * ahead + right.z * side};
             if (wanted.x != characterAt.x || wanted.z != characterAt.z)
             {
-                const pj::Vec3 stepped = collision.empty() ? wanted : collision.move(characterAt, wanted, 0.5f);
+                const mh::Vec3 stepped = collision.empty() ? wanted : collision.move(characterAt, wanted, 0.5f);
                 const float dx = stepped.x - characterAt.x;
                 const float dz = stepped.z - characterAt.z;
                 moved = std::sqrt(dx * dx + dz * dz);
@@ -1275,9 +1275,9 @@ int main(int argc, char** argv)
         {
             const float aspect = static_cast<float>(width) / static_cast<float>(height);
             const float tanHalfFov = std::tan(1.05f * 0.5f);
-            const pj::Vec3 f = camera.orbiting ? pj::normalise(camera.lookAtPoint() - camera.eye()) : camera.forward();
-            const pj::Vec3 r = pj::normalise(pj::cross(f, pj::Vec3{0.0f, 1.0f, 0.0f}));
-            const pj::Vec3 u = pj::cross(r, f);
+            const mh::Vec3 f = camera.orbiting ? mh::normalise(camera.lookAtPoint() - camera.eye()) : camera.forward();
+            const mh::Vec3 r = mh::normalise(mh::cross(f, mh::Vec3{0.0f, 1.0f, 0.0f}));
+            const mh::Vec3 u = mh::cross(r, f);
 
             SkyUniforms skyUniforms{};
             skyUniforms.forward[0] = f.x;
@@ -1310,19 +1310,19 @@ int main(int argc, char** argv)
 
         if (indexCount)
         {
-            const pj::Mat4 view = pj::lookAt(camera.eye(), camera.lookAtPoint(), pj::Vec3{0, 1, 0});
+            const mh::Mat4 view = mh::lookAt(camera.eye(), camera.lookAtPoint(), mh::Vec3{0, 1, 0});
             // A near plane scaled to the zone puts everything nearby inside it
             // when standing on the ground, so it is fixed rather than relative.
-            const pj::Mat4 projection =
+            const mh::Mat4 projection =
                 // A far plane 20x the zone radius wastes most of the depth
                 // buffer's precision on space nothing occupies, which is what
                 // makes coplanar layers fight in the first place.
-                pj::perspective(1.05f, static_cast<float>(width) / static_cast<float>(height), 0.25f, radius * 4.0f);
+                mh::perspective(1.05f, static_cast<float>(width) / static_cast<float>(height), 0.25f, radius * 4.0f);
 
             Uniforms uniforms{};
-            const pj::Mat4 viewProjection = projection * view;
+            const mh::Mat4 viewProjection = projection * view;
             std::memcpy(uniforms.viewProjection, viewProjection.m, sizeof(uniforms.viewProjection));
-            const pj::Vec3 light = pj::normalise(pj::Vec3{0.4f, 0.8f, 0.45f});
+            const mh::Vec3 light = mh::normalise(mh::Vec3{0.4f, 0.8f, 0.45f});
             uniforms.lightDirection[0] = light.x;
             uniforms.lightDirection[1] = light.y;
             uniforms.lightDirection[2] = light.z;
@@ -1339,7 +1339,7 @@ int main(int argc, char** argv)
             uniforms.fogColour[2] = set.landscapeFog.b;
             uniforms.fogRange[0] = set.landscapeMinFog;
             uniforms.fogRange[1] = set.landscapeMaxFog > 0.0f ? set.landscapeMaxFog : 10000.0f;
-            const pj::Vec3 eyePoint = camera.eye();
+            const mh::Vec3 eyePoint = camera.eye();
             uniforms.eye[0] = eyePoint.x;
             uniforms.eye[1] = eyePoint.y;
             uniforms.eye[2] = eyePoint.z;
@@ -1354,7 +1354,7 @@ int main(int argc, char** argv)
                 uniforms.sunlight[0] = uniforms.sunlight[1] = uniforms.sunlight[2] = 0.65f;
                 uniforms.fogRange[1] = 1e9f;
             }
-            // PORTJEUNO_SHADER_MODE: 0 draws colour with no alpha discard,
+            // MOGHOUSE_SHADER_MODE: 0 draws colour with no alpha discard,
             // 2 draws alpha as greyscale, unset is normal rendering.
             uniforms.lightDirection[3] = shaderMode;
             queue.WriteBuffer(uniformBuffer, 0, &uniforms, sizeof(uniforms));
@@ -1364,7 +1364,7 @@ int main(int argc, char** argv)
             pass.SetIndexBuffer(indexBuffer, wgpu::IndexFormat::Uint32);
             for (size_t i = 0; i < zone->draws.size() && i < batchBindGroups.size(); ++i)
             {
-                const pj::InstancedDraw& draw = zone->draws[i];
+                const mh::InstancedDraw& draw = zone->draws[i];
                 // cutoutMode: 0 never cuts out, 1 always, otherwise the
                 // texture's own measurement decides.
                 const bool cutout = cutoutMode == 0   ? false
@@ -1380,17 +1380,17 @@ int main(int argc, char** argv)
                 if (playing)
                 {
                     const float frame = animationSeconds / playing->frameSeconds();
-                    pj::reskin(character->geometry, pj::animatedPose(character->skeleton, *playing, frame),
+                    mh::reskin(character->geometry, mh::animatedPose(character->skeleton, *playing, frame),
                                character->meshes);
                     queue.WriteBuffer(characterVertexBuffer, 0, character->geometry.vertices.data(),
-                                      character->geometry.vertices.size() * sizeof(pj::Vertex));
+                                      character->geometry.vertices.size() * sizeof(mh::Vertex));
                 }
                 pass.SetVertexBuffer(0, characterVertexBuffer);
                 pass.SetVertexBuffer(1, characterInstanceBuffer);
                 pass.SetIndexBuffer(characterIndexBuffer, wgpu::IndexFormat::Uint32);
                 for (size_t i = 0; i < character->geometry.batches.size() && i < characterBindGroups.size(); ++i)
                 {
-                    const pj::Batch& batch = character->geometry.batches[i];
+                    const mh::Batch& batch = character->geometry.batches[i];
                     pass.SetPipeline(batch.cutout ? cutoutPipeline : pipeline);
                     pass.SetBindGroup(0, characterBindGroups[i]);
                     pass.DrawIndexed(batch.indexCount, 1, batch.indexOffset, 0, 0);

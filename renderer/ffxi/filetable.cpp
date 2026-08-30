@@ -57,7 +57,7 @@ std::optional<std::filesystem::path> FileTable::path(size_t fileId) const
 
 std::filesystem::path defaultInstallRoot()
 {
-    if (const char* fromEnv = std::getenv("PORTJEUNO_FFXI_INSTALL"))
+    if (const char* fromEnv = std::getenv("MOGHOUSE_FFXI_INSTALL"))
     {
         return std::filesystem::path{fromEnv};
     }

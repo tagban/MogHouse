@@ -10,7 +10,7 @@
 
 #include <cmath>
 
-namespace pj
+namespace mh
 {
 struct Vec3
 {
@@ -93,4 +93,4 @@ inline Mat4 lookAt(const Vec3& eye, const Vec3& target, const Vec3& up)
     out.m[14] = dot(forward, eye);
     return out;
 }
-} // namespace pj
+} // namespace mh

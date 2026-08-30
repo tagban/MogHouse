@@ -12,7 +12,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace pj
+namespace mh
 {
 struct Vertex
 {
@@ -69,4 +69,4 @@ ZoneMesh buildZoneMesh(const ffxi::Zone& zone);
 ZoneMesh buildPlacedMesh(const ffxi::Zone& zone, const std::unordered_map<std::string, ffxi::Model>& models,
                          const std::unordered_map<std::string, ffxi::Texture>& textures, size_t& placementsResolved,
                          size_t& placementsMissing);
-} // namespace pj
+} // namespace mh

@@ -15,5 +15,5 @@ cmake -S renderer -B build-renderer -G Ninja \
 
 cmake --build build-renderer
 echo
-echo "run it with: ./build-renderer/portjeuno-renderer"
+echo "run it with: ./build-renderer/moghouse-renderer"
 echo "it should print which backend it got - on macOS that must say Metal."

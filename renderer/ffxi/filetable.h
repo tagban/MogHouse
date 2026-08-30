@@ -32,7 +32,7 @@ private:
     std::vector<uint8_t> ftable_;
 };
 
-/// Where the retail client is installed, from PORTJEUNO_FFXI_INSTALL, falling
+/// Where the retail client is installed, from MOGHOUSE_FFXI_INSTALL, falling
 /// back to the usual Windows location.
 std::filesystem::path defaultInstallRoot();
 } // namespace ffxi

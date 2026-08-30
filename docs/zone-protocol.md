@@ -99,10 +99,10 @@ static Huffman codec driven by two fixed lookup tables loaded at startup from
   the end and decodes a stray trailing symbol. Harmless there, because
   sub-packet iteration stops before reaching it. This port subtracts the 8.
 
-The tables are **not** bundled with PortJeuno: they are GPLv3 in the LandSandBoat
+The tables are **not** bundled with MogHouse: they are GPLv3 in the LandSandBoat
 repo and their contents most likely originate in the retail client, so shipping
 them is a licensing decision rather than something to make by accident. They are
-loaded from a path (`PORTJEUNO_FFXI_RES`, or beside the executable). Their bytes
+loaded from a path (`MOGHOUSE_FFXI_RES`, or beside the executable). Their bytes
 do not appear in any retail client DLL in either 32- or 16-bit packing, so they
 appear to be built at runtime rather than stored.
 

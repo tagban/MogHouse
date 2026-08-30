@@ -3,7 +3,7 @@
 // Water. A translucent sheet at the height each collision cell records, tinted
 // by the zone's own lighting so it belongs to the time of day.
 
-namespace pj
+namespace mh
 {
 inline constexpr const char* kWaterShader = R"(
 struct Uniforms {
@@ -74,4 +74,4 @@ fn fragmentMain(in : WaterOut) -> @location(0) vec4<f32> {
     return vec4<f32>(colour, alpha);
 }
 )";
-} // namespace pj
+} // namespace mh

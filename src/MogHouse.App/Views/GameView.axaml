@@ -1,0 +1,79 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:MogHouse.App.ViewModels"
+             xmlns:ffxi="using:MogHouse.Core.Ffxi"
+             xmlns:controls="using:MogHouse.App.Controls"
+             x:Class="MogHouse.App.Views.GameView"
+             x:DataType="vm:GameViewModel">
+  <Grid ColumnDefinitions="*,320" Margin="10">
+
+    <!-- Chat -->
+    <Grid Grid.Column="0" RowDefinitions="Auto,*,Auto" Margin="0,0,10,0">
+      <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10" Margin="0,0,0,8">
+        <TextBlock Text="{Binding CharacterName}" FontSize="18"/>
+        <TextBlock Text="{Binding PositionText}" Opacity="0.6" VerticalAlignment="Center"/>
+      </StackPanel>
+
+      <Border Grid.Row="1" BorderBrush="#333" BorderThickness="1" CornerRadius="4">
+        <ScrollViewer>
+          <ItemsControl ItemsSource="{Binding ChatLines}" Margin="6">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="ffxi:FfxiChatLine">
+                <!-- Plain TextBlocks rather than Runs: Avalonia's Run does not
+                     support every property through a binding, and failures are
+                     silent, which is how the chat box ended up empty. -->
+                <StackPanel Orientation="Horizontal" Spacing="5" Margin="0,1">
+                  <TextBlock Text="{Binding Kind}" Foreground="#7E9CD8" FontSize="12" VerticalAlignment="Center"/>
+                  <TextBlock Text="{Binding Sender}" FontWeight="SemiBold"/>
+                  <TextBlock Text="{Binding Text}" TextWrapping="Wrap"/>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Border>
+
+      <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" Margin="0,8,0,0">
+        <TextBox Grid.Column="0"
+                 Name="ChatInput"
+                 Text="{Binding Input}"
+                 KeyDown="OnChatKeyDown"
+                 PlaceholderText="Say something, /tell Name message, or !gmcommand"/>
+        <Button Grid.Column="1" Content="Send" Command="{Binding SendCommand}" Margin="6,0,0,0"/>
+        <Button Grid.Column="2" Content="Log out" Command="{Binding LogoutCommand}" Margin="6,0,0,0"/>
+      </Grid>
+    </Grid>
+
+    <!-- Radar -->
+    <StackPanel Grid.Column="1" Spacing="8">
+      <TextBlock Text="Nearby" FontSize="16"/>
+      <Border BorderBrush="#333" BorderThickness="1" CornerRadius="4">
+        <controls:RadarControl Name="Radar" Width="300" Height="300"/>
+      </Border>
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <TextBlock Text="players" Opacity="0.5" FontSize="12"/>
+        <TextBlock Text="{Binding PlayerCount}" Opacity="0.85" FontSize="12"/>
+        <TextBlock Text="npcs" Opacity="0.5" FontSize="12" Margin="8,0,0,0"/>
+        <TextBlock Text="{Binding NpcCount}" Opacity="0.85" FontSize="12"/>
+      </StackPanel>
+      <TextBlock Opacity="0.4" FontSize="11" TextWrapping="Wrap"
+                 Text="Click the map to walk there, routed around walls. Blue is you, yellow players, grey NPCs; the lit area is walkable ground."/>
+      <Button Content="Stop walking" Command="{Binding StopWalkingCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+
+      <TextBlock Text="Move" FontSize="16" Margin="0,10,0,0"/>
+      <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto" Width="180" HorizontalAlignment="Left">
+        <Button Grid.Row="0" Grid.Column="1" Content="N" Command="{Binding MoveNorthCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+        <Button Grid.Row="1" Grid.Column="0" Content="W" Command="{Binding MoveWestCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+        <Button Grid.Row="1" Grid.Column="1" Content="S" Command="{Binding MoveSouthCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+        <Button Grid.Row="1" Grid.Column="2" Content="E" Command="{Binding MoveEastCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+      </Grid>
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <TextBlock Text="Step" VerticalAlignment="Center" Opacity="0.6"/>
+        <TextBox Text="{Binding StepSize}" Width="60"/>
+        <TextBlock Text="units" VerticalAlignment="Center" Opacity="0.6"/>
+      </StackPanel>
+      <TextBlock Opacity="0.4" FontSize="11" TextWrapping="Wrap"
+                 Text="Arrow keys work too, when the chat box is not focused. Height stays at the zone-in ground level, so avoid walking far up or down slopes."/>
+    </StackPanel>
+  </Grid>
+</UserControl>

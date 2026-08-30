@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <cstring>
 
-namespace pj
+namespace mh
 {
 wgpu::Surface CreateSurface(const wgpu::Instance& instance, SDL_Window* window)
 {
@@ -48,4 +48,4 @@ wgpu::Surface CreateSurface(const wgpu::Instance& instance, SDL_Window* window)
     wgpu::SurfaceDescriptor descriptor{.nextInChain = &source};
     return instance.CreateSurface(&descriptor);
 }
-} // namespace pj
+} // namespace mh

@@ -4,7 +4,7 @@
 #include <array>
 #include <cmath>
 
-namespace pj
+namespace mh
 {
 namespace
 {
@@ -392,4 +392,4 @@ void reskin(Character& character, const std::vector<BonePose>& pose, const std::
         ++index;
     });
 }
-} // namespace pj
+} // namespace mh

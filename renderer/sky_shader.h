@@ -5,7 +5,7 @@
 // FFXI's sky is not geometry - it is eight colours at eight altitudes, stored
 // per time of day alongside the fog and lighting. See docs/lighting-format.md.
 
-namespace pj
+namespace mh
 {
 inline constexpr const char* kSkyShader = R"(
 struct SkyUniforms {
@@ -71,4 +71,4 @@ fn fragmentMain(in : SkyOut) -> @location(0) vec4<f32> {
     return vec4<f32>(colour, 1.0);
 }
 )";
-} // namespace pj
+} // namespace mh

@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace pj
+namespace mh
 {
 /// FFXI characters are around this tall in world units, judging by the height
 /// range of a zone's collision geometry.
@@ -81,4 +81,4 @@ struct Camera
         position.y += verticalAmount;
     }
 };
-} // namespace pj
+} // namespace mh

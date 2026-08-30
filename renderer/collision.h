@@ -21,7 +21,7 @@
 #include <optional>
 #include <vector>
 
-namespace pj
+namespace mh
 {
 /// The zone's collision geometry, indexed for queries.
 class Collision
@@ -97,4 +97,4 @@ private:
     int cellsX_{1};
     int cellsZ_{1};
 };
-} // namespace pj
+} // namespace mh

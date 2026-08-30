@@ -20,7 +20,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace pj
+namespace mh
 {
 /// One equipment slot. FFXI stores a character as separate meshes sharing one
 /// skeleton, so an outfit is a matter of swapping which OS2 goes in each slot
@@ -99,4 +99,4 @@ Character buildCharacter(const std::vector<BonePose>& pose, const std::vector<ff
 /// indices and batches alone. Skinning is the only part of the work that
 /// changes between frames.
 void reskin(Character& character, const std::vector<BonePose>& pose, const std::vector<ffxi::SkinnedModel>& meshes);
-} // namespace pj
+} // namespace mh

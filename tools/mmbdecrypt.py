@@ -30,7 +30,7 @@ def load_table(path, which):
     assert len(vals) == 256, len(vals)
     return bytes(vals)
 
-KT = "C:/Users/Gaming/Desktop/PortJeuno/ffxi-engine/ffxi/dat/key_tables.cppm"
+KT = "C:/Users/Gaming/Desktop/MogHouse/ffxi-engine/ffxi/dat/key_tables.cppm"
 key_table = load_table(KT, "key_table[0x100]")
 key_table2 = load_table(KT, "key_table2[0x100]")
 

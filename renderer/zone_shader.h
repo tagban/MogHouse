@@ -6,7 +6,7 @@
 // Geometry arrives in model space and is placed by a per-instance matrix, so a
 // model appearing 1,218 times is uploaded once rather than 1,218 times.
 
-namespace pj
+namespace mh
 {
 inline constexpr const char* kZoneShader = R"(
 struct Uniforms {
@@ -98,4 +98,4 @@ fn fragmentCutout(in : VertexOut) -> @location(0) vec4<f32> {
     return shade(in, true);
 }
 )";
-} // namespace pj
+} // namespace mh

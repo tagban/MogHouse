@@ -94,5 +94,5 @@ since other toolchains still need it.
 ## Still open
 
 `ffxi/CMakeLists.txt` builds an executable and hardcodes `target_sources(ffxi ...)`
-against it, so there is no library for PortJeuno's interop layer to link against.
+against it, so there is no library for MogHouse's interop layer to link against.
 Wiring the engine to the C# client needs that restructured first.

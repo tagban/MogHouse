@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MogHouse.App/MogHouse.App.csproj" />
+    <Project Path="src/MogHouse.Console/MogHouse.Console.csproj" />
+    <Project Path="src/MogHouse.Core.Tests/MogHouse.Core.Tests.csproj" />
+    <Project Path="src/MogHouse.Core/MogHouse.Core.csproj" />
+  </Folder>
+</Solution>

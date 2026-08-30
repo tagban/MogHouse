@@ -64,7 +64,7 @@ address content are not stable - they shift when Square Enix patches the game.
 LandSandBoat carries ids for items and NPCs that are offsets into the DATs, and
 those have to be revised each update for the same reason.
 
-So no table mapping ids to content can ever be shipped with PortJeuno. Whatever
+So no table mapping ids to content can ever be shipped with MogHouse. Whatever
 we know about a particular install is only true of that install, at that
 version, until the next patch.
 
@@ -111,7 +111,7 @@ coming from `FFXiMain.dll`'s data section. Which points at where the client's ow
 mapping actually lives, and at a more durable approach than hardcoding: read
 those tables per install rather than pinning them per version.
 
-LandSandBoat is **GPL-3.0**, so its files cannot be copied into PortJeuno. What
+LandSandBoat is **GPL-3.0**, so its files cannot be copied into MogHouse. What
 we can do - and what fits the pattern already used for the compression tables
 and the MZB key table - is read the user's own LandSandBoat checkout when they
 have one, rather than vendoring anything.

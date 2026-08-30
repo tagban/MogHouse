@@ -9,7 +9,7 @@
 #include <cstring>
 #include <vector>
 
-namespace pj
+namespace mh
 {
 /// Uploads one texture. BC2 goes up untouched - it is a format the GPU reads
 /// natively, which is the whole reason DXT3 assets are cheap to load.
@@ -67,4 +67,4 @@ inline wgpu::Texture createWhiteTexture(const wgpu::Device& device)
     device.GetQueue().WriteTexture(&destination, white, sizeof(white), &layout, &descriptor.size);
     return texture;
 }
-} // namespace pj
+} // namespace mh

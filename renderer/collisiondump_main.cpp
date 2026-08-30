@@ -21,11 +21,11 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    const char* keyPath = std::getenv("PORTJEUNO_FFXI_KEYTABLE");
+    const char* keyPath = std::getenv("MOGHOUSE_FFXI_KEYTABLE");
     auto keys = keyPath ? ffxi::KeyTable::load(keyPath) : std::nullopt;
     if (!keys)
     {
-        std::printf("set PORTJEUNO_FFXI_KEYTABLE to the 256-byte MZB key table\n");
+        std::printf("set MOGHOUSE_FFXI_KEYTABLE to the 256-byte MZB key table\n");
         return 2;
     }
 
@@ -33,7 +33,7 @@ int main(int argc, char** argv)
     for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkMzb))
     {
         ffxi::Zone zone = ffxi::parseMzb(chunk, *keys);
-        pj::Collision collision{zone};
+        mh::Collision collision{zone};
 
         std::printf("zone %s: %zu collision meshes, %zu instances -> %zu triangles\n", zone.id.c_str(),
                     zone.collision.size(), zone.instances.size(), collision.triangleCount());
@@ -43,8 +43,8 @@ int main(int argc, char** argv)
         {
             continue;
         }
-        const pj::Vec3 lo = collision.boundsMin();
-        const pj::Vec3 hi = collision.boundsMax();
+        const mh::Vec3 lo = collision.boundsMin();
+        const mh::Vec3 hi = collision.boundsMax();
         std::printf("  bounds x %.1f..%.1f  y %.1f..%.1f  z %.1f..%.1f\n", lo.x, hi.x, lo.y, hi.y, lo.z, hi.z);
 
         // Walk from a point in a straight line, the way the renderer does, and
@@ -56,7 +56,7 @@ int main(int argc, char** argv)
             const float dirX = static_cast<float>(std::atof(argv[4]));
             const float dirZ = static_cast<float>(std::atof(argv[5]));
 
-            std::optional<pj::Vec3> at = collision.nearestGround(startX, startZ, hi.y + 10.0f, 60.0f);
+            std::optional<mh::Vec3> at = collision.nearestGround(startX, startZ, hi.y + 10.0f, 60.0f);
             if (!at)
             {
                 std::printf("  no ground within 60 units of %.1f %.1f\n", startX, startZ);
@@ -67,13 +67,13 @@ int main(int argc, char** argv)
             size_t blocked = 0;
             for (int step = 0; step < 40; ++step)
             {
-                const pj::Vec3 wanted{at->x + dirX, at->y, at->z + dirZ};
-                const pj::Vec3 stepped = collision.move(*at, wanted, 0.5f);
+                const mh::Vec3 wanted{at->x + dirX, at->y, at->z + dirZ};
+                const mh::Vec3 stepped = collision.move(*at, wanted, 0.5f);
                 const float dx = stepped.x - at->x;
                 const float dz = stepped.z - at->z;
                 const bool stopped = std::sqrt(dx * dx + dz * dz) < 1e-4f;
 
-                std::optional<pj::Vec3> next =
+                std::optional<mh::Vec3> next =
                     collision.nearestGround(stepped.x, stepped.z, at->y + 1.0f, 4.0f);
                 if (!next)
                 {
@@ -86,7 +86,7 @@ int main(int argc, char** argv)
                 }
                 if (stopped)
                 {
-                    const std::vector<pj::Collision::Blocker> blockers = collision.blockersNear(*at, 2.0f);
+                    const std::vector<mh::Collision::Blocker> blockers = collision.blockersNear(*at, 2.0f);
                     std::printf("  %zu wall triangles straddle the character here\n", blockers.size());
                     for (size_t i = 0; i < blockers.size() && i < 4; ++i)
                     {
@@ -150,7 +150,7 @@ int main(int argc, char** argv)
         // eager, which a hit rate alone will not show.
         size_t open = 0;
         size_t tested = 0;
-        pj::Vec3 bestSpot{};
+        mh::Vec3 bestSpot{};
         int bestScore = -1;
         for (int ix = 0; ix < 40; ++ix)
         {
@@ -169,11 +169,11 @@ int main(int argc, char** argv)
                 const float dirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
                 for (const auto& dir : dirs)
                 {
-                    pj::Vec3 at{x, *y, z};
+                    mh::Vec3 at{x, *y, z};
                     for (int step = 0; step < 10; ++step)
                     {
-                        const pj::Vec3 stepped = collision.move(at, {at.x + dir[0], at.y, at.z + dir[1]}, 0.5f);
-                        const std::optional<pj::Vec3> next =
+                        const mh::Vec3 stepped = collision.move(at, {at.x + dir[0], at.y, at.z + dir[1]}, 0.5f);
+                        const std::optional<mh::Vec3> next =
                             collision.nearestGround(stepped.x, stepped.z, at.y + 1.0f, 2.0f);
                         if (!next)
                         {

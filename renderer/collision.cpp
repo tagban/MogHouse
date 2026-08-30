@@ -4,7 +4,7 @@
 #include <cmath>
 #include <limits>
 
-namespace pj
+namespace mh
 {
 namespace
 {
@@ -367,4 +367,4 @@ Vec3 Collision::move(const Vec3& from, const Vec3& to, float radius) const
     }
     return to;
 }
-} // namespace pj
+} // namespace mh

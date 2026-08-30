@@ -5,7 +5,7 @@
 #include <limits>
 #include <map>
 
-namespace pj
+namespace mh
 {
 namespace
 {
@@ -230,4 +230,4 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
     scene.boundsMax = hi;
     return scene;
 }
-} // namespace pj
+} // namespace mh

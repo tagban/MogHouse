@@ -16,7 +16,7 @@ set VULKAN_SDK=C:\VulkanSDK\1.4.357.0
   -DVulkanMemoryAllocator_DIR="%~dp0vendor\vma-install\share\cmake\VulkanMemoryAllocator" ^
   -DSLANGC="%VULKAN_SDK%\Bin\slangc.exe" ^
   -DGLM_ROOT_DIR="%~dp0vendor\glm" ^
-  -DPORTJEUNO_VULKAN_CPPM="%~dp0vendor\vulkan-module\vulkan.cppm"
+  -DMOGHOUSE_VULKAN_CPPM="%~dp0vendor\vulkan-module\vulkan.cppm"
 echo --- CONFIGURE EXIT: %ERRORLEVEL% ---
 if not "%ERRORLEVEL%"=="0" exit /b %ERRORLEVEL%
 

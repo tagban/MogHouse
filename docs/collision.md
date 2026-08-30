@@ -12,7 +12,7 @@ Read by `renderer/collision.cpp`, probed by `ffxi-collisiondump`.
 
 ## Why the DATs rather than the server's navmeshes
 
-LandSandBoat ships Recast navmeshes per zone, and PortJeuno's C# client already
+LandSandBoat ships Recast navmeshes per zone, and MogHouse's C# client already
 reads them for server-authoritative movement. The renderer deliberately does
 not.
 

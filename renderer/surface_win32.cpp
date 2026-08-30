@@ -9,7 +9,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-namespace pj
+namespace mh
 {
 wgpu::Surface CreateSurface(const wgpu::Instance& instance, SDL_Window* window)
 {
@@ -26,4 +26,4 @@ wgpu::Surface CreateSurface(const wgpu::Instance& instance, SDL_Window* window)
     wgpu::SurfaceDescriptor descriptor{.nextInChain = &source};
     return instance.CreateSurface(&descriptor);
 }
-} // namespace pj
+} // namespace mh

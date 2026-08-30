@@ -84,13 +84,13 @@ int main(int argc, char** argv)
             }
         }
 
-        const std::vector<pj::BonePose> pose = pj::bindPose(skeleton);
+        const std::vector<mh::BonePose> pose = mh::bindPose(skeleton);
 
         // How far the skeleton itself reaches. If this is wrong the mesh has
         // no chance, and it is far easier to read.
-        pj::Vec3 low{1e9f, 1e9f, 1e9f};
-        pj::Vec3 high{-1e9f, -1e9f, -1e9f};
-        for (const pj::BonePose& bone : pose)
+        mh::Vec3 low{1e9f, 1e9f, 1e9f};
+        mh::Vec3 high{-1e9f, -1e9f, -1e9f};
+        for (const mh::BonePose& bone : pose)
         {
             low = {std::fmin(low.x, bone.translation.x), std::fmin(low.y, bone.translation.y),
                    std::fmin(low.z, bone.translation.z)};
@@ -100,14 +100,14 @@ int main(int argc, char** argv)
         std::printf("bones span x %.3f..%.3f  y %.3f..%.3f  z %.3f..%.3f\n", low.x, high.x, low.y, high.y, low.z,
                     high.z);
 
-        const pj::Character character = pj::buildCharacter(pose, meshes, textures);
+        const mh::Character character = mh::buildCharacter(pose, meshes, textures);
         std::printf("skinned %zu meshes -> %zu vertices, %zu triangles, %zu batches\n", meshes.size(),
                     character.vertices.size(), character.triangles(), character.batches.size());
         std::printf("bounds  x %.3f..%.3f  y %.3f..%.3f  z %.3f..%.3f   height %.3f\n", character.boundsMin.x,
                     character.boundsMax.x, character.boundsMin.y, character.boundsMax.y, character.boundsMin.z,
                     character.boundsMax.z, character.height());
 
-        for (const pj::Batch& batch : character.batches)
+        for (const mh::Batch& batch : character.batches)
         {
             const auto found = textures.find(batch.texture);
             std::printf("  batch %-18s %6u indices  %s%s\n", batch.texture.c_str(), batch.indexCount,

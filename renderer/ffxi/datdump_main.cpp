@@ -23,14 +23,14 @@ int main(int argc, char** argv)
     if (argc < 2)
     {
         std::printf("usage: ffxi-datdump <file.DAT> [more.DAT ...]\n");
-        std::printf("  key table path comes from PORTJEUNO_FFXI_KEYTABLE\n");
+        std::printf("  key table path comes from MOGHOUSE_FFXI_KEYTABLE\n");
         return 2;
     }
 
-    const char* keyPath = std::getenv("PORTJEUNO_FFXI_KEYTABLE");
+    const char* keyPath = std::getenv("MOGHOUSE_FFXI_KEYTABLE");
     if (!keyPath)
     {
-        std::printf("set PORTJEUNO_FFXI_KEYTABLE to a file holding the 256-byte key table\n");
+        std::printf("set MOGHOUSE_FFXI_KEYTABLE to a file holding the 256-byte key table\n");
         return 2;
     }
 
@@ -53,7 +53,7 @@ int main(int argc, char** argv)
         // Models. The check that matters is whether vertices land inside the
         // bounding box the model declares for itself - a wrong stride or offset
         // scatters them outside it immediately.
-        const char* key2Path = std::getenv("PORTJEUNO_FFXI_KEYTABLE2");
+        const char* key2Path = std::getenv("MOGHOUSE_FFXI_KEYTABLE2");
         if (key2Path)
         {
             if (auto keys2 = ffxi::KeyTable::load(key2Path))

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(portjeuno-renderer CXX)
+project(moghouse-renderer CXX)
 
 # Objective-C++ only exists on Apple, and enabling it unconditionally makes the
 # configure fail everywhere else.
@@ -26,7 +26,7 @@ else()
     set(PJ_SURFACE_SOURCE surface_linux.cpp)
 endif()
 
-add_executable(portjeuno-renderer
+add_executable(moghouse-renderer
     character.cpp
     collision.cpp
     main.cpp
@@ -35,19 +35,19 @@ add_executable(portjeuno-renderer
     ${PJ_SURFACE_SOURCE}
 )
 
-target_link_libraries(portjeuno-renderer PRIVATE dawn::webgpu_dawn SDL3::SDL3 ffxi-dat)
+target_link_libraries(moghouse-renderer PRIVATE dawn::webgpu_dawn SDL3::SDL3 ffxi-dat)
 
 if(APPLE)
-    target_link_libraries(portjeuno-renderer PRIVATE "-framework QuartzCore" "-framework Cocoa")
+    target_link_libraries(moghouse-renderer PRIVATE "-framework QuartzCore" "-framework Cocoa")
     # surface_metal.mm uses __bridge casts, which only exist under ARC. Without
     # this the file does not compile.
     set_source_files_properties(surface_metal.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 endif()
 
 if(MSVC)
-    add_custom_command(TARGET portjeuno-renderer POST_BUILD
+    add_custom_command(TARGET moghouse-renderer POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_RUNTIME_DLLS:portjeuno-renderer> $<TARGET_FILE_DIR:portjeuno-renderer>
+            $<TARGET_RUNTIME_DLLS:moghouse-renderer> $<TARGET_FILE_DIR:moghouse-renderer>
         COMMAND_EXPAND_LISTS
     )
 endif()

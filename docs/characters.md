@@ -6,7 +6,7 @@ those seven numbers.
 
     race, face, head, body, hands, legs, feet
 
-`PORTJEUNO_LOOK=1,0,0,1,1,1,1` is a hume male with face 0 and the first
+`MOGHOUSE_LOOK=1,0,0,1,1,1,1` is a hume male with face 0 and the first
 body, hands, legs and feet in the table, wearing no headgear.
 
 ## Where the files are
@@ -105,7 +105,7 @@ python tools/keytables.py
 Then, with the retail install present:
 
 ```
-PORTJEUNO_FFXI_KEYTABLE=keys/mzb_key_table.bin PORTJEUNO_FFXI_KEYTABLE2=keys/mmb_key_table2.bin PORTJEUNO_LOOK=1,0,0,1,1,1,1 PORTJEUNO_ANIMATION=wlk0   build-renderer/portjeuno-renderer "<install>/ROM/1/0.DAT"
+MOGHOUSE_FFXI_KEYTABLE=keys/mzb_key_table.bin MOGHOUSE_FFXI_KEYTABLE2=keys/mmb_key_table2.bin MOGHOUSE_LOOK=1,0,0,1,1,1,1 MOGHOUSE_ANIMATION=wlk0   build-renderer/moghouse-renderer "<install>/ROM/1/0.DAT"
 ```
 
 `ROM/1/0.DAT` is East Sarutabaruta. Any zone DAT works.
@@ -114,12 +114,12 @@ PORTJEUNO_FFXI_KEYTABLE=keys/mzb_key_table.bin PORTJEUNO_FFXI_KEYTABLE2=keys/mmb
 
 | variable | meaning |
 | --- | --- |
-| `PORTJEUNO_LOOK` | `race,face,head,body,hands,legs,feet` |
-| `PORTJEUNO_CHARACTER` | semicolon-separated DAT paths, for an NPC that lives in one file |
-| `PORTJEUNO_CHARACTER_AT` | `x,y,z` to stand it at |
-| `PORTJEUNO_CHARACTER_FACING` | heading in degrees; the model faces east at zero |
-| `PORTJEUNO_ANIMATION` | pins one animation; without it, movement picks |
-| `PORTJEUNO_FRAME` | pins the animation clock, for a repeatable screenshot |
+| `MOGHOUSE_LOOK` | `race,face,head,body,hands,legs,feet` |
+| `MOGHOUSE_CHARACTER` | semicolon-separated DAT paths, for an NPC that lives in one file |
+| `MOGHOUSE_CHARACTER_AT` | `x,y,z` to stand it at |
+| `MOGHOUSE_CHARACTER_FACING` | heading in degrees; the model faces east at zero |
+| `MOGHOUSE_ANIMATION` | pins one animation; without it, movement picks |
+| `MOGHOUSE_FRAME` | pins the animation clock, for a repeatable screenshot |
 
 In the window: **wasd** drives the character, **shift** runs, **c** stands them
 where the camera is, **f** swaps between driving the character and flying the
@@ -127,7 +127,7 @@ camera, **tab** orbits, **p** prints the position.
 
 The character walks on the terrain and stops at walls — see
 [collision.md](collision.md). Idle, walk and run are chosen by what they are
-actually doing, unless `PORTJEUNO_ANIMATION` pins one.
+actually doing, unless `MOGHOUSE_ANIMATION` pins one.
 
 ## Not done yet
 

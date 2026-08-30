@@ -4,7 +4,7 @@ Parked for later. Everything this needs already works.
 
 ## Why it's viable now
 
-PortJeuno can already do the whole chain without any rendering:
+MogHouse can already do the whole chain without any rendering:
 
 - log in (TLS+JSON auth), fetch the character roster, select a character
 - connect to the zone server over UDP, encrypted and compressed

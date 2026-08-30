@@ -62,23 +62,23 @@ print(path if path else '')
     Write-Host "zone $ZoneId -> $Zone"
 }
 
-$env:PORTJEUNO_FFXI_KEYTABLE = Join-Path $keys "mzb_key_table.bin"
-$env:PORTJEUNO_FFXI_KEYTABLE2 = Join-Path $keys "mmb_key_table2.bin"
-$env:PORTJEUNO_FFXI_INSTALL = $Install
+$env:MOGHOUSE_FFXI_KEYTABLE = Join-Path $keys "mzb_key_table.bin"
+$env:MOGHOUSE_FFXI_KEYTABLE2 = Join-Path $keys "mmb_key_table2.bin"
+$env:MOGHOUSE_FFXI_INSTALL = $Install
 $lookValue = $Look -join ","
-$env:PORTJEUNO_LOOK = if ($lookValue) { $lookValue } else { $null }
-$env:PORTJEUNO_CHARACTER = if ($Character) { $Character } else { $null }
-$env:PORTJEUNO_ANIMATION = if ($lookValue -or $Character) { $Animation } else { $null }
-$env:PORTJEUNO_CHARACTER_AT = if ($At) { $At } else { $null }
-$env:PORTJEUNO_CHARACTER_FACING = if ($Facing) { $Facing } else { $null }
-$env:PORTJEUNO_TIME = if ($Time) { $Time } else { $null }
+$env:MOGHOUSE_LOOK = if ($lookValue) { $lookValue } else { $null }
+$env:MOGHOUSE_CHARACTER = if ($Character) { $Character } else { $null }
+$env:MOGHOUSE_ANIMATION = if ($lookValue -or $Character) { $Animation } else { $null }
+$env:MOGHOUSE_CHARACTER_AT = if ($At) { $At } else { $null }
+$env:MOGHOUSE_CHARACTER_FACING = if ($Facing) { $Facing } else { $null }
+$env:MOGHOUSE_TIME = if ($Time) { $Time } else { $null }
 
 # Left over from a shot.ps1 run in the same window these would silently turn
 # this into a screenshot that exits immediately.
-$env:PORTJEUNO_SCREENSHOT = $null
-$env:PORTJEUNO_SCREENSHOT_SEQUENCE = $null
-$env:PORTJEUNO_FRAME = $null
-$env:PORTJEUNO_CAMERA = $null
-$env:PORTJEUNO_CAMERA_LOOK = $null
+$env:MOGHOUSE_SCREENSHOT = $null
+$env:MOGHOUSE_SCREENSHOT_SEQUENCE = $null
+$env:MOGHOUSE_FRAME = $null
+$env:MOGHOUSE_CAMERA = $null
+$env:MOGHOUSE_CAMERA_LOOK = $null
 
-& "$PSScriptRoot\build-renderer\portjeuno-renderer.exe" $Zone
+& "$PSScriptRoot\build-renderer\moghouse-renderer.exe" $Zone

@@ -4,7 +4,7 @@
 
 struct SDL_Window;
 
-namespace pj
+namespace mh
 {
 // Creating a WebGPU surface from an SDL window is the one genuinely
 // platform-specific piece of this renderer, because each windowing system hands
@@ -14,4 +14,4 @@ namespace pj
 // Returns a null surface if the platform is not supported or the handle could
 // not be read; the caller reports the error.
 wgpu::Surface CreateSurface(const wgpu::Instance& instance, SDL_Window* window);
-} // namespace pj
+} // namespace mh

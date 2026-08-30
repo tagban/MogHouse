@@ -18,7 +18,7 @@ paths had ever been run.
 
 ## What this is
 
-PortJeuno is a from-scratch Final Fantasy XI client. Its networking, chat,
+MogHouse is a from-scratch Final Fantasy XI client. Its networking, chat,
 movement and radar are C# and already run on macOS. What does not is 3D
 rendering.
 
@@ -67,7 +67,7 @@ xcode-select --install   # if the command line tools are not already there
 ```
 
 ```bash
-cd PortJeuno && git pull
+cd MogHouse && git pull
 ```
 
 Build Dawn. This is a large build - it fetches its own dependencies and compiles
@@ -81,7 +81,7 @@ Then the slice:
 
 ```bash
 ./build-renderer.sh
-./build-renderer/portjeuno-renderer
+./build-renderer/moghouse-renderer
 ```
 
 Escape or closing the window quits.
@@ -206,9 +206,9 @@ install prefix. CMake 4.4.3 cleared Dawn's configure without the
 ## What actually broke - all three will hit Linux identically
 
 **1. `build-renderer/` was committed.** 33 files of generated MSVC output -
-`CMakeCache.txt`, object files, `SDL3.dll`, `portjeuno-renderer.exe` - sitting
+`CMakeCache.txt`, object files, `SDL3.dll`, `moghouse-renderer.exe` - sitting
 at exactly the path both build scripts configure into. Any non-Windows clone
-hit the stale cache. The cache hardcoded `C:/Users/Gaming/Desktop/PortJeuno/`,
+hit the stale cache. The cache hardcoded `C:/Users/Gaming/Desktop/MogHouse/`,
 so it was already useless on any other Windows checkout too.
 
 Removed from tracking and from disk. `.gitignore` now carries
@@ -250,11 +250,11 @@ the same split exists on Windows under display scaling.
 
 Not asked for by this doc, but tested while the toolchain was set up:
 
-- `dotnet build PortJeuno.slnx -c Release` - **0 errors**, 2.9s, one trivial
+- `dotnet build MogHouse.slnx -c Release` - **0 errors**, 2.9s, one trivial
   `CS9191` warning in `Ffxi/FfxiNavMesh.cs:99`.
 - `dotnet test` - **100 passed, 0 failed, 12 skipped**, 33 ms.
 
-The 12 skips are gated, not broken: they need `PORTJEUNO_FFXI_RES` pointing at
+The 12 skips are gated, not broken: they need `MOGHOUSE_FFXI_RES` pointing at
 a directory holding `compress.dat` and `decompress.dat`.
 
 **A retail install does not satisfy this.** A full one was staged on this
@@ -278,7 +278,7 @@ parsers actually need; the compression tables are a separate problem.
 
 Two things noticed in passing, neither acted on:
 
-- **`PortJeuno.App` runs on macOS - but is not in `PortJeuno.slnx`.** Only
+- **`MogHouse.App` runs on macOS - but is not in `MogHouse.slnx`.** Only
   Console, Core and Core.Tests are listed, so a solution-level build skips the
   app entirely. Built directly, it succeeds in 1.4s with 0 errors (one
   `AVLN5001` warning: `TextBox.Watermark` is obsolete, use `PlaceholderText`,
@@ -289,13 +289,13 @@ Two things noticed in passing, neither acted on:
   console window. **It should be added to the solution.**
 
   Two things noticed while it was running. Its own status bar reports
-  "Compression tables not found - set PORTJEUNO_FFXI_RES...", which is the app
+  "Compression tables not found - set MOGHOUSE_FFXI_RES...", which is the app
   surfacing the same gap the 12 skipped tests do - good behaviour, worth
   keeping. And the macOS menu bar shows "Avalonia Application" rather than
-  "PortJeuno", because the app is not packaged as a `.app` bundle with an
+  "MogHouse", because the app is not packaged as a `.app` bundle with an
   `Info.plist`. Cosmetic now, but it needs solving before anyone ships a Mac
   build.
-- **`native/portjeuno_interop` has still never been compiled.** Its README says
+- **`native/moghouse_interop` has still never been compiled.** Its README says
   the authoring machine had no CMake or Ninja. This machine now has both, so
   that claim can finally be tested. `Core/Interop/NativeEngine.cs` declares
   `LibraryImport` against it, but no `.csproj` references it, so the .NET build
@@ -323,9 +323,9 @@ The heavy Dawn paths are redirected to an external APFS volume, because the
 internal disk had only 14.8 GB free:
 
 ```
-vendor/dawn          -> /Volumes/AppStorage/PortJeuno-build/dawn
-build-dawn           -> /Volumes/AppStorage/PortJeuno-build/build-dawn
-vendor/dawn-install  -> /Volumes/AppStorage/PortJeuno-build/dawn-install
+vendor/dawn          -> /Volumes/AppStorage/MogHouse-build/dawn
+build-dawn           -> /Volumes/AppStorage/MogHouse-build/build-dawn
+vendor/dawn-install  -> /Volumes/AppStorage/MogHouse-build/dawn-install
 ```
 
 These are symlinks, so the build scripts still work unmodified. If that volume

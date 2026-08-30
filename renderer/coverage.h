@@ -12,7 +12,7 @@
 #include <cstdio>
 #include <vector>
 
-namespace pj
+namespace mh
 {
 struct Coverage
 {
@@ -172,4 +172,4 @@ inline void printCoverageDiff(const ZoneMesh& reference, const ZoneMesh& subject
     }
     std::printf("  both %u, collision only %u, models only %u\n", both, onlyReference, onlySubject);
 }
-} // namespace pj
+} // namespace mh
