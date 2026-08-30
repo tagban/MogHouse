@@ -35,3 +35,5 @@ build-dawn
 # committed from Windows; its CMakeCache.txt hardcodes absolute paths, so it is
 # not portable even between two Windows machines.
 /build-renderer
+# Derived index of the local retail install - regenerable, install-specific
+/ffxi-index.json
