@@ -60,8 +60,9 @@ public:
     Vec3 move(const Vec3& from, const Vec3& to, float radius) const;
 
     /// An 8-bit top-down picture of where a character can stand: 255 walkable,
-    /// 0 not. Square, covering the same extent the zone map is baked over, so
-    /// the two line up texel for texel.
+    /// 0 not. Square, covering the same extent the zone map is baked over and
+    /// the same way up - north at the top, east to the right - so the two line
+    /// up texel for texel.
     ///
     /// Rasterised rather than sampled. Asking groundAt for every texel of a
     /// 1024 square is a million queries; walking the triangles and filling

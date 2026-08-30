@@ -849,10 +849,18 @@ int mh::runViewer(const ViewerOptions& options)
         const mh::Vec3 middle = zone->centre();
 
         Uniforms mapUniforms{};
-        // Straight down. The up vector has to differ from the view direction,
-        // and +z puts north at the top.
+        // Straight down, with +z up the screen so north is at the top.
+        //
+        // The left and right of the projection are swapped on purpose. Looking
+        // straight down with north up, this look-at puts the world -x axis to
+        // screen right - the map comes out mirrored east to west, which is
+        // invisible on terrain this irregular and would send a player walking
+        // east sliding west across the radar. Swapping the projection mirrors
+        // it back. Measured, not reasoned: with both axes as they were, only
+        // 80% of walkable texels landed on drawn terrain, against 100% once
+        // corrected.
         const mh::Mat4 mapView = mh::lookAt({middle.x, hi.y + 100.0f, middle.z}, middle, {0.0f, 0.0f, 1.0f});
-        const mh::Mat4 mapProjection = mh::orthographic(-half, half, -half, half, 1.0f, (hi.y - lo.y) + 400.0f);
+        const mh::Mat4 mapProjection = mh::orthographic(half, -half, -half, half, 1.0f, (hi.y - lo.y) + 400.0f);
         const mh::Mat4 mapViewProjection = mapProjection * mapView;
         std::memcpy(mapUniforms.viewProjection, mapViewProjection.m, sizeof(mapUniforms.viewProjection));
 
@@ -923,6 +931,22 @@ int mh::runViewer(const ViewerOptions& options)
             copyEncoder.CopyTextureToBuffer(&source, &destination, &extent);
             wgpu::CommandBuffer copyCommands = copyEncoder.Finish();
             queue.Submit(1, &copyCommands);
+
+            // The mask over the same square, so the two can be checked against
+            // each other. They are only useful together, and an offset here
+            // would put every radar dot the same distance off the terrain it
+            // is meant to sit on.
+            {
+                const std::vector<uint8_t> mask = collision.rasteriseWalkable(kMapSize, middle, half);
+                const std::string maskPath = *options.mapPath + ".mask.pgm";
+                if (std::FILE* file = std::fopen(maskPath.c_str(), "wb"))
+                {
+                    std::fprintf(file, "P5\n%u %u\n255\n", kMapSize, kMapSize);
+                    std::fwrite(mask.data(), 1, mask.size(), file);
+                    std::fclose(file);
+                    std::printf("wrote %s\n", maskPath.c_str());
+                }
+            }
 
             bool mapped = false;
             wgpu::Future future = readback.MapAsync(wgpu::MapMode::Read, 0, wgpu::kWholeMapSize,

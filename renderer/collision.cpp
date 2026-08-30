@@ -251,7 +251,12 @@ std::vector<uint8_t> Collision::rasteriseWalkable(uint32_t size, const Vec3& cen
 
     const float scale = static_cast<float>(size) / (halfExtent * 2.0f);
     const float originX = centre.x - halfExtent;
-    const float originZ = centre.z - halfExtent;
+
+    // Row 0 is the +z edge, so this comes out the same way up as the baked
+    // map: north at the top, east to the right. The two are only ever useful
+    // together, and a mask that disagreed with the map would put every radar
+    // dot the same distance off the terrain it is meant to sit on.
+    const float originZ = centre.z + halfExtent;
 
     for (const Triangle& triangle : triangles_)
     {
@@ -263,11 +268,11 @@ std::vector<uint8_t> Collision::rasteriseWalkable(uint32_t size, const Vec3& cen
         // Into texel space. Only x and z matter - this is a plan view, and a
         // ramp counts as ground wherever its footprint falls.
         const float ax = (triangle.a.x - originX) * scale;
-        const float az = (triangle.a.z - originZ) * scale;
+        const float az = (originZ - triangle.a.z) * scale;
         const float bx = (triangle.b.x - originX) * scale;
-        const float bz = (triangle.b.z - originZ) * scale;
+        const float bz = (originZ - triangle.b.z) * scale;
         const float cx = (triangle.c.x - originX) * scale;
-        const float cz = (triangle.c.z - originZ) * scale;
+        const float cz = (originZ - triangle.c.z) * scale;
 
         int minX = static_cast<int>(std::floor(std::min({ax, bx, cx})));
         int maxX = static_cast<int>(std::ceil(std::max({ax, bx, cx})));
