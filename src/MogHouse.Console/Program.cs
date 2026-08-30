@@ -840,6 +840,7 @@ sealed class LiveRadar : IDisposable
             // Set MOGHOUSE_SCREENSHOT to check the live radar without watching
             // it. The wait is in frames, and it has to outlast the first few
             // entity updates or the shot shows an empty radar.
+            ZoneName = FfxiZoneNames.Get((uint)zoneId) ?? $"ZONE {zoneId}",
             ScreenshotPath = Environment.GetEnvironmentVariable("MOGHOUSE_SCREENSHOT"),
             ScreenshotAfterFrames =
                 int.TryParse(Environment.GetEnvironmentVariable("MOGHOUSE_SCREENSHOT_AFTER"), out int after)

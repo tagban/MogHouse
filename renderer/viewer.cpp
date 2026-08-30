@@ -70,6 +70,7 @@ struct RadarUniforms
     float mapExtent[4];
     float viewer[4];
     float counts[4];
+    float label[mh::kRadarMaxLabel][4];
     float entities[mh::kRadarMaxEntities][4];
 };
 
@@ -1401,6 +1402,29 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     std::vector<mh::RadarEntity> radarEntities = options.testEntities;
     float radarRange = 120.0f;
 
+    // The zone name as glyph indices, resolved once. Anything outside the font
+    // becomes a space rather than a wrong letter, and underscores read as
+    // spaces because that is how the server names zones.
+    std::vector<int> labelIndices;
+    if (options.zoneName)
+    {
+        static const std::string kOrder = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'-.";
+        for (char raw : *options.zoneName)
+        {
+            if (labelIndices.size() >= mh::kRadarMaxLabel)
+            {
+                break;
+            }
+            char upper = raw >= 'a' && raw <= 'z' ? static_cast<char>(raw - 'a' + 'A') : raw;
+            if (upper == '_')
+            {
+                upper = ' ';
+            }
+            const size_t found = kOrder.find(upper);
+            labelIndices.push_back(found == std::string::npos ? 0 : static_cast<int>(found));
+        }
+    }
+
     /// How fast a fall accelerates, in units per second squared. Not measured
     /// against anything - FFXI's own value is not in the DATs - so it is
     /// tuned to look right at this scale, where a character is 1.8 units tall.
@@ -1809,6 +1833,11 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 
                 const size_t shown = std::min(radarEntities.size(), static_cast<size_t>(mh::kRadarMaxEntities));
                 radar.counts[0] = static_cast<float>(shown);
+                radar.counts[1] = static_cast<float>(labelIndices.size());
+                for (size_t i = 0; i < labelIndices.size(); ++i)
+                {
+                    radar.label[i][0] = static_cast<float>(labelIndices[i]);
+                }
                 for (size_t i = 0; i < shown; ++i)
                 {
                     radar.entities[i][0] = radarEntities[i].x;

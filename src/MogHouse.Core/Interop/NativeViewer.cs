@@ -34,6 +34,9 @@ public sealed record NativeViewerOptions
     /// <summary>Compass degrees.</summary>
     public string? CharacterFacing { get; init; }
 
+    /// <summary>Shown along the bottom of the radar.</summary>
+    public string? ZoneName { get; init; }
+
     /// <summary>Vana'diel clock as hhmm, or null to let the day run.</summary>
     public int? TimeOfDay { get; init; }
 
@@ -124,6 +127,7 @@ public sealed partial class NativeViewer : IDisposable
         IntPtr at = Utf8(options.CharacterAt);
         IntPtr facing = Utf8(options.CharacterFacing);
         IntPtr shot = Utf8(options.ScreenshotPath);
+        IntPtr zoneName = Utf8(options.ZoneName);
 
         try
         {
@@ -135,6 +139,7 @@ public sealed partial class NativeViewer : IDisposable
                 Look = look,
                 CharacterAt = at,
                 CharacterFacing = facing,
+                ZoneName = zoneName,
                 TimeOfDay = options.TimeOfDay ?? -1,
                 ScreenshotPath = shot,
                 ScreenshotAfterFrames = options.ScreenshotAfterFrames,
@@ -148,7 +153,7 @@ public sealed partial class NativeViewer : IDisposable
         }
         finally
         {
-            foreach (IntPtr held in new[] { zone, keys, keys2, look, at, facing, shot })
+            foreach (IntPtr held in new[] { zone, keys, keys2, look, at, facing, shot, zoneName })
             {
                 if (held != IntPtr.Zero)
                 {
@@ -210,6 +215,7 @@ public sealed partial class NativeViewer : IDisposable
         public IntPtr Look;
         public IntPtr CharacterAt;
         public IntPtr CharacterFacing;
+        public IntPtr ZoneName;
         public int TimeOfDay;
         public IntPtr ScreenshotPath;
         public int ScreenshotAfterFrames;

@@ -53,6 +53,11 @@ struct ViewerOptions
 
     std::optional<std::string> characterAt;      ///< "x,y,z"
     std::optional<std::string> characterFacing;  ///< compass degrees, 0 is north (+z)
+
+    /// Shown along the bottom of the radar. The renderer has no zone-name
+    /// table and does not want one - the client already knows what zone it
+    /// asked for, so it says.
+    std::optional<std::string> zoneName;
     std::optional<std::string> camera;           ///< "x,y,z"
     std::optional<std::string> cameraLook;       ///< "yaw,pitch" in degrees
 

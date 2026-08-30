@@ -59,6 +59,10 @@ typedef struct MhViewerOptions
     /// Compass degrees, or null.
     const char* character_facing;
 
+    /// Shown along the bottom of the radar. The renderer has no zone-name
+    /// table; the caller already knows what it asked for.
+    const char* zone_name;
+
     /// Vana'diel clock as hhmm, or -1 to let the day run.
     int32_t time_of_day;
 

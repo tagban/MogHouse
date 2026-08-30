@@ -50,6 +50,7 @@ ViewerOptions optionsFromEnvironment(int argc, char** argv)
     options.camera = fromEnvironment("MOGHOUSE_CAMERA");
     options.cameraLook = fromEnvironment("MOGHOUSE_CAMERA_LOOK");
     options.animation = fromEnvironment("MOGHOUSE_ANIMATION");
+    options.zoneName = fromEnvironment("MOGHOUSE_ZONE_NAME");
     options.screenshotPath = fromEnvironment("MOGHOUSE_SCREENSHOT");
     options.mapPath = fromEnvironment("MOGHOUSE_MAP");
 
