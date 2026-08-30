@@ -50,6 +50,17 @@ struct CollisionMesh
     size_t triangleCount() const { return indices.size() / 3; }
 };
 
+/// One placement of a collision mesh into the world.
+///
+/// The meshes themselves are in model space and are reused - a zone has far
+/// more instances than meshes. Drawing the meshes without these puts every one
+/// of them at the origin, stacked on top of each other.
+struct CollisionInstance
+{
+    float transform[16]; // column major, ready for a shader
+    uint32_t mesh{};
+};
+
 /// A parsed MZB chunk.
 struct Zone
 {
@@ -57,6 +68,7 @@ struct Zone
     uint8_t version{};
     std::vector<Placement> placements;
     std::vector<CollisionMesh> collision;
+    std::vector<CollisionInstance> instances;
 };
 
 /// Decrypts and parses one MZB chunk.

@@ -27,7 +27,12 @@ struct ZoneMesh
     float radius() const;
 };
 
-/// Flattens every collision mesh in a zone into one buffer.
+/// Flattens a zone's collision geometry into one buffer, placed in the world.
+///
+/// Meshes are model space and reused, so this walks the instances rather than
+/// the meshes - drawing the meshes directly stacks every one of them on the
+/// origin. FFXI's Y axis points down, so it is flipped here and everything
+/// downstream can assume Y is up.
 ///
 /// Normals are computed per face rather than taken from the file. MZB does
 /// store normals, but there are fewer of them than either vertices or triangles

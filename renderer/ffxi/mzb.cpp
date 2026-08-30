@@ -3,6 +3,7 @@
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace ffxi
 {
@@ -174,11 +175,75 @@ Zone parseMzb(const Chunk& chunk, const KeyTable& keys)
     const uint32_t meshCount = read<uint32_t>(buffer, meshTable);
     size_t entry = read<uint32_t>(buffer, meshTable + 4);
     zone.collision.reserve(meshCount);
+
+    // Instances reference a mesh by the offset of its table entry, so remember
+    // where each one started.
+    std::unordered_map<uint32_t, uint32_t> meshByOffset;
     for (uint32_t i = 0; i < meshCount; ++i)
     {
         size_t next = 0;
+        meshByOffset[static_cast<uint32_t>(entry)] = static_cast<uint32_t>(zone.collision.size());
         zone.collision.push_back(readMesh(buffer, entry, next));
         entry = next;
+    }
+
+    // The meshes are model space and reused. Where each copy goes is held in a
+    // spatial grid: a 2D array of offsets, each pointing at a list of
+    // (placement, mesh) pairs. Without this every mesh sits at the origin.
+    const uint32_t gridTable = read<uint32_t>(buffer, meshTable + 0x10);
+    if (gridTable == 0)
+    {
+        return zone;
+    }
+
+    const uint8_t gridWidth = buffer[12];
+    const uint8_t gridHeight = buffer[13];
+    const uint8_t bucketWidth = buffer[14];
+    const uint8_t bucketHeight = buffer[15];
+    const int cellsAcross = gridWidth * bucketWidth / 4;
+    const int cellsDown = gridHeight * bucketHeight / 4;
+
+    for (int y = 0; y < cellsDown; ++y)
+    {
+        for (int x = 0; x < cellsAcross; ++x)
+        {
+            const size_t cell = gridTable + static_cast<size_t>(y * cellsAcross + x) * 4;
+            const uint32_t listOffset = read<uint32_t>(buffer, cell);
+            if (listOffset == 0)
+            {
+                continue;
+            }
+
+            // The low 14 bits are how many entries follow; the rest is a
+            // position we do not need, since the transform carries it.
+            const uint32_t count = read<uint32_t>(buffer, listOffset) & 0x3FFF;
+            size_t pair = listOffset + 4;
+            for (uint32_t i = 0; i < count; ++i, pair += 8)
+            {
+                const uint32_t placementOffset = read<uint32_t>(buffer, pair);
+                const uint32_t meshOffset = read<uint32_t>(buffer, pair + 4);
+
+                auto found = meshByOffset.find(meshOffset);
+                if (found == meshByOffset.end())
+                {
+                    continue;
+                }
+
+                CollisionInstance instance{};
+                instance.mesh = found->second;
+                // Stored row major; transpose into the column major a shader
+                // wants.
+                for (int row = 0; row < 4; ++row)
+                {
+                    for (int col = 0; col < 4; ++col)
+                    {
+                        instance.transform[col * 4 + row] =
+                            read<float>(buffer, placementOffset + static_cast<size_t>(row * 4 + col) * sizeof(float));
+                    }
+                }
+                zone.instances.push_back(instance);
+            }
+        }
     }
 
     return zone;

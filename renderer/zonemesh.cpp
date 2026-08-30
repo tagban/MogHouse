@@ -17,9 +17,29 @@ ZoneMesh buildZoneMesh(const ffxi::Zone& zone)
     out.boundsMin = {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
     out.boundsMax = {std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest()};
 
-    for (const ffxi::CollisionMesh& mesh : zone.collision)
+    // FFXI's Y axis points down - ground level objects sit at negative Y, and a
+    // zone's collision runs from about -6 up to +1.5. Flip it on the way in so
+    // everything downstream can assume Y is up.
+    auto toWorld = [](const ffxi::CollisionInstance& instance, const Vec3& local)
     {
+        const float* m = instance.transform;
+        const Vec3 placed{m[0] * local.x + m[4] * local.y + m[8] * local.z + m[12],
+                          m[1] * local.x + m[5] * local.y + m[9] * local.z + m[13],
+                          m[2] * local.x + m[6] * local.y + m[10] * local.z + m[14]};
+        return Vec3{placed.x, -placed.y, placed.z};
+    };
+
+    // An instance says where a mesh goes. Without them every mesh lands on the
+    // origin, folded through every other one.
+    for (const ffxi::CollisionInstance& instance : zone.instances)
+    {
+        if (instance.mesh >= zone.collision.size())
+        {
+            continue;
+        }
+        const ffxi::CollisionMesh& mesh = zone.collision[instance.mesh];
         const size_t vertexCount = mesh.vertexCount();
+
         for (size_t i = 0; i + 2 < mesh.indices.size(); i += 3)
         {
             const uint16_t ia = mesh.indices[i];
@@ -30,9 +50,9 @@ ZoneMesh buildZoneMesh(const ffxi::Zone& zone)
                 continue;
             }
 
-            const Vec3 a{mesh.vertices[ia * 3], mesh.vertices[ia * 3 + 1], mesh.vertices[ia * 3 + 2]};
-            const Vec3 b{mesh.vertices[ib * 3], mesh.vertices[ib * 3 + 1], mesh.vertices[ib * 3 + 2]};
-            const Vec3 c{mesh.vertices[ic * 3], mesh.vertices[ic * 3 + 1], mesh.vertices[ic * 3 + 2]};
+            const Vec3 a = toWorld(instance, {mesh.vertices[ia * 3], mesh.vertices[ia * 3 + 1], mesh.vertices[ia * 3 + 2]});
+            const Vec3 b = toWorld(instance, {mesh.vertices[ib * 3], mesh.vertices[ib * 3 + 1], mesh.vertices[ib * 3 + 2]});
+            const Vec3 c = toWorld(instance, {mesh.vertices[ic * 3], mesh.vertices[ic * 3 + 1], mesh.vertices[ic * 3 + 2]});
 
             const Vec3 normal = normalise(cross(b - a, c - a));
 
