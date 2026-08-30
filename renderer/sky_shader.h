@@ -1,20 +1,24 @@
 #pragma once
 
-// A sky. Not geometry - FFXI's sky is drawn by the engine, which is why seven of
-// a zone's textures (cloud, moon, three lens flares) are referenced by no model
-// at all. This is a gradient standing in for that until the skybox colour ramp
-// in MZB's lighting data is read.
+// The sky, from the zone's own colour ramp rather than an invented gradient.
+//
+// FFXI's sky is not geometry - it is eight colours at eight altitudes, stored
+// per time of day alongside the fog and lighting. See docs/lighting-format.md.
 
 namespace pj
 {
 inline constexpr const char* kSkyShader = R"(
 struct SkyUniforms {
-    // Camera basis, each already scaled so a ray is forward + right*x + up*y
-    // across the normalised device square. Passing these avoids inverting the
-    // view projection just to get a direction back.
+    // Camera basis, already scaled so a ray is forward + right*x + up*y across
+    // the normalised device square.
     forward : vec4<f32>,
     right : vec4<f32>,
     up : vec4<f32>,
+    // Eight stops of the zone's sky ramp. Altitudes are packed one per vec4
+    // because a uniform array of f32 strides by 16 bytes anyway.
+    colours : array<vec4<f32>, 8>,
+    altitudes : array<vec4<f32>, 8>,
+    fogColour : vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> sky : SkyUniforms;
@@ -40,16 +44,30 @@ fn vertexMain(@builtin(vertex_index) index : u32) -> SkyOut {
 @fragment
 fn fragmentMain(in : SkyOut) -> @location(0) vec4<f32> {
     let direction = normalize(in.direction);
-    let height = clamp(direction.y * 0.5 + 0.5, 0.0, 1.0);
 
-    let horizon = vec3<f32>(0.66, 0.72, 0.76);
-    let zenith = vec3<f32>(0.24, 0.44, 0.70);
-    let ground = vec3<f32>(0.18, 0.18, 0.17);
+    // The ramp runs bottom to top. Find the pair of stops the view direction
+    // falls between and blend.
+    var colour = sky.colours[0].rgb;
+    for (var i = 0u; i < 7u; i = i + 1u) {
+        let lo = sky.altitudes[i].x;
+        let hi = sky.altitudes[i + 1u].x;
+        if (direction.y >= lo && direction.y <= hi) {
+            let span = max(hi - lo, 0.0001);
+            colour = mix(sky.colours[i].rgb, sky.colours[i + 1u].rgb, (direction.y - lo) / span);
+        }
+    }
+    if (direction.y <= sky.altitudes[0].x) {
+        colour = sky.colours[0].rgb;
+    }
+    if (direction.y >= sky.altitudes[7].x) {
+        colour = sky.colours[7].rgb;
+    }
 
-    // Below the horizon stays dull rather than mirroring the sky, so it reads as
-    // distance rather than as a second sky underneath the world.
-    var colour = mix(horizon, zenith, smoothstep(0.5, 1.0, height));
-    colour = mix(ground, colour, smoothstep(0.44, 0.52, height));
+    // Below the horizon fades toward the zone's fog colour, so the ground plane
+    // meets something of the right hue rather than a hard edge.
+    let toGround = smoothstep(0.05, -0.15, direction.y);
+    colour = mix(colour, sky.fogColour.rgb, toGround);
+
     return vec4<f32>(colour, 1.0);
 }
 )";

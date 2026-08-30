@@ -12,6 +12,14 @@ inline constexpr const char* kZoneShader = R"(
 struct Uniforms {
     viewProjection : mat4x4<f32>,
     lightDirection : vec4<f32>,
+    // From the zone's own lighting for the current time of day.
+    ambient : vec4<f32>,
+    sunlight : vec4<f32>,
+    fogColour : vec4<f32>,
+    // x is where fog starts, y where it is total, z the eye position packed
+    // alongside so the fragment stage can measure distance.
+    fogRange : vec4<f32>,
+    eye : vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> uniforms : Uniforms;
@@ -22,6 +30,7 @@ struct VertexOut {
     @builtin(position) clipPosition : vec4<f32>,
     @location(0) normal : vec3<f32>,
     @location(1) uv : vec2<f32>,
+    @location(2) worldPosition : vec3<f32>,
 };
 
 @vertex
@@ -42,6 +51,7 @@ fn vertexMain(@location(0) position : vec3<f32>,
     // which is what placements use.
     out.normal = (model * vec4<f32>(normal, 0.0)).xyz;
     out.uv = uv;
+    out.worldPosition = world.xyz;
     return out;
 }
 
@@ -50,7 +60,6 @@ fn shade(in : VertexOut, cutout : bool) -> vec4<f32> {
     // Two-sided: FFXI geometry is not consistently wound, and single-sided
     // lighting turns half of a zone into pure shadow.
     let lambert = abs(dot(n, normalize(uniforms.lightDirection.xyz)));
-    let lit = 0.35 + 0.65 * lambert;
 
     let sampled = textureSample(zoneTexture, zoneSampler, in.uv);
 
@@ -60,7 +69,23 @@ fn shade(in : VertexOut, cutout : bool) -> vec4<f32> {
     if (cutout && sampled.a < 0.03) {
         discard;
     }
-    return vec4<f32>(sampled.rgb * lit, 1.0);
+
+    // Ambient plus a diffuse term, both the zone's own colours for this time of
+    // day. Components run 0..128 in the file, so values above 1 are normal and
+    // act as overbrightness.
+    let light = uniforms.ambient.rgb + uniforms.sunlight.rgb * lambert;
+    var colour = sampled.rgb * light;
+
+    // Fog fades toward the zone's fog colour between the two distances it
+    // gives. At night the far distance collapses - 123 against noon's 450 - so
+    // this is most of what makes FFXI dark after dusk.
+    let distance = length(in.worldPosition - uniforms.eye.xyz);
+    let fogStart = uniforms.fogRange.x;
+    let fogEnd = max(uniforms.fogRange.y, fogStart + 0.001);
+    let fog = clamp((distance - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
+    colour = mix(colour, uniforms.fogColour.rgb, fog);
+
+    return vec4<f32>(colour, 1.0);
 }
 
 @fragment

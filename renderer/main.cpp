@@ -8,6 +8,7 @@
 
 #include "ffxi/dat.h"
 #include "ffxi/mmb.h"
+#include "ffxi/lighting.h"
 #include "ffxi/mzb.h"
 #include "ffxi/texture.h"
 #include "gputexture.h"
@@ -44,6 +45,11 @@ struct Uniforms
 {
     float viewProjection[16];
     float lightDirection[4];
+    float ambient[4];
+    float sunlight[4];
+    float fogColour[4];
+    float fogRange[4];
+    float eye[4];
 };
 
 struct SkyUniforms
@@ -51,6 +57,9 @@ struct SkyUniforms
     float forward[4];
     float right[4];
     float up[4];
+    float skyColours[8][4];
+    float skyAltitudes[8][4];
+    float fogColour[4];
 };
 
 const char* backendName(wgpu::BackendType backend)
@@ -69,7 +78,7 @@ const char* backendName(wgpu::BackendType backend)
 // Loads the largest MZB in a DAT. Largest because the ferry DATs hold both a
 // world and a vessel, and the world is the interesting one.
 std::optional<pj::Scene> loadZone(const char* datPath, const char* keyPath, const char* key2Path, std::string& zoneId,
-                                     std::unordered_map<std::string, ffxi::Texture>& textures)
+                                     std::unordered_map<std::string, ffxi::Texture>& textures, ffxi::Lighting& lighting)
 {
     auto keys = ffxi::KeyTable::load(keyPath);
     if (!keys)
@@ -79,6 +88,11 @@ std::optional<pj::Scene> loadZone(const char* datPath, const char* keyPath, cons
     }
 
     ffxi::DatFile dat{std::filesystem::path{datPath}};
+
+    for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkLighting))
+    {
+        lighting.add(chunk);
+    }
 
     // Textures are not obfuscated, so they need no keys.
     for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkTexture))
@@ -182,6 +196,7 @@ int main(int argc, char** argv)
     std::string zoneId;
     std::optional<pj::Scene> zone;
     std::unordered_map<std::string, ffxi::Texture> textures;
+    ffxi::Lighting lighting;
     if (argc > 1)
     {
         const char* keyPath = std::getenv("PORTJEUNO_FFXI_KEYTABLE");
@@ -190,7 +205,7 @@ int main(int argc, char** argv)
             std::printf("set PORTJEUNO_FFXI_KEYTABLE to the 256-byte MZB key table to load a zone\n");
             return 2;
         }
-        zone = loadZone(argv[1], keyPath, std::getenv("PORTJEUNO_FFXI_KEYTABLE2"), zoneId, textures);
+        zone = loadZone(argv[1], keyPath, std::getenv("PORTJEUNO_FFXI_KEYTABLE2"), zoneId, textures, lighting);
         if (!zone)
         {
             return 1;
@@ -474,27 +489,40 @@ int main(int argc, char** argv)
         whiteTexture = pj::createWhiteTexture(device);
         const wgpu::TextureView whiteView = whiteTexture.CreateView();
 
+        std::unordered_map<std::string, wgpu::TextureView> uploadedViews;
         size_t uploaded = 0;
         size_t untextured = 0;
         for (const pj::InstancedDraw& batch : zone->draws)
         {
+            // Cached by name: instancing produces one draw per mesh, and many
+            // meshes share a texture. Uploading per draw meant 397 GPU textures
+            // for 46 distinct images.
             wgpu::TextureView view = whiteView;
             if (!batch.texture.empty())
             {
-                auto found = textures.find(batch.texture);
-                if (found != textures.end())
+                auto cached = uploadedViews.find(batch.texture);
+                if (cached != uploadedViews.end())
                 {
-                    wgpu::Texture gpu = pj::uploadTexture(device, found->second);
-                    if (gpu)
-                    {
-                        batchTextures.push_back(gpu);
-                        view = batchTextures.back().CreateView();
-                        ++uploaded;
-                    }
+                    view = cached->second;
                 }
                 else
                 {
-                    ++untextured;
+                    auto found = textures.find(batch.texture);
+                    if (found != textures.end())
+                    {
+                        wgpu::Texture gpu = pj::uploadTexture(device, found->second);
+                        if (gpu)
+                        {
+                            batchTextures.push_back(gpu);
+                            view = batchTextures.back().CreateView();
+                            uploadedViews.emplace(batch.texture, view);
+                            ++uploaded;
+                        }
+                    }
+                    else
+                    {
+                        ++untextured;
+                    }
                 }
             }
 
@@ -536,6 +564,17 @@ int main(int argc, char** argv)
     const float shaderMode = modeEnv ? static_cast<float>(std::atof(modeEnv)) : 0.0f;
     const char* cutoutEnv = std::getenv("PORTJEUNO_CUTOUT");
     const int cutoutMode = cutoutEnv ? std::atoi(cutoutEnv) : 2;
+
+    // PORTJEUNO_TIME=1830 pins the clock; otherwise a Vana'diel day passes in
+    // one real minute, which is fast but makes the whole cycle visible.
+    const char* timeEnv = std::getenv("PORTJEUNO_TIME");
+    const bool timeFixed = timeEnv != nullptr;
+    const int fixedMinutes = timeFixed ? (std::atoi(timeEnv) / 100) * 60 + (std::atoi(timeEnv) % 100) : 0;
+    if (!lighting.empty())
+    {
+        std::printf("lighting: %zu times of day, clock %s\n", lighting.sets().size(),
+                    timeFixed ? "fixed" : "running");
+    }
 
     uint64_t previousTicks = SDL_GetTicksNS();
     bool running = true;
@@ -587,6 +626,10 @@ int main(int argc, char** argv)
                                              radius * 12.0f);
             }
         }
+
+        // A Vana'diel day in a real minute when not pinned.
+        const int clockMinutes =
+            timeFixed ? fixedMinutes : static_cast<int>((SDL_GetTicksNS() / 1000000ull / 42ull) % 1440ull);
 
         const uint64_t nowTicks = SDL_GetTicksNS();
         const float delta = static_cast<float>(nowTicks - previousTicks) / 1e9f;
@@ -644,6 +687,18 @@ int main(int argc, char** argv)
             skyUniforms.up[0] = u.x * tanHalfFov;
             skyUniforms.up[1] = u.y * tanHalfFov;
             skyUniforms.up[2] = u.z * tanHalfFov;
+
+            const ffxi::LightingSet skySet = lighting.at(clockMinutes);
+            for (size_t i = 0; i < 8; ++i)
+            {
+                skyUniforms.skyColours[i][0] = skySet.skyColours[i].r;
+                skyUniforms.skyColours[i][1] = skySet.skyColours[i].g;
+                skyUniforms.skyColours[i][2] = skySet.skyColours[i].b;
+                skyUniforms.skyAltitudes[i][0] = skySet.skyAltitudes[i];
+            }
+            skyUniforms.fogColour[0] = skySet.landscapeFog.r;
+            skyUniforms.fogColour[1] = skySet.landscapeFog.g;
+            skyUniforms.fogColour[2] = skySet.landscapeFog.b;
             queue.WriteBuffer(skyUniformBuffer, 0, &skyUniforms, sizeof(skyUniforms));
 
             pass.SetPipeline(skyPipeline);
@@ -669,6 +724,32 @@ int main(int argc, char** argv)
             uniforms.lightDirection[0] = light.x;
             uniforms.lightDirection[1] = light.y;
             uniforms.lightDirection[2] = light.z;
+
+            const ffxi::LightingSet set = lighting.at(clockMinutes);
+            uniforms.ambient[0] = set.landscapeAmbient.r * 0.5f;
+            uniforms.ambient[1] = set.landscapeAmbient.g * 0.5f;
+            uniforms.ambient[2] = set.landscapeAmbient.b * 0.5f;
+            uniforms.sunlight[0] = set.landscapeSunlight.r * 0.5f;
+            uniforms.sunlight[1] = set.landscapeSunlight.g * 0.5f;
+            uniforms.sunlight[2] = set.landscapeSunlight.b * 0.5f;
+            uniforms.fogColour[0] = set.landscapeFog.r;
+            uniforms.fogColour[1] = set.landscapeFog.g;
+            uniforms.fogColour[2] = set.landscapeFog.b;
+            uniforms.fogRange[0] = set.landscapeMinFog;
+            uniforms.fogRange[1] = set.landscapeMaxFog > 0.0f ? set.landscapeMaxFog : 10000.0f;
+            const pj::Vec3 eyePoint = camera.eye();
+            uniforms.eye[0] = eyePoint.x;
+            uniforms.eye[1] = eyePoint.y;
+            uniforms.eye[2] = eyePoint.z;
+
+            // With no lighting data, fall back to a plain lit look rather than
+            // a black zone.
+            if (lighting.empty())
+            {
+                uniforms.ambient[0] = uniforms.ambient[1] = uniforms.ambient[2] = 0.35f;
+                uniforms.sunlight[0] = uniforms.sunlight[1] = uniforms.sunlight[2] = 0.65f;
+                uniforms.fogRange[1] = 1e9f;
+            }
             // PORTJEUNO_SHADER_MODE: 0 draws colour with no alpha discard,
             // 2 draws alpha as greyscale, unset is normal rendering.
             uniforms.lightDirection[3] = shaderMode;
