@@ -47,3 +47,15 @@ if(MSVC)
         COMMAND_EXPAND_LISTS
     )
 endif()
+
+# The FFXI asset readers, and a CLI that reports what they see. The CLI needs
+# neither Dawn nor SDL, so it builds fast and can be checked against the python
+# in tools/ that was validated across every zone in ROM/1.
+add_library(ffxi-dat STATIC
+    ffxi/dat.cpp
+    ffxi/mzb.cpp
+)
+target_include_directories(ffxi-dat PUBLIC ffxi)
+
+add_executable(ffxi-datdump ffxi/datdump_main.cpp)
+target_link_libraries(ffxi-datdump PRIVATE ffxi-dat)

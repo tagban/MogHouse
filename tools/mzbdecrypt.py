@@ -44,7 +44,9 @@ def decrypt(payload, key_table):
 
     length = struct.unpack_from("<I", buffer, 0)[0] & 0x00FFFFFF
     if length > len(buffer):
-        raise SystemExit(f"declared length {length} exceeds payload {len(buffer)}")
+        # ValueError, not SystemExit: callers scanning thousands of files need
+        # to record this one and carry on, and SystemExit bypasses except Exception.
+        raise ValueError(f"declared length {length} exceeds payload {len(buffer)}")
 
     key = key_table[buffer[7] ^ 0xFF]
     counter = 0
