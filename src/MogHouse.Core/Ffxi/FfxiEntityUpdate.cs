@@ -30,6 +30,19 @@ namespace MogHouse.Core.Ffxi;
 /// and isn't populated by the character-insert trigger, and a zero-scale
 /// character is present and targetable while plausibly drawing as nothing.
 /// </param>
+/// <summary>What an entity is, for anything that has to tell them apart.</summary>
+public enum FfxiEntityKind
+{
+    /// <summary>Another player.</summary>
+    Player,
+
+    /// <summary>A friendly NPC - a shopkeeper, a guard, a moogle.</summary>
+    Npc,
+
+    /// <summary>Something that fights back.</summary>
+    Enemy,
+}
+
 public sealed record FfxiEntityUpdate(
     ushort PacketId,
     uint UniqueNo,
@@ -41,10 +54,33 @@ public sealed record FfxiEntityUpdate(
     string? Name = null,
     byte? ModelSize = null,
     uint? RawFlags1 = null,
-    uint? RawFlags0 = null)
+    uint? RawFlags0 = null,
+    byte? Allegiance = null,
+    byte? HealthPercent = null)
 {
     public const ushort PlayerPacketId = 0x00D;
     public const ushort NpcPacketId = 0x00E;
+
+    /// <summary>
+    /// Whether this is a player, a friendly NPC or something hostile.
+    ///
+    /// Not from the target index, which is the obvious guess and is wrong.
+    /// The widely repeated ranges have it backwards: the server's own dispatch
+    /// in zone_entities.cpp sends targid below 0x400 to the mob *and* NPC
+    /// lists and 0x400-0x6FF to players, so the index cannot separate a
+    /// shopkeeper from a crab at all.
+    ///
+    /// What does: both branches of the server's entity_update builder write
+    /// the entity's allegiance to the same byte, and Mob is 0 while players
+    /// and the three nations are 1 to 6.
+    /// </summary>
+    public FfxiEntityKind Kind =>
+        PacketId == PlayerPacketId ? FfxiEntityKind.Player
+        : Allegiance == MobAllegiance ? FfxiEntityKind.Enemy
+        : FfxiEntityKind.Npc;
+
+    /// <summary>xi::Allegiance - 0 is Mob, 1 Player, 2-6 the nations.</summary>
+    public const byte MobAllegiance = 0;
 
     private const int Body = 4; // id/size/sync sub-packet header
     private const int OffsetUniqueNo = Body + 0;
@@ -53,6 +89,17 @@ public sealed record FfxiEntityUpdate(
     private const int OffsetX = Body + 8;
     private const int OffsetVertical = Body + 12; // engine Y - see FfxiPositionPacket
     private const int OffsetDepth = Body + 16;
+
+    /// <summary>
+    /// Absolute 0x29, which is where the server writes allegiance for both
+    /// NPCs and mobs. Only present once the update carries the HP block, so
+    /// short updates leave it null rather than reading a zero and calling
+    /// every entity hostile.
+    /// </summary>
+    private const int OffsetAllegiance = 0x29;
+
+    /// <summary>Absolute 0x1E - real HP percent for a mob, hardcoded 100 for an NPC.</summary>
+    private const int OffsetHealthPercent = 0x1E;
 
     /// <summary>Minimum bytes needed for the head this parses.</summary>
     public const int MinimumSize = Body + 20;
@@ -95,6 +142,14 @@ public sealed record FfxiEntityUpdate(
         byte? modelSize = null;
         uint? rawFlags1 = null;
         uint? rawFlags0 = null;
+        byte? allegiance = null;
+        byte? healthPercent = null;
+
+        if (id == NpcPacketId && subPacket.Length > OffsetAllegiance)
+        {
+            allegiance = subPacket[OffsetAllegiance];
+            healthPercent = subPacket[OffsetHealthPercent];
+        }
 
         if (id == PlayerPacketId && subPacket.Length >= OffsetFlags1 + 4)
         {
@@ -121,7 +176,9 @@ public sealed record FfxiEntityUpdate(
             Name: name,
             ModelSize: modelSize,
             RawFlags1: rawFlags1,
-            RawFlags0: rawFlags0);
+            RawFlags0: rawFlags0,
+            Allegiance: allegiance,
+            HealthPercent: healthPercent);
     }
 
     private static string ReadFixedString(ReadOnlySpan<byte> field)

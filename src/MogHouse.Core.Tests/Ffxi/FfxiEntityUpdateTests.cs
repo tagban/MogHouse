@@ -157,4 +157,90 @@ public class FfxiEntityUpdateAppearanceTests
         Assert.Null(entity.Name);
         Assert.Null(entity.ModelSize);
     }
+
+    /// <summary>
+    /// Builds an 0x00E long enough to carry the HP block, so allegiance is
+    /// actually present.
+    /// </summary>
+    private static byte[] NpcUpdate(byte allegiance, byte healthPercent, ushort actIndex)
+    {
+        byte[] packet = new byte[0x48];
+        BinaryPrimitives.WriteUInt16LittleEndian(packet, (ushort)(0x00E | (packet.Length / 4) << 9));
+        BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(4), 0x01000000u | actIndex);
+        BinaryPrimitives.WriteUInt16LittleEndian(packet.AsSpan(8), actIndex);
+        packet[0x1E] = healthPercent;
+        packet[0x29] = allegiance;
+        return packet;
+    }
+
+    [Fact]
+    public void MobAllegianceReadsAsAnEnemy()
+    {
+        FfxiEntityUpdate? update = FfxiEntityUpdate.TryParse(NpcUpdate(allegiance: 0, healthPercent: 87, actIndex: 0x0123));
+
+        Assert.NotNull(update);
+        Assert.Equal(FfxiEntityKind.Enemy, update.Kind);
+        Assert.Equal((byte)87, update.HealthPercent);
+    }
+
+    [Theory]
+    [InlineData((byte)1)] // Player
+    [InlineData((byte)2)] // San d'Oria
+    [InlineData((byte)3)] // Bastok
+    [InlineData((byte)4)] // Windurst
+    public void NonMobAllegianceReadsAsAnNpc(byte allegiance)
+    {
+        FfxiEntityUpdate? update = FfxiEntityUpdate.TryParse(NpcUpdate(allegiance, healthPercent: 100, actIndex: 0x0200));
+
+        Assert.NotNull(update);
+        Assert.Equal(FfxiEntityKind.Npc, update.Kind);
+    }
+
+    /// <summary>
+    /// The target index is the obvious discriminator and the wrong one. An NPC
+    /// and a mob share the range below 0x400, so a classifier built on it puts
+    /// shopkeepers and crabs in the same bucket.
+    /// </summary>
+    [Fact]
+    public void AnNpcAndAMobCanShareTheSameIndexRange()
+    {
+        FfxiEntityUpdate? npc = FfxiEntityUpdate.TryParse(NpcUpdate(allegiance: 3, healthPercent: 100, actIndex: 0x0100));
+        FfxiEntityUpdate? mob = FfxiEntityUpdate.TryParse(NpcUpdate(allegiance: 0, healthPercent: 100, actIndex: 0x0101));
+
+        Assert.NotNull(npc);
+        Assert.NotNull(mob);
+        Assert.True(npc.ActIndex < 0x400 && mob.ActIndex < 0x400);
+        Assert.NotEqual(npc.Kind, mob.Kind);
+    }
+
+    [Fact]
+    public void APlayerUpdateIsAPlayerWhateverElseItCarries()
+    {
+        byte[] packet = new byte[0x60];
+        BinaryPrimitives.WriteUInt16LittleEndian(packet, (ushort)(0x00D | (packet.Length / 4) << 9));
+        packet[0x29] = 0; // would read as Mob if the packet id were ignored
+
+        FfxiEntityUpdate? update = FfxiEntityUpdate.TryParse(packet);
+
+        Assert.NotNull(update);
+        Assert.Equal(FfxiEntityKind.Player, update.Kind);
+        Assert.Null(update.Allegiance);
+    }
+
+    /// <summary>
+    /// A short update has no HP block, so allegiance is absent rather than
+    /// zero - reading a zero there would call every entity hostile.
+    /// </summary>
+    [Fact]
+    public void AShortNpcUpdateHasNoAllegiance()
+    {
+        byte[] packet = new byte[FfxiEntityUpdate.MinimumSize];
+        BinaryPrimitives.WriteUInt16LittleEndian(packet, (ushort)(0x00E | (packet.Length / 4) << 9));
+
+        FfxiEntityUpdate? update = FfxiEntityUpdate.TryParse(packet);
+
+        Assert.NotNull(update);
+        Assert.Null(update.Allegiance);
+        Assert.Equal(FfxiEntityKind.Npc, update.Kind);
+    }
 }
