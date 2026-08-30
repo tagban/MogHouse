@@ -1,0 +1,92 @@
+#pragma once
+
+// Just enough linear algebra to point a camera at something. Deliberately not a
+// dependency - the renderer needs perspective, look-at and a multiply, and
+// nothing else yet.
+
+#include <cmath>
+
+namespace pj
+{
+struct Vec3
+{
+    float x{}, y{}, z{};
+};
+
+inline Vec3 operator-(const Vec3& a, const Vec3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+inline Vec3 operator+(const Vec3& a, const Vec3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+inline Vec3 operator*(const Vec3& v, float s) { return {v.x * s, v.y * s, v.z * s}; }
+
+inline Vec3 cross(const Vec3& a, const Vec3& b)
+{
+    return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+
+inline float dot(const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+
+inline Vec3 normalise(const Vec3& v)
+{
+    const float length = std::sqrt(dot(v, v));
+    return length > 0.0f ? Vec3{v.x / length, v.y / length, v.z / length} : Vec3{0, 1, 0};
+}
+
+/// Column-major 4x4, matching what WGSL expects in a uniform buffer.
+struct Mat4
+{
+    float m[16]{};
+
+    static Mat4 identity()
+    {
+        Mat4 out;
+        out.m[0] = out.m[5] = out.m[10] = out.m[15] = 1.0f;
+        return out;
+    }
+};
+
+inline Mat4 operator*(const Mat4& a, const Mat4& b)
+{
+    Mat4 out;
+    for (int col = 0; col < 4; ++col)
+    {
+        for (int row = 0; row < 4; ++row)
+        {
+            float sum = 0.0f;
+            for (int k = 0; k < 4; ++k)
+            {
+                sum += a.m[k * 4 + row] * b.m[col * 4 + k];
+            }
+            out.m[col * 4 + row] = sum;
+        }
+    }
+    return out;
+}
+
+/// Right-handed, depth mapped to 0..1 the way WebGPU wants rather than -1..1.
+inline Mat4 perspective(float fovY, float aspect, float near, float far)
+{
+    const float f = 1.0f / std::tan(fovY * 0.5f);
+    Mat4 out;
+    out.m[0] = f / aspect;
+    out.m[5] = f;
+    out.m[10] = far / (near - far);
+    out.m[11] = -1.0f;
+    out.m[14] = (near * far) / (near - far);
+    return out;
+}
+
+inline Mat4 lookAt(const Vec3& eye, const Vec3& target, const Vec3& up)
+{
+    const Vec3 forward = normalise(target - eye);
+    const Vec3 right = normalise(cross(forward, up));
+    const Vec3 trueUp = cross(right, forward);
+
+    Mat4 out = Mat4::identity();
+    out.m[0] = right.x;   out.m[4] = right.y;   out.m[8] = right.z;
+    out.m[1] = trueUp.x;  out.m[5] = trueUp.y;  out.m[9] = trueUp.z;
+    out.m[2] = -forward.x; out.m[6] = -forward.y; out.m[10] = -forward.z;
+    out.m[12] = -dot(right, eye);
+    out.m[13] = -dot(trueUp, eye);
+    out.m[14] = dot(forward, eye);
+    return out;
+}
+} // namespace pj

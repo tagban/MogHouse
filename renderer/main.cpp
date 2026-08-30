@@ -1,24 +1,43 @@
-// Step 1 and 2 of the vertical slice in docs/renderer-webgpu.md: bring up Dawn
-// on a real window and clear the screen. No FFXI data yet - the point is to
-// prove the same source builds and runs on Windows, macOS and Linux before any
-// of the renderer is written against it.
+// PortJeuno's renderer. Opens a window on WebGPU - Metal on macOS, D3D12 on
+// Windows, Vulkan on Linux - and draws FFXI zone geometry read from the retail
+// DATs.
+//
+// Given a DAT it draws that zone's collision geometry. Given nothing it only
+// clears, so the graphics path can still be checked on a machine with no game
+// installed.
 
+#include "ffxi/dat.h"
+#include "ffxi/mzb.h"
+#include "math.h"
 #include "surface.h"
+#include "zone_shader.h"
+#include "zonemesh.h"
 
 #include <SDL3/SDL.h>
 #include <webgpu/webgpu_cpp.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <iterator>
+#include <optional>
 #include <string>
 
 namespace
 {
 constexpr uint32_t kWidth = 1280;
 constexpr uint32_t kHeight = 720;
+constexpr wgpu::TextureFormat kDepthFormat = wgpu::TextureFormat::Depth24Plus;
 
-const char* BackendName(wgpu::BackendType backend)
+struct Uniforms
+{
+    float viewProjection[16];
+    float lightDirection[4];
+};
+
+const char* backendName(wgpu::BackendType backend)
 {
     switch (backend)
     {
@@ -30,14 +49,67 @@ const char* BackendName(wgpu::BackendType backend)
     default: return "other";
     }
 }
+
+// Loads the largest MZB in a DAT. Largest because the ferry DATs hold both a
+// world and a vessel, and the world is the interesting one.
+std::optional<pj::ZoneMesh> loadZone(const char* datPath, const char* keyPath, std::string& zoneId)
+{
+    auto keys = ffxi::KeyTable::load(keyPath);
+    if (!keys)
+    {
+        std::printf("could not read a 256-byte key table from %s\n", keyPath);
+        return std::nullopt;
+    }
+
+    ffxi::DatFile dat{std::filesystem::path{datPath}};
+    std::optional<pj::ZoneMesh> best;
+    for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkMzb))
+    {
+        ffxi::Zone zone = ffxi::parseMzb(chunk, *keys);
+        pj::ZoneMesh mesh = pj::buildZoneMesh(zone);
+        if (!best || mesh.vertices.size() > best->vertices.size())
+        {
+            best = std::move(mesh);
+            zoneId = zone.id;
+        }
+    }
+    return best;
+}
+
+wgpu::Buffer createBuffer(const wgpu::Device& device, const void* data, size_t size, wgpu::BufferUsage usage)
+{
+    wgpu::BufferDescriptor descriptor{.usage = usage | wgpu::BufferUsage::CopyDst, .size = size};
+    wgpu::Buffer buffer = device.CreateBuffer(&descriptor);
+    device.GetQueue().WriteBuffer(buffer, 0, data, size);
+    return buffer;
+}
 } // namespace
 
-int main(int, char**)
+int main(int argc, char** argv)
 {
-    // The whole point of this program is the line it prints saying which
-    // backend it got. Buffered stdout loses that if the process is killed
-    // rather than closed, so don't buffer it.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
+
+    std::string zoneId;
+    std::optional<pj::ZoneMesh> zone;
+    if (argc > 1)
+    {
+        const char* keyPath = std::getenv("PORTJEUNO_FFXI_KEYTABLE");
+        if (!keyPath)
+        {
+            std::printf("set PORTJEUNO_FFXI_KEYTABLE to the 256-byte MZB key table to load a zone\n");
+            return 2;
+        }
+        zone = loadZone(argv[1], keyPath, zoneId);
+        if (!zone)
+        {
+            return 1;
+        }
+        std::printf("zone %s: %zu triangles\n", zoneId.c_str(), zone->indices.size() / 3);
+    }
+    else
+    {
+        std::printf("no DAT given - clearing only. Pass a zone DAT to draw one.\n");
+    }
 
     if (!SDL_Init(SDL_INIT_VIDEO))
     {
@@ -45,25 +117,21 @@ int main(int, char**)
         return 1;
     }
 
-    // HIGH_PIXEL_DENSITY opts the window into the display's real backing store
-    // rather than a scaled-up 1x one. Without it a retina Mac hands back a 1x
-    // drawable while surface_metal.mm has already set the layer's contentsScale
-    // from backingScaleFactor, and the two disagree. Windows under display
-    // scaling and Linux under fractional scaling have the same split.
-    SDL_Window* window = SDL_CreateWindow("PortJeuno renderer", kWidth, kHeight, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    SDL_Window* window = SDL_CreateWindow("PortJeuno renderer", kWidth, kHeight,
+                                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!window)
     {
         std::printf("SDL_CreateWindow failed: %s\n", SDL_GetError());
         return 1;
     }
 
-    // Waiting on a future with a non-zero timeout is an opt-in feature. Without
-    // it every WaitAny below fails with "Timeout waits are either not enabled
-    // or not supported", which reads like a driver problem and is not one.
+    // Waiting on a future with a non-zero timeout is opt-in. Without this every
+    // WaitAny fails with "Timeout waits are either not enabled or not
+    // supported", which reads like a driver limitation and is not one.
     static constexpr wgpu::InstanceFeatureName kInstanceFeatures[] = {wgpu::InstanceFeatureName::TimedWaitAny};
-
-    wgpu::InstanceDescriptor instance_descriptor{.requiredFeatureCount = std::size(kInstanceFeatures), .requiredFeatures = kInstanceFeatures};
-    wgpu::Instance instance = wgpu::CreateInstance(&instance_descriptor);
+    wgpu::InstanceDescriptor instanceDescriptor{.requiredFeatureCount = std::size(kInstanceFeatures),
+                                                .requiredFeatures = kInstanceFeatures};
+    wgpu::Instance instance = wgpu::CreateInstance(&instanceDescriptor);
     if (!instance)
     {
         std::printf("could not create a WebGPU instance\n");
@@ -77,16 +145,14 @@ int main(int, char**)
         return 1;
     }
 
-    // Adapter and device requests are asynchronous. Dawn will run the callbacks
-    // on this thread when we wait on the future, so there is no threading here.
     wgpu::Adapter adapter;
-    wgpu::RequestAdapterOptions adapter_options{.compatibleSurface = surface};
-    instance.WaitAny(instance.RequestAdapter(&adapter_options, wgpu::CallbackMode::WaitAnyOnly,
+    wgpu::RequestAdapterOptions adapterOptions{.compatibleSurface = surface};
+    instance.WaitAny(instance.RequestAdapter(&adapterOptions, wgpu::CallbackMode::WaitAnyOnly,
                                              [&](wgpu::RequestAdapterStatus status, wgpu::Adapter result, wgpu::StringView message)
                                              {
                                                  if (status != wgpu::RequestAdapterStatus::Success)
                                                  {
-                                                     std::printf("could not get an adapter: %.*s\n", static_cast<int>(message.length), message.data);
+                                                     std::printf("no adapter: %.*s\n", static_cast<int>(message.length), message.data);
                                                      return;
                                                  }
                                                  adapter = std::move(result);
@@ -99,19 +165,19 @@ int main(int, char**)
 
     wgpu::AdapterInfo info{};
     adapter.GetInfo(&info);
-    std::printf("adapter: %.*s (%s)\n", static_cast<int>(info.device.length), info.device.data, BackendName(info.backendType));
+    std::printf("adapter: %.*s (%s)\n", static_cast<int>(info.device.length), info.device.data, backendName(info.backendType));
 
-    wgpu::DeviceDescriptor device_descriptor{};
-    device_descriptor.SetUncapturedErrorCallback([](const wgpu::Device&, wgpu::ErrorType, wgpu::StringView message)
-                                                 { std::printf("webgpu error: %.*s\n", static_cast<int>(message.length), message.data); });
+    wgpu::DeviceDescriptor deviceDescriptor{};
+    deviceDescriptor.SetUncapturedErrorCallback([](const wgpu::Device&, wgpu::ErrorType, wgpu::StringView message)
+                                                { std::printf("webgpu error: %.*s\n", static_cast<int>(message.length), message.data); });
 
     wgpu::Device device;
-    instance.WaitAny(adapter.RequestDevice(&device_descriptor, wgpu::CallbackMode::WaitAnyOnly,
+    instance.WaitAny(adapter.RequestDevice(&deviceDescriptor, wgpu::CallbackMode::WaitAnyOnly,
                                            [&](wgpu::RequestDeviceStatus status, wgpu::Device result, wgpu::StringView message)
                                            {
                                                if (status != wgpu::RequestDeviceStatus::Success)
                                                {
-                                                   std::printf("could not get a device: %.*s\n", static_cast<int>(message.length), message.data);
+                                                   std::printf("no device: %.*s\n", static_cast<int>(message.length), message.data);
                                                    return;
                                                }
                                                device = std::move(result);
@@ -122,38 +188,102 @@ int main(int, char**)
         return 1;
     }
 
-    wgpu::SurfaceCapabilities capabilities{};
-    surface.GetCapabilities(adapter, &capabilities);
-    wgpu::TextureFormat format = capabilities.formats[0];
-
-    auto configure = [&](uint32_t width, uint32_t height)
-    {
-        wgpu::SurfaceConfiguration configuration{
-            .device = device, .format = format, .usage = wgpu::TextureUsage::RenderAttachment, .width = width, .height = height, .presentMode = wgpu::PresentMode::Fifo};
-        surface.Configure(&configuration);
-    };
-    // kWidth/kHeight are points, which is not the drawable size on any display
-    // with a scale factor. The resize path below is already in pixels, because
-    // SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED reports them - so ask SDL for pixels
-    // here too and the initial configure agrees with every later one. A flat
-    // clear colour looks identical either way, so this cannot be caught by eye
-    // until there is real geometry on screen.
-    int pixel_width = 0;
-    int pixel_height = 0;
-    SDL_GetWindowSizeInPixels(window, &pixel_width, &pixel_height);
-
-    // Worth printing rather than assuming: points and pixels differ on any
-    // scaled display, not just retina, and a swapchain sized in the wrong one
-    // renders at the wrong resolution without failing.
-    int point_width = 0;
-    int point_height = 0;
-    SDL_GetWindowSize(window, &point_width, &point_height);
-    std::printf("window: %dx%d points, %dx%d pixels\n", point_width, point_height, pixel_width, pixel_height);
-
-    configure(static_cast<uint32_t>(pixel_width), static_cast<uint32_t>(pixel_height));
-
     wgpu::Queue queue = device.GetQueue();
 
+    wgpu::SurfaceCapabilities capabilities{};
+    surface.GetCapabilities(adapter, &capabilities);
+    const wgpu::TextureFormat surfaceFormat = capabilities.formats[0];
+
+    int pixelWidth = 0;
+    int pixelHeight = 0;
+    SDL_GetWindowSizeInPixels(window, &pixelWidth, &pixelHeight);
+
+    int pointWidth = 0;
+    int pointHeight = 0;
+    SDL_GetWindowSize(window, &pointWidth, &pointHeight);
+    std::printf("window: %dx%d points, %dx%d pixels\n", pointWidth, pointHeight, pixelWidth, pixelHeight);
+
+    wgpu::Texture depthTexture;
+    auto configure = [&](uint32_t width, uint32_t height)
+    {
+        wgpu::SurfaceConfiguration configuration{.device = device,
+                                                 .format = surfaceFormat,
+                                                 .usage = wgpu::TextureUsage::RenderAttachment,
+                                                 .width = width,
+                                                 .height = height,
+                                                 .presentMode = wgpu::PresentMode::Fifo};
+        surface.Configure(&configuration);
+
+        wgpu::TextureDescriptor depthDescriptor{.usage = wgpu::TextureUsage::RenderAttachment,
+                                                .dimension = wgpu::TextureDimension::e2D,
+                                                .size = {width, height, 1},
+                                                .format = kDepthFormat,
+                                                .mipLevelCount = 1,
+                                                .sampleCount = 1};
+        depthTexture = device.CreateTexture(&depthDescriptor);
+    };
+    configure(static_cast<uint32_t>(pixelWidth), static_cast<uint32_t>(pixelHeight));
+
+    wgpu::Buffer vertexBuffer;
+    wgpu::Buffer indexBuffer;
+    wgpu::Buffer uniformBuffer;
+    wgpu::BindGroup bindGroup;
+    wgpu::RenderPipeline pipeline;
+    uint32_t indexCount = 0;
+
+    if (zone && !zone->indices.empty())
+    {
+        vertexBuffer = createBuffer(device, zone->vertices.data(), zone->vertices.size() * sizeof(pj::Vertex),
+                                    wgpu::BufferUsage::Vertex);
+        indexBuffer = createBuffer(device, zone->indices.data(), zone->indices.size() * sizeof(uint32_t),
+                                   wgpu::BufferUsage::Index);
+        indexCount = static_cast<uint32_t>(zone->indices.size());
+
+        wgpu::BufferDescriptor uniformDescriptor{.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
+                                                 .size = sizeof(Uniforms)};
+        uniformBuffer = device.CreateBuffer(&uniformDescriptor);
+
+        wgpu::ShaderSourceWGSL wgsl;
+        wgsl.code = pj::kZoneShader;
+        wgpu::ShaderModuleDescriptor moduleDescriptor{.nextInChain = &wgsl};
+        wgpu::ShaderModule module = device.CreateShaderModule(&moduleDescriptor);
+
+        wgpu::VertexAttribute attributes[2] = {
+            {.format = wgpu::VertexFormat::Float32x3, .offset = 0, .shaderLocation = 0},
+            {.format = wgpu::VertexFormat::Float32x3, .offset = 3 * sizeof(float), .shaderLocation = 1}};
+        wgpu::VertexBufferLayout vertexLayout{.stepMode = wgpu::VertexStepMode::Vertex,
+                                              .arrayStride = sizeof(pj::Vertex),
+                                              .attributeCount = 2,
+                                              .attributes = attributes};
+
+        wgpu::ColorTargetState colorTarget{.format = surfaceFormat};
+        wgpu::FragmentState fragment{.module = module, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &colorTarget};
+        wgpu::DepthStencilState depthStencil{.format = kDepthFormat,
+                                             .depthWriteEnabled = wgpu::OptionalBool::True,
+                                             .depthCompare = wgpu::CompareFunction::Less};
+
+        wgpu::RenderPipelineDescriptor pipelineDescriptor{
+            .vertex = {.module = module, .entryPoint = "vertexMain", .bufferCount = 1, .buffers = &vertexLayout},
+            .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
+            .depthStencil = &depthStencil,
+            .fragment = &fragment};
+        pipeline = device.CreateRenderPipeline(&pipelineDescriptor);
+
+        wgpu::BindGroupEntry entry{.binding = 0, .buffer = uniformBuffer, .size = sizeof(Uniforms)};
+        wgpu::BindGroupDescriptor bindGroupDescriptor{.layout = pipeline.GetBindGroupLayout(0), .entryCount = 1, .entries = &entry};
+        bindGroup = device.CreateBindGroup(&bindGroupDescriptor);
+    }
+
+    const pj::Vec3 centre = zone ? zone->centre() : pj::Vec3{};
+    const float radius = zone ? std::max(zone->radius(), 1.0f) : 1.0f;
+
+    float orbit = 0.0f;
+    float pitch = 0.45f;
+    float distance = radius * 2.4f;
+    bool dragging = false;
+    bool spinning = true;
+
+    uint64_t previousTicks = SDL_GetTicksNS();
     bool running = true;
     while (running)
     {
@@ -164,39 +294,100 @@ int main(int, char**)
             {
                 running = false;
             }
-            else if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE)
+            else if (event.type == SDL_EVENT_KEY_DOWN)
             {
-                running = false;
+                if (event.key.key == SDLK_ESCAPE)
+                {
+                    running = false;
+                }
+                else if (event.key.key == SDLK_SPACE)
+                {
+                    spinning = !spinning;
+                }
             }
             else if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED)
             {
                 configure(static_cast<uint32_t>(event.window.data1), static_cast<uint32_t>(event.window.data2));
             }
+            else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+            {
+                dragging = true;
+                spinning = false;
+            }
+            else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP)
+            {
+                dragging = false;
+            }
+            else if (event.type == SDL_EVENT_MOUSE_MOTION && dragging)
+            {
+                orbit -= event.motion.xrel * 0.008f;
+                pitch = std::clamp(pitch + event.motion.yrel * 0.008f, -1.4f, 1.4f);
+            }
+            else if (event.type == SDL_EVENT_MOUSE_WHEEL)
+            {
+                distance = std::clamp(distance * (event.wheel.y > 0 ? 0.9f : 1.1f), radius * 0.05f, radius * 12.0f);
+            }
         }
 
-        wgpu::SurfaceTexture surface_texture;
-        surface.GetCurrentTexture(&surface_texture);
-        if (!surface_texture.texture)
+        const uint64_t nowTicks = SDL_GetTicksNS();
+        const float delta = static_cast<float>(nowTicks - previousTicks) / 1e9f;
+        previousTicks = nowTicks;
+        if (spinning)
+        {
+            orbit += delta * 0.25f;
+        }
+
+        wgpu::SurfaceTexture surfaceTexture;
+        surface.GetCurrentTexture(&surfaceTexture);
+        if (!surfaceTexture.texture)
         {
             continue;
         }
 
-        // Deliberately animated. A static dark clear looks exactly like a window
-        // that never rendered anything, and telling those apart is the entire
-        // job of this program - especially on a machine I cannot see.
-        double t = SDL_GetTicks() / 1000.0;
-        auto wave = [&](double phase) { return 0.25 + 0.2 * std::sin(t * 0.8 + phase); };
+        const uint32_t width = surfaceTexture.texture.GetWidth();
+        const uint32_t height = surfaceTexture.texture.GetHeight();
 
-        wgpu::RenderPassColorAttachment colour{.view = surface_texture.texture.CreateView(),
+        wgpu::RenderPassColorAttachment colour{.view = surfaceTexture.texture.CreateView(),
                                                .loadOp = wgpu::LoadOp::Clear,
                                                .storeOp = wgpu::StoreOp::Store,
-                                               .clearValue = {wave(0.0), wave(2.1), wave(4.2), 1.0}};
-        wgpu::RenderPassDescriptor pass_descriptor{.colorAttachmentCount = 1, .colorAttachments = &colour};
+                                               .clearValue = {0.05, 0.07, 0.09, 1.0}};
+        wgpu::RenderPassDepthStencilAttachment depth{.view = depthTexture.CreateView(),
+                                                     .depthLoadOp = wgpu::LoadOp::Clear,
+                                                     .depthStoreOp = wgpu::StoreOp::Store,
+                                                     .depthClearValue = 1.0f};
+        wgpu::RenderPassDescriptor passDescriptor{.colorAttachmentCount = 1,
+                                                  .colorAttachments = &colour,
+                                                  .depthStencilAttachment = indexCount ? &depth : nullptr};
 
         wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
-        wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&pass_descriptor);
-        pass.End();
+        wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&passDescriptor);
 
+        if (indexCount)
+        {
+            const pj::Vec3 eye{centre.x + distance * std::cos(pitch) * std::sin(orbit),
+                               centre.y + distance * std::sin(pitch),
+                               centre.z + distance * std::cos(pitch) * std::cos(orbit)};
+            const pj::Mat4 view = pj::lookAt(eye, centre, pj::Vec3{0, 1, 0});
+            const pj::Mat4 projection = pj::perspective(1.05f, static_cast<float>(width) / static_cast<float>(height),
+                                                        radius * 0.01f, radius * 20.0f);
+
+            Uniforms uniforms{};
+            const pj::Mat4 viewProjection = projection * view;
+            std::memcpy(uniforms.viewProjection, viewProjection.m, sizeof(uniforms.viewProjection));
+            const pj::Vec3 light = pj::normalise(pj::Vec3{0.4f, 0.8f, 0.45f});
+            uniforms.lightDirection[0] = light.x;
+            uniforms.lightDirection[1] = light.y;
+            uniforms.lightDirection[2] = light.z;
+            queue.WriteBuffer(uniformBuffer, 0, &uniforms, sizeof(uniforms));
+
+            pass.SetPipeline(pipeline);
+            pass.SetBindGroup(0, bindGroup);
+            pass.SetVertexBuffer(0, vertexBuffer);
+            pass.SetIndexBuffer(indexBuffer, wgpu::IndexFormat::Uint32);
+            pass.DrawIndexed(indexCount);
+        }
+
+        pass.End();
         wgpu::CommandBuffer commands = encoder.Finish();
         queue.Submit(1, &commands);
         surface.Present();

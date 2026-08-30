@@ -28,10 +28,11 @@ endif()
 
 add_executable(portjeuno-renderer
     main.cpp
+    zonemesh.cpp
     ${PJ_SURFACE_SOURCE}
 )
 
-target_link_libraries(portjeuno-renderer PRIVATE dawn::webgpu_dawn SDL3::SDL3)
+target_link_libraries(portjeuno-renderer PRIVATE dawn::webgpu_dawn SDL3::SDL3 ffxi-dat)
 
 if(APPLE)
     target_link_libraries(portjeuno-renderer PRIVATE "-framework QuartzCore" "-framework Cocoa")
