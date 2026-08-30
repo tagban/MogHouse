@@ -9,6 +9,8 @@
 #include "ffxi/dat.h"
 #include "ffxi/mmb.h"
 #include "ffxi/mzb.h"
+#include "ffxi/texture.h"
+#include "gputexture.h"
 #include "math.h"
 #include "surface.h"
 #include "zone_shader.h"
@@ -55,7 +57,8 @@ const char* backendName(wgpu::BackendType backend)
 
 // Loads the largest MZB in a DAT. Largest because the ferry DATs hold both a
 // world and a vessel, and the world is the interesting one.
-std::optional<pj::ZoneMesh> loadZone(const char* datPath, const char* keyPath, const char* key2Path, std::string& zoneId)
+std::optional<pj::ZoneMesh> loadZone(const char* datPath, const char* keyPath, const char* key2Path, std::string& zoneId,
+                                     std::unordered_map<std::string, ffxi::Texture>& textures)
 {
     auto keys = ffxi::KeyTable::load(keyPath);
     if (!keys)
@@ -65,6 +68,20 @@ std::optional<pj::ZoneMesh> loadZone(const char* datPath, const char* keyPath, c
     }
 
     ffxi::DatFile dat{std::filesystem::path{datPath}};
+
+    // Textures are not obfuscated, so they need no keys.
+    for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkTexture))
+    {
+        try
+        {
+            ffxi::Texture texture = ffxi::parseTexture(chunk);
+            std::string key = texture.name;
+            textures.emplace(std::move(key), std::move(texture));
+        }
+        catch (const std::exception&)
+        {
+        }
+    }
 
     // Every model in the DAT, keyed by the name a placement refers to it by.
     std::unordered_map<std::string, ffxi::Model> models;
@@ -151,6 +168,7 @@ int main(int argc, char** argv)
 
     std::string zoneId;
     std::optional<pj::ZoneMesh> zone;
+    std::unordered_map<std::string, ffxi::Texture> textures;
     if (argc > 1)
     {
         const char* keyPath = std::getenv("PORTJEUNO_FFXI_KEYTABLE");
@@ -159,7 +177,7 @@ int main(int argc, char** argv)
             std::printf("set PORTJEUNO_FFXI_KEYTABLE to the 256-byte MZB key table to load a zone\n");
             return 2;
         }
-        zone = loadZone(argv[1], keyPath, std::getenv("PORTJEUNO_FFXI_KEYTABLE2"), zoneId);
+        zone = loadZone(argv[1], keyPath, std::getenv("PORTJEUNO_FFXI_KEYTABLE2"), zoneId, textures);
         if (!zone)
         {
             return 1;
@@ -229,7 +247,21 @@ int main(int argc, char** argv)
     adapter.GetInfo(&info);
     std::printf("adapter: %.*s (%s)\n", static_cast<int>(info.device.length), info.device.data, backendName(info.backendType));
 
+    // BC2 is the format FFXI's DXT3 textures already are, but a WebGPU device
+    // will not accept it unless the feature is asked for up front.
+    const bool supportsBc = adapter.HasFeature(wgpu::FeatureName::TextureCompressionBC);
+    if (!supportsBc)
+    {
+        std::printf("this adapter has no BC texture support - compressed textures will be skipped\n");
+    }
+    const wgpu::FeatureName requiredFeatures[] = {wgpu::FeatureName::TextureCompressionBC};
+
     wgpu::DeviceDescriptor deviceDescriptor{};
+    if (supportsBc)
+    {
+        deviceDescriptor.requiredFeatureCount = 1;
+        deviceDescriptor.requiredFeatures = requiredFeatures;
+    }
     deviceDescriptor.SetUncapturedErrorCallback([](const wgpu::Device&, wgpu::ErrorType, wgpu::StringView message)
                                                 { std::printf("webgpu error: %.*s\n", static_cast<int>(message.length), message.data); });
 
@@ -289,8 +321,11 @@ int main(int argc, char** argv)
     wgpu::Buffer vertexBuffer;
     wgpu::Buffer indexBuffer;
     wgpu::Buffer uniformBuffer;
-    wgpu::BindGroup bindGroup;
     wgpu::RenderPipeline pipeline;
+    wgpu::Sampler sampler;
+    wgpu::Texture whiteTexture;
+    std::vector<wgpu::Texture> batchTextures;
+    std::vector<wgpu::BindGroup> batchBindGroups;
     uint32_t indexCount = 0;
 
     if (zone && !zone->indices.empty())
@@ -311,12 +346,13 @@ int main(int argc, char** argv)
         wgpu::ShaderModuleDescriptor moduleDescriptor{.nextInChain = &wgsl};
         wgpu::ShaderModule module = device.CreateShaderModule(&moduleDescriptor);
 
-        wgpu::VertexAttribute attributes[2] = {
+        wgpu::VertexAttribute attributes[3] = {
             {.format = wgpu::VertexFormat::Float32x3, .offset = 0, .shaderLocation = 0},
-            {.format = wgpu::VertexFormat::Float32x3, .offset = 3 * sizeof(float), .shaderLocation = 1}};
+            {.format = wgpu::VertexFormat::Float32x3, .offset = 3 * sizeof(float), .shaderLocation = 1},
+            {.format = wgpu::VertexFormat::Float32x2, .offset = 6 * sizeof(float), .shaderLocation = 2}};
         wgpu::VertexBufferLayout vertexLayout{.stepMode = wgpu::VertexStepMode::Vertex,
                                               .arrayStride = sizeof(pj::Vertex),
-                                              .attributeCount = 2,
+                                              .attributeCount = 3,
                                               .attributes = attributes};
 
         wgpu::ColorTargetState colorTarget{.format = surfaceFormat};
@@ -332,9 +368,58 @@ int main(int argc, char** argv)
             .fragment = &fragment};
         pipeline = device.CreateRenderPipeline(&pipelineDescriptor);
 
-        wgpu::BindGroupEntry entry{.binding = 0, .buffer = uniformBuffer, .size = sizeof(Uniforms)};
-        wgpu::BindGroupDescriptor bindGroupDescriptor{.layout = pipeline.GetBindGroupLayout(0), .entryCount = 1, .entries = &entry};
-        bindGroup = device.CreateBindGroup(&bindGroupDescriptor);
+        // WebGPU has no bindless arrays, so each texture needs its own bind
+        // group and its own draw. Fine at a zone's few dozen textures; this is
+        // the thing that will need atlasing or caching at a larger scale.
+        wgpu::SamplerDescriptor samplerDescriptor{};
+        samplerDescriptor.addressModeU = wgpu::AddressMode::Repeat;
+        samplerDescriptor.addressModeV = wgpu::AddressMode::Repeat;
+        samplerDescriptor.magFilter = wgpu::FilterMode::Linear;
+        samplerDescriptor.minFilter = wgpu::FilterMode::Linear;
+        sampler = device.CreateSampler(&samplerDescriptor);
+
+        whiteTexture = pj::createWhiteTexture(device);
+        const wgpu::TextureView whiteView = whiteTexture.CreateView();
+
+        size_t uploaded = 0;
+        size_t untextured = 0;
+        for (const pj::Batch& batch : zone->batches)
+        {
+            wgpu::TextureView view = whiteView;
+            if (!batch.texture.empty())
+            {
+                auto found = textures.find(batch.texture);
+                if (found != textures.end())
+                {
+                    wgpu::Texture gpu = pj::uploadTexture(device, found->second);
+                    if (gpu)
+                    {
+                        batchTextures.push_back(gpu);
+                        view = batchTextures.back().CreateView();
+                        ++uploaded;
+                    }
+                }
+                else
+                {
+                    ++untextured;
+                }
+            }
+
+            wgpu::BindGroupEntry entries[3] = {};
+            entries[0].binding = 0;
+            entries[0].buffer = uniformBuffer;
+            entries[0].size = sizeof(Uniforms);
+            entries[1].binding = 1;
+            entries[1].textureView = view;
+            entries[2].binding = 2;
+            entries[2].sampler = sampler;
+
+            wgpu::BindGroupDescriptor bindGroupDescriptor{
+                .layout = pipeline.GetBindGroupLayout(0), .entryCount = 3, .entries = entries};
+            batchBindGroups.push_back(device.CreateBindGroup(&bindGroupDescriptor));
+        }
+        std::printf("%zu batches, %zu textures uploaded, %zu with no texture in this DAT\n", zone->batches.size(),
+                    uploaded, untextured);
     }
 
     const pj::Vec3 centre = zone ? zone->centre() : pj::Vec3{};
@@ -444,10 +529,13 @@ int main(int argc, char** argv)
             queue.WriteBuffer(uniformBuffer, 0, &uniforms, sizeof(uniforms));
 
             pass.SetPipeline(pipeline);
-            pass.SetBindGroup(0, bindGroup);
             pass.SetVertexBuffer(0, vertexBuffer);
             pass.SetIndexBuffer(indexBuffer, wgpu::IndexFormat::Uint32);
-            pass.DrawIndexed(indexCount);
+            for (size_t i = 0; i < zone->batches.size() && i < batchBindGroups.size(); ++i)
+            {
+                pass.SetBindGroup(0, batchBindGroups[i]);
+                pass.DrawIndexed(zone->batches[i].indexCount, 1, zone->batches[i].indexOffset);
+            }
         }
 
         pass.End();

@@ -1,6 +1,6 @@
 #pragma once
 
-// Turns MZB collision meshes into something a GPU can draw.
+// Turns FFXI zone data into something a GPU can draw.
 
 #include "ffxi/mmb.h"
 #include "ffxi/mzb.h"
@@ -17,12 +17,24 @@ struct Vertex
 {
     float position[3];
     float normal[3];
+    float uv[2];
+};
+
+/// A run of indices sharing one texture. Geometry is grouped by material so
+/// each can be drawn with its own binding - WebGPU has no bindless arrays, so
+/// one draw per texture is the shape available to us.
+struct Batch
+{
+    std::string texture; ///< empty means untextured, e.g. collision geometry
+    uint32_t indexOffset{};
+    uint32_t indexCount{};
 };
 
 struct ZoneMesh
 {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
+    std::vector<Batch> batches;
     Vec3 boundsMin{};
     Vec3 boundsMax{};
 
@@ -30,27 +42,20 @@ struct ZoneMesh
     float radius() const;
 };
 
-/// Flattens a zone's collision geometry into one buffer, placed in the world.
+/// Collision geometry, as one untextured batch.
 ///
-/// Meshes are model space and reused, so this walks the instances rather than
-/// the meshes - drawing the meshes directly stacks every one of them on the
-/// origin. FFXI's Y axis points down, so it is flipped here and everything
-/// downstream can assume Y is up.
-///
-/// Normals are computed per face rather than taken from the file. MZB does
-/// store normals, but there are fewer of them than either vertices or triangles
-/// - 2,354 against 3,248 and 3,578 in one zone - so what they are indexed by is
-/// still unknown. Face normals are correct, need no such answer, and give flat
-/// shading that suits collision geometry anyway.
+/// Normals are computed per face rather than read from the file. MZB stores
+/// normals but there are fewer of them than either vertices or triangles, so
+/// what indexes them is still unknown. Face normals need no such answer and
+/// suit collision hulls anyway.
 ZoneMesh buildZoneMesh(const ffxi::Zone& zone);
 
-/// Builds the visible world: every MZB placement resolved to its MMB model,
-/// transformed into place.
+/// The visible world: every placement resolved to its model, transformed into
+/// place, and grouped by texture.
 ///
-/// Transforms are baked into the vertices rather than instanced. A zone is a
-/// few million vertices that way, which is fine for a static buffer, and it
-/// reuses the collision pipeline unchanged. Instancing is the obvious next step
-/// but not a prerequisite for seeing whether the placement maths is right.
+/// Transforms are baked into the vertices rather than instanced. That costs a
+/// copy of the geometry per placement, which is the obvious thing to fix next,
+/// but it reuses one pipeline and made the placement maths verifiable first.
 ZoneMesh buildPlacedMesh(const ffxi::Zone& zone, const std::unordered_map<std::string, ffxi::Model>& models,
                          size_t& placementsResolved, size_t& placementsMissing);
 } // namespace pj
