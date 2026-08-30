@@ -7,6 +7,8 @@
 // installed.
 
 #include "ffxi/dat.h"
+#include "ffxi/filetable.h"
+#include "ffxi/look.h"
 #include "ffxi/mmb.h"
 #include "ffxi/lighting.h"
 #include "ffxi/mzb.h"
@@ -775,7 +777,53 @@ int main(int argc, char** argv)
     // one character from, and PORTJEUNO_CHARACTER_AT is where to stand it.
     std::optional<pj::Character> character;
     pj::Vec3 characterAt{};
-    if (const char* charEnv = std::getenv("PORTJEUNO_CHARACTER"))
+
+    // PORTJEUNO_LOOK is what a player character actually is:
+    // race,face,head,body,hands,legs,feet, all model ids. The skeleton comes
+    // from the race and each slot from its own file, which is how a change of
+    // outfit is one number rather than a different character.
+    if (const char* lookEnv = std::getenv("PORTJEUNO_LOOK"))
+    {
+        ffxi::Look look;
+        if (!ffxi::parseLook(lookEnv, look))
+        {
+            std::printf("PORTJEUNO_LOOK wants race,face,head,body,hands,legs,feet\n");
+        }
+        else
+        {
+            try
+            {
+                const ffxi::FileTable table{ffxi::defaultInstallRoot()};
+                std::vector<std::string> paths;
+
+                // The skeleton file first: it carries the bones every piece is
+                // hung on, and nothing but the race decides it.
+                if (auto skeleton = table.path(ffxi::skeletonFileId(look.race)))
+                {
+                    paths.push_back(skeleton->string());
+                }
+                std::printf("look: %s", ffxi::raceName(look.race));
+                for (size_t i = 0; i < static_cast<size_t>(ffxi::LookSlot::Count); ++i)
+                {
+                    const auto slot = static_cast<ffxi::LookSlot>(i);
+                    const size_t fileId = ffxi::modelFileId(look.race, slot, look.model[i]);
+                    auto path = fileId ? table.path(fileId) : std::nullopt;
+                    std::printf(", %s %u%s", ffxi::slotName(slot), look.model[i], path ? "" : " (missing)");
+                    if (path)
+                    {
+                        paths.push_back(path->string());
+                    }
+                }
+                std::printf("\n");
+                character = loadCharacter(paths, textures);
+            }
+            catch (const std::exception& e)
+            {
+                std::printf("could not read the file table: %s\n", e.what());
+            }
+        }
+    }
+    else if (const char* charEnv = std::getenv("PORTJEUNO_CHARACTER"))
     {
         std::vector<std::string> paths;
         std::string current;

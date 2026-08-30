@@ -6,10 +6,11 @@ param(
     [Parameter(Mandatory = $true)][string]$Out,
     [string]$Zone = "C:\Program Files (x86)\PlayOnline\SquareEnix\FINAL FANTASY XI\ROM\1\0.DAT",
     [string]$Character = "",
+    [string]$Look = "",
     [string]$CharacterAt = "",
     [string]$Facing = "",
     [string]$Camera = "",
-    [string]$Look = "",
+    [string]$CameraLook = "",
     [string]$Time = "1200"
 )
 
@@ -19,10 +20,11 @@ $bmp = [System.IO.Path]::ChangeExtension($Out, ".bmp")
 $env:PORTJEUNO_SCREENSHOT = $bmp
 $env:PORTJEUNO_TIME = $Time
 if ($Character) { $env:PORTJEUNO_CHARACTER = $Character } else { Remove-Item env:PORTJEUNO_CHARACTER -EA SilentlyContinue }
+if ($Look) { $env:PORTJEUNO_LOOK = $Look } else { Remove-Item env:PORTJEUNO_LOOK -EA SilentlyContinue }
 if ($CharacterAt) { $env:PORTJEUNO_CHARACTER_AT = $CharacterAt } else { Remove-Item env:PORTJEUNO_CHARACTER_AT -EA SilentlyContinue }
 if ($Facing) { $env:PORTJEUNO_CHARACTER_FACING = $Facing } else { Remove-Item env:PORTJEUNO_CHARACTER_FACING -EA SilentlyContinue }
 if ($Camera) { $env:PORTJEUNO_CAMERA = $Camera } else { Remove-Item env:PORTJEUNO_CAMERA -EA SilentlyContinue }
-if ($Look) { $env:PORTJEUNO_CAMERA_LOOK = $Look } else { Remove-Item env:PORTJEUNO_CAMERA_LOOK -EA SilentlyContinue }
+if ($CameraLook) { $env:PORTJEUNO_CAMERA_LOOK = $CameraLook } else { Remove-Item env:PORTJEUNO_CAMERA_LOOK -EA SilentlyContinue }
 
 & "$PSScriptRoot\build-renderer\portjeuno-renderer.exe" $Zone 2>&1 | Select-String "character|wrote|could not|webgpu error"
 
