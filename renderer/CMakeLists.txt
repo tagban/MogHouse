@@ -55,6 +55,7 @@ endif()
 # in tools/ that was validated across every zone in ROM/1.
 add_library(ffxi-dat STATIC
     ffxi/dat.cpp
+    ffxi/lighting.cpp
     ffxi/mmb.cpp
     ffxi/mzb.cpp
     ffxi/texture.cpp

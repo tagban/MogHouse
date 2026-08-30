@@ -3,6 +3,7 @@
 // every zone in ROM/1; this exists so the C++ can be held to the same result.
 
 #include "dat.h"
+#include "lighting.h"
 #include "mmb.h"
 #include "mzb.h"
 #include "texture.h"
@@ -171,6 +172,34 @@ int main(int argc, char** argv)
                 if (failed)
                 {
                     std::printf("  first failure %s\n", texFailure.c_str());
+                }
+            }
+        }
+
+        // Lighting, and whether it interpolates sensibly across the day.
+        {
+            ffxi::Lighting lighting;
+            for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkLighting))
+            {
+                lighting.add(chunk);
+            }
+            if (!lighting.empty())
+            {
+                std::printf("lighting: %zu times of day\n", lighting.sets().size());
+                for (const ffxi::LightingSet& set : lighting.sets())
+                {
+                    std::printf("  %02d:%02d  ambient %.2f %.2f %.2f  fog %.2f %.2f %.2f  maxfog %7.1f  bright %.2f\n",
+                                set.minutes / 60, set.minutes % 60, set.landscapeAmbient.r, set.landscapeAmbient.g,
+                                set.landscapeAmbient.b, set.landscapeFog.r, set.landscapeFog.g, set.landscapeFog.b,
+                                set.landscapeMaxFog, set.landscapeBrightness);
+                }
+                // Interpolation should move smoothly rather than jumping.
+                std::printf("  interpolated across the day:\n");
+                for (int hour = 0; hour < 24; hour += 3)
+                {
+                    const ffxi::LightingSet set = lighting.at(hour * 60);
+                    std::printf("    %02d:00  ambient %.2f %.2f %.2f  maxfog %7.1f\n", hour, set.landscapeAmbient.r,
+                                set.landscapeAmbient.g, set.landscapeAmbient.b, set.landscapeMaxFog);
                 }
             }
         }
