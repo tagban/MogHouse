@@ -2,6 +2,9 @@
 
 // The zone shader, inline rather than loaded from disk so the executable has no
 // runtime dependency on its own source tree.
+//
+// Geometry arrives in model space and is placed by a per-instance matrix, so a
+// model appearing 1,218 times is uploaded once rather than 1,218 times.
 
 namespace pj
 {
@@ -24,24 +27,22 @@ struct VertexOut {
 @vertex
 fn vertexMain(@location(0) position : vec3<f32>,
               @location(1) normal : vec3<f32>,
-              @location(2) uv : vec2<f32>) -> VertexOut {
+              @location(2) uv : vec2<f32>,
+              // The placement matrix, one column per attribute.
+              @location(3) m0 : vec4<f32>,
+              @location(4) m1 : vec4<f32>,
+              @location(5) m2 : vec4<f32>,
+              @location(6) m3 : vec4<f32>) -> VertexOut {
+    let model = mat4x4<f32>(m0, m1, m2, m3);
+
     var out : VertexOut;
-    out.clipPosition = uniforms.viewProjection * vec4<f32>(position, 1.0);
-    out.normal = normal;
+    let world = model * vec4<f32>(position, 1.0);
+    out.clipPosition = uniforms.viewProjection * world;
+    // Rotating the normal by the same matrix is only exact for uniform scale,
+    // which is what placements use.
+    out.normal = (model * vec4<f32>(normal, 0.0)).xyz;
     out.uv = uv;
     return out;
-}
-
-@fragment
-fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
-    return shade(in, false);
-}
-
-// Same shading, but alpha is treated as a cutout. Used only for the surfaces
-// whose mesh header asks for it.
-@fragment
-fn fragmentCutout(in : VertexOut) -> @location(0) vec4<f32> {
-    return shade(in, true);
 }
 
 fn shade(in : VertexOut, cutout : bool) -> vec4<f32> {
@@ -53,14 +54,23 @@ fn shade(in : VertexOut, cutout : bool) -> vec4<f32> {
 
     let sampled = textureSample(zoneTexture, zoneSampler, in.uv);
 
-    // Alpha is only a cutout on surfaces that ask for it. On terrain it is a
-    // blend factor - sar_kk2, the flat ground, is 60.5% alpha-zero while its
-    // RGB is never black - so testing against it punched the ground full of
-    // holes and left a checkerboard with the background showing through.
+    // Alpha is a cutout mask only on textures that are black where transparent.
+    // On terrain it is a blend factor, and testing it punches holes in the
+    // ground - see docs/dxt3-format.md.
     if (cutout && sampled.a < 0.03) {
         discard;
     }
     return vec4<f32>(sampled.rgb * lit, 1.0);
+}
+
+@fragment
+fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
+    return shade(in, false);
+}
+
+@fragment
+fn fragmentCutout(in : VertexOut) -> @location(0) vec4<f32> {
+    return shade(in, true);
 }
 )";
 } // namespace pj

@@ -14,6 +14,7 @@
 #include "camera.h"
 #include "coverage.h"
 #include "math.h"
+#include "scene.h"
 #include "surface.h"
 #include "sky_shader.h"
 #include "zone_shader.h"
@@ -67,7 +68,7 @@ const char* backendName(wgpu::BackendType backend)
 
 // Loads the largest MZB in a DAT. Largest because the ferry DATs hold both a
 // world and a vessel, and the world is the interesting one.
-std::optional<pj::ZoneMesh> loadZone(const char* datPath, const char* keyPath, const char* key2Path, std::string& zoneId,
+std::optional<pj::Scene> loadZone(const char* datPath, const char* keyPath, const char* key2Path, std::string& zoneId,
                                      std::unordered_map<std::string, ffxi::Texture>& textures)
 {
     auto keys = ffxi::KeyTable::load(keyPath);
@@ -116,51 +117,32 @@ std::optional<pj::ZoneMesh> loadZone(const char* datPath, const char* keyPath, c
         }
     }
 
-    std::optional<pj::ZoneMesh> best;
+    std::optional<pj::Scene> best;
     for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkMzb))
     {
         ffxi::Zone zone = ffxi::parseMzb(chunk, *keys);
 
         // Placed models are the visible world; collision geometry is the
         // fallback when the model key table is not available.
-        pj::ZoneMesh mesh;
+        pj::Scene mesh;
         if (!models.empty())
         {
             size_t resolved = 0;
             size_t missing = 0;
-            mesh = pj::buildPlacedMesh(zone, models, textures, resolved, missing);
+            mesh = pj::buildScene(zone, models, textures, resolved, missing);
             if (!mesh.vertices.empty())
             {
                 std::printf("  %zu models (%zu unreadable), %zu placements drawn, %zu with no model\n", models.size(),
                             modelsFailed, resolved, missing);
+                std::printf("  %zu unique triangles, %zu drawn - instancing saves %.1fx\n", mesh.triangles(),
+                            mesh.drawnTriangles(),
+                            mesh.triangles() ? static_cast<double>(mesh.drawnTriangles()) / static_cast<double>(mesh.triangles()) : 0.0);
             }
         }
         // Collision geometry is deliberately not drawn. Its meshes carry a
         // flags field with only two values across all 5,921 of them, so it
         // references no material - it is genuine collision, not terrain, and
         // drawing it just covers the world in untextured white.
-        // Compare against the collision geometry's footprint. If collision
-        // covers far more ground than the placed models, the terrain surface is
-        // not coming from the placement table at all.
-        {
-            pj::ZoneMesh collision = pj::buildZoneMesh(zone);
-            if (!collision.indices.empty())
-            {
-                const pj::Coverage c = pj::measureCoverage(collision);
-                std::printf("  collision footprint: %.1f%% any, %.1f%% horizontal (%zu triangles)\n",
-                            c.anyGeometry * 100.0f, c.groundLike * 100.0f, collision.indices.size() / 3);
-                if (std::getenv("PORTJEUNO_COVERAGE_MAP"))
-                {
-                    pj::printCoverageDiff(collision, mesh);
-                }
-            }
-        }
-
-        if (mesh.vertices.empty())
-        {
-            mesh = pj::buildZoneMesh(zone);
-        }
-
         if (!best || mesh.vertices.size() > best->vertices.size())
         {
             best = std::move(mesh);
@@ -198,7 +180,7 @@ int main(int argc, char** argv)
     std::setvbuf(stdout, nullptr, _IONBF, 0);
 
     std::string zoneId;
-    std::optional<pj::ZoneMesh> zone;
+    std::optional<pj::Scene> zone;
     std::unordered_map<std::string, ffxi::Texture> textures;
     if (argc > 1)
     {
@@ -216,9 +198,6 @@ int main(int argc, char** argv)
         std::printf("zone %s: %zu triangles\n", zoneId.c_str(), zone->indices.size() / 3);
         std::printf("  bounds x %.1f..%.1f  y %.1f..%.1f  z %.1f..%.1f\n", zone->boundsMin.x, zone->boundsMax.x,
                     zone->boundsMin.y, zone->boundsMax.y, zone->boundsMin.z, zone->boundsMax.z);
-        const pj::Coverage coverage = pj::measureCoverage(*zone);
-        std::printf("  ground coverage: %.1f%% has geometry over it, %.1f%% has a horizontal face\n",
-                    coverage.anyGeometry * 100.0f, coverage.groundLike * 100.0f);
     }
     else
     {
@@ -385,6 +364,7 @@ int main(int argc, char** argv)
 
     wgpu::Buffer vertexBuffer;
     wgpu::Buffer indexBuffer;
+    wgpu::Buffer instanceBuffer;
     wgpu::Buffer uniformBuffer;
     wgpu::RenderPipeline pipeline;
     wgpu::RenderPipeline cutoutPipeline;
@@ -401,6 +381,8 @@ int main(int argc, char** argv)
                                     wgpu::BufferUsage::Vertex);
         indexBuffer = createBuffer(device, zone->indices.data(), zone->indices.size() * sizeof(uint32_t),
                                    wgpu::BufferUsage::Index);
+        instanceBuffer = createBuffer(device, zone->instances.data(), zone->instances.size() * sizeof(float),
+                                      wgpu::BufferUsage::Vertex);
         indexCount = static_cast<uint32_t>(zone->indices.size());
         std::printf("buffers created\n");
 
@@ -417,10 +399,23 @@ int main(int argc, char** argv)
             {.format = wgpu::VertexFormat::Float32x3, .offset = 0, .shaderLocation = 0},
             {.format = wgpu::VertexFormat::Float32x3, .offset = 3 * sizeof(float), .shaderLocation = 1},
             {.format = wgpu::VertexFormat::Float32x2, .offset = 6 * sizeof(float), .shaderLocation = 2}};
+        wgpu::VertexAttribute instanceAttributes[4] = {
+            {.format = wgpu::VertexFormat::Float32x4, .offset = 0, .shaderLocation = 3},
+            {.format = wgpu::VertexFormat::Float32x4, .offset = 4 * sizeof(float), .shaderLocation = 4},
+            {.format = wgpu::VertexFormat::Float32x4, .offset = 8 * sizeof(float), .shaderLocation = 5},
+            {.format = wgpu::VertexFormat::Float32x4, .offset = 12 * sizeof(float), .shaderLocation = 6}};
+
         wgpu::VertexBufferLayout vertexLayout{.stepMode = wgpu::VertexStepMode::Vertex,
                                               .arrayStride = sizeof(pj::Vertex),
                                               .attributeCount = 3,
                                               .attributes = attributes};
+        // Stepping per instance rather than per vertex is the whole trick: one
+        // copy of the geometry, one matrix per placement.
+        wgpu::VertexBufferLayout instanceLayout{.stepMode = wgpu::VertexStepMode::Instance,
+                                                .arrayStride = 16 * sizeof(float),
+                                                .attributeCount = 4,
+                                                .attributes = instanceAttributes};
+        wgpu::VertexBufferLayout bufferLayouts[2] = {vertexLayout, instanceLayout};
 
         // An explicit layout shared by both pipelines. Letting each derive its
         // own default layout makes bind groups built for one incompatible with
@@ -452,7 +447,7 @@ int main(int argc, char** argv)
 
         wgpu::RenderPipelineDescriptor pipelineDescriptor{
             .layout = sharedLayout,
-            .vertex = {.module = module, .entryPoint = "vertexMain", .bufferCount = 1, .buffers = &vertexLayout},
+            .vertex = {.module = module, .entryPoint = "vertexMain", .bufferCount = 2, .buffers = bufferLayouts},
             .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
             .depthStencil = &depthStencil,
             .fragment = &fragment};
@@ -481,7 +476,7 @@ int main(int argc, char** argv)
 
         size_t uploaded = 0;
         size_t untextured = 0;
-        for (const pj::Batch& batch : zone->batches)
+        for (const pj::InstancedDraw& batch : zone->draws)
         {
             wgpu::TextureView view = whiteView;
             if (!batch.texture.empty())
@@ -516,7 +511,7 @@ int main(int argc, char** argv)
                 .layout = zoneBindGroupLayout, .entryCount = 3, .entries = entries};
             batchBindGroups.push_back(device.CreateBindGroup(&bindGroupDescriptor));
         }
-        std::printf("%zu batches, %zu textures uploaded, %zu with no texture in this DAT\n", zone->batches.size(),
+        std::printf("%zu draws, %zu textures uploaded, %zu with no texture in this DAT\n", zone->draws.size(),
                     uploaded, untextured);
     }
 
@@ -680,21 +675,19 @@ int main(int argc, char** argv)
             queue.WriteBuffer(uniformBuffer, 0, &uniforms, sizeof(uniforms));
 
             pass.SetVertexBuffer(0, vertexBuffer);
+            pass.SetVertexBuffer(1, instanceBuffer);
             pass.SetIndexBuffer(indexBuffer, wgpu::IndexFormat::Uint32);
-            for (size_t i = 0; i < zone->batches.size() && i < batchBindGroups.size(); ++i)
+            for (size_t i = 0; i < zone->draws.size() && i < batchBindGroups.size(); ++i)
             {
-                const pj::Batch& batch = zone->batches[i];
-                // 0x8000 marks the surfaces that want a cutout. Terrain does
-                // not, and testing its alpha removes most of the ground.
+                const pj::InstancedDraw& draw = zone->draws[i];
                 // cutoutMode: 0 never cuts out, 1 always, otherwise the
-                // mesh's own 0x8000 bit decides. The override exists because
-                // which surfaces want a cutout is still not settled.
+                // texture's own measurement decides.
                 const bool cutout = cutoutMode == 0   ? false
                                     : cutoutMode == 1 ? true
-                                                      : batch.cutout;
+                                                      : draw.cutout;
                 pass.SetPipeline(cutout ? cutoutPipeline : pipeline);
                 pass.SetBindGroup(0, batchBindGroups[i]);
-                pass.DrawIndexed(batch.indexCount, 1, batch.indexOffset);
+                pass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
             }
         }
 

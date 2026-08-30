@@ -28,6 +28,7 @@ endif()
 
 add_executable(portjeuno-renderer
     main.cpp
+    scene.cpp
     zonemesh.cpp
     ${PJ_SURFACE_SOURCE}
 )
