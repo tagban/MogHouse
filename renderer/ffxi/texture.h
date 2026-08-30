@@ -25,11 +25,21 @@ struct Texture
     TextureFormat format{TextureFormat::Bc2};
     std::vector<uint8_t> pixels;
 
-    /// Fraction of texels with zero alpha. Ground textures sit around 0.5 and
-    /// their alpha is a blend factor; foliage is far higher and genuinely wants
-    /// cutting out. Measured here because it is a property of the artwork, and
-    /// nothing in the headers says which a texture is.
+    /// Fraction of texels with zero alpha.
     float alphaZero{};
+
+    /// Of the blocks that are mostly transparent, the fraction whose colour is
+    /// also black.
+    ///
+    /// This is what separates a cutout mask from a blend factor, and nothing in
+    /// the format says which a texture is. An artist painting a cutout leaves
+    /// the hidden area black because it will never be seen; a blend texture
+    /// carries real colour throughout. Measured across a zone the split is
+    /// absolute - cutouts land at 0.37 to 0.93, everything else at 0.00.
+    ///
+    /// Transparency alone does not work: grass is only 0.19 to 0.25 alpha-zero,
+    /// less than rock at 0.51 or ground at 0.60.
+    float blackWhereClear{};
 };
 
 /// Reads one texture chunk. Texture chunks are not obfuscated, unlike MZB and

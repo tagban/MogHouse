@@ -14,18 +14,10 @@ namespace
 /// the distances a zone spans.
 constexpr float kLayerSeparation = 0.004f;
 
-/// How transparent a texture must be before its alpha is read as a cutout mask
-/// rather than a blend factor.
-///
-/// Bracketed by measurement rather than chosen: ground 0.60, rock 0.51 and the
-/// river surface 0.80 must all stay opaque - cutting the river out puts holes
-/// along its edges - while grass at 0.95 must be cut out. 0.88 sits between the
-/// closest pair, so it is the widest margin available on this zone.
-///
-/// That margin is 0.15, which is not much. A texture landing between 0.80 and
-/// 0.95 in another zone would be a coin toss, and this is the first thing to
-/// revisit when a town or later expansion renders wrongly.
-constexpr float kMostlyTransparent = 0.88f;
+/// How much of a texture's transparent area must also be black before its alpha
+/// is read as a cutout mask. Cutouts measure 0.37 upward and everything else
+/// exactly 0.00, so anything in between will do.
+constexpr float kCutoutSignal = 0.2f;
 
 struct Bounds
 {
@@ -166,19 +158,19 @@ ZoneMesh buildPlacedMesh(const ffxi::Zone& zone, const std::unordered_map<std::s
         uint32_t meshIndex = 0;
         for (const ffxi::ModelMesh& mesh : found->second.meshes)
         {
-            // Whether alpha is a cutout mask or a blend factor is a property of
-            // the texture, and measuring it is the only thing that has held up.
-            // Grass is 95% alpha-zero, rock 51%, ground 60% - a wide, clean gap.
+            // A cutout texture is black where it is transparent, because that
+            // area is never meant to be seen. A blend texture carries real
+            // colour throughout. Across a zone the split is absolute: cutouts
+            // measure 0.37 to 0.93, everything else exactly 0.00.
             //
-            // Geometry was tried twice as a discriminator and abandoned. The
-            // mesh header's blending field marks base against overlay, not
-            // transparency. Orientation looked promising but a grass tuft is
-            // crossed, splayed quads measuring 0.57 rather than 0, so no
-            // threshold separated it from ground without also cutting holes in
-            // cliff faces.
+            // Three other discriminators failed first. The mesh header's
+            // blending field marks base against overlay, not transparency.
+            // Surface orientation cannot separate crossed grass quads from
+            // ground without also cutting arches through cliffs. And how
+            // transparent a texture is says nothing - grass is 0.19 to 0.25
+            // alpha-zero, *less* than rock at 0.51 or ground at 0.60.
             auto texture = textures.find(mesh.texture);
-            const float transparency = texture == textures.end() ? 0.0f : texture->second.alphaZero;
-            const bool cutout = transparency > kMostlyTransparent;
+            const bool cutout = texture != textures.end() && texture->second.blackWhereClear > kCutoutSignal;
 
             Group& group = groups[{mesh.texture, cutout}];
             const uint32_t base = static_cast<uint32_t>(group.vertices.size());

@@ -95,20 +95,42 @@ Texture parseTexture(const Chunk& chunk)
         texture.pixels.resize(size);
         std::memcpy(texture.pixels.data(), data.data() + kBlockDataOffset, size);
 
-        // BC2 packs a 4x4 block into 16 bytes: 8 of 4-bit alpha, then colour.
+        // BC2 packs a 4x4 block into 16 bytes: 8 of 4-bit alpha, then two
+        // RGB565 endpoints and 2-bit indices between them.
         size_t zero = 0;
         size_t texels = 0;
+        size_t clearBlocks = 0;
+        size_t clearAndBlack = 0;
         for (size_t block = 0; block + 16 <= texture.pixels.size(); block += 16)
         {
+            size_t blockZero = 0;
             for (size_t i = 0; i < 8; ++i)
             {
                 const uint8_t byte = texture.pixels[block + i];
-                zero += (byte & 0x0F) == 0;
-                zero += (byte >> 4) == 0;
-                texels += 2;
+                blockZero += (byte & 0x0F) == 0;
+                blockZero += (byte >> 4) == 0;
+            }
+            zero += blockZero;
+            texels += 16;
+
+            // Half the block transparent is enough to ask what colour it hides.
+            if (blockZero >= 8)
+            {
+                ++clearBlocks;
+                uint16_t c0 = 0;
+                uint16_t c1 = 0;
+                std::memcpy(&c0, texture.pixels.data() + block + 8, sizeof(c0));
+                std::memcpy(&c1, texture.pixels.data() + block + 10, sizeof(c1));
+                // Both endpoints near black in RGB565.
+                if (c0 < 0x1082 && c1 < 0x1082)
+                {
+                    ++clearAndBlack;
+                }
             }
         }
         texture.alphaZero = texels ? static_cast<float>(zero) / static_cast<float>(texels) : 0.0f;
+        texture.blackWhereClear =
+            clearBlocks ? static_cast<float>(clearAndBlack) / static_cast<float>(clearBlocks) : 0.0f;
         break;
     }
     case 0xB1:

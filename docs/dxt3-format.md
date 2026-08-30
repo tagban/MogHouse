@@ -74,37 +74,39 @@ Testing against alpha on those removes most of the ground and leaves a
 checkerboard of holes. The colour is meaningful everywhere, so terrain is simply
 drawn opaque and its alpha ignored.
 
-Which surfaces want a cutout is **not** stated anywhere in the format. Two
-candidates were tried and abandoned:
+Which surfaces want a cutout is **not** stated anywhere in the format. What
+works is that **a cutout texture is black where it is transparent** - the artist
+never expects that area to be seen - while a blend texture carries real colour
+throughout. Measured as the fraction of mostly-transparent blocks whose colour
+endpoints are also near black, the split is absolute:
+
+| texture | black where clear | treatment |
+| --- | --- | --- |
+| `moonshap` | 0.93 | cutout |
+| `win_m03c` | 0.72 | cutout |
+| `sal_w02c` (grass) | 0.42 | cutout |
+| `sal_w04c` (grass) | 0.41 | cutout |
+| `sar_kaw1` (river) | **0.00** | blend |
+| `sar_kk2` (ground) | **0.00** | blend |
+| `sar_w1` (rock) | **0.00** | blend |
+
+Three other discriminators were tried and each failed:
 
 - **The mesh header's `blending` field** marks base against overlay within a
-  tile, not transparency. The same texture appears under both flags - `sar_kk2`
-  has 53 meshes at `0x0000` and 52 at `0x8000` - so it could never have
-  separated foliage from ground.
-- **Surface orientation.** Plausible, since foliage is billboards and ground is
-  flat, but a grass tuft is crossed, splayed quads measuring 0.57 rather than 0,
-  and no threshold separated it from ground without also cutting holes through
-  cliff faces. Worth noting that grass billboards carry normals pointing
-  straight up - so they light like the ground beneath - which makes stored
-  normals useless here even before that.
+  tile, not transparency - the same texture appears under both flags.
+- **Surface orientation.** A grass tuft is crossed, splayed quads measuring 0.57
+  rather than 0, so nothing separated it from ground without also cutting arches
+  through cliff faces. Grass billboards also point their normals straight up, so
+  they light like the ground beneath, which rules out stored normals entirely.
+- **How transparent a texture is.** The one that looked most convincing and was
+  simply wrong. Grass is 0.19 to 0.25 alpha-zero - *less* than rock at 0.51 or
+  ground at 0.60 - so every threshold fitted to it was fitted to the wrong pair
+  of textures and worked, when it worked, by accident.
 
-What does work is **how transparent the texture is**, measured at load:
-
-| texture | alpha-zero | treatment |
-| --- | --- | --- |
-| `sar_hg_0` (grass) | 0.95 | cutout |
-| `sar_kaw1` (river) | 0.80 | opaque |
-| `sar_kk2` (ground) | 0.60 | opaque |
-| `sar_w1` (rock) | 0.51 | opaque |
-
-The threshold sits at **0.88**, bracketed between the river and the grass. Each
-neighbour was established by a visible failure: below 0.80 the river edges break
-up, above 0.95 the grass renders as black boxes.
-
-**This is fitted, not derived.** The margin is 0.15, tuned against one field
-zone. A texture landing between 0.80 and 0.95 elsewhere is a coin toss, and this
-is the first thing to look at when a town or later-expansion zone renders
-wrongly.
+The grass models are `_sal_w03/04/05_m`, the three most-placed models in the
+zone at 887, 928 and 1,218 placements. Assuming `sar_hg_0` was the grass on the
+strength of its name, without noticing it had two meshes in the entire zone, is
+what sent the first three attempts astray.
 
 ## Still to work out
 
