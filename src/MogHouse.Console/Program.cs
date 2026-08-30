@@ -1,5 +1,6 @@
 using System.Text.Json;
 using MogHouse.Core.Ffxi;
+using MogHouse.Core.Interop;
 
 // A flag's value is the next token, unless that token is itself another
 // "--flag" - this lets valueless flags like --save sit anywhere in the
@@ -42,6 +43,9 @@ switch (args[0])
 
     case "create-account":
         return await CreateAccountAsync(ParseFlags(args));
+
+    case "view":
+        return await ViewAsync(ParseFlags(args));
 
     default:
         PrintUsage();
@@ -638,4 +642,103 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
         Console.WriteLine($"Login failed: {ex}");
         return 1;
     }
+}
+
+/// <summary>
+/// Opens the renderer inside this process and feeds its radar while it runs.
+///
+/// This is the whole point of the interop: one application, not a client
+/// talking to a viewer. Without --live it walks a ring of synthetic entities
+/// around the character, which is enough to prove the cross-thread feed
+/// reaches the radar - the dots have to move.
+/// </summary>
+static async Task<int> ViewAsync(Dictionary<string, string> flags)
+{
+    if (!flags.TryGetValue("zone", out string? zonePath))
+    {
+        Console.WriteLine("view --zone <path to a zone DAT> [--look 1,0,0,1,1,1,1] [--at x,y,z] [--time hhmm]");
+        return 2;
+    }
+
+    string keys = flags.GetValueOrDefault("keys")
+        ?? Environment.GetEnvironmentVariable("MOGHOUSE_FFXI_KEYTABLE") ?? "";
+    string keys2 = flags.GetValueOrDefault("keys2")
+        ?? Environment.GetEnvironmentVariable("MOGHOUSE_FFXI_KEYTABLE2") ?? "";
+
+    var options = new NativeViewerOptions
+    {
+        ZonePath = zonePath,
+        KeyTablePath = keys,
+        KeyTable2Path = keys2,
+        Look = flags.GetValueOrDefault("look"),
+        CharacterAt = flags.GetValueOrDefault("at"),
+        CharacterFacing = flags.GetValueOrDefault("facing"),
+        TimeOfDay = flags.TryGetValue("time", out string? time) && int.TryParse(time, out int hhmm) ? hhmm : null,
+    };
+
+    using var viewer = new NativeViewer(options);
+    using var feeding = new CancellationTokenSource();
+
+    // Parse the character position so the ring has something to orbit.
+    float centreX = 0, centreZ = 0;
+    if (options.CharacterAt is { } at)
+    {
+        string[] parts = at.Split(',');
+        if (parts.Length == 3)
+        {
+            float.TryParse(parts[0], out centreX);
+            float.TryParse(parts[2], out centreZ);
+        }
+    }
+
+    Task feeder = Task.Run(async () =>
+    {
+        double phase = 0;
+        while (!feeding.Token.IsCancellationRequested)
+        {
+            // Three dots of each kind, orbiting at different radii. Movement is
+            // the assertion: a static list could be a stale first frame.
+            var entities = new NativeRadarEntity[9];
+            for (int i = 0; i < entities.Length; i++)
+            {
+                double angle = phase + i * (Math.Tau / entities.Length);
+                float radius = 12f + (i % 3) * 14f;
+                entities[i] = new NativeRadarEntity
+                {
+                    X = centreX + (float)(Math.Cos(angle) * radius),
+                    Z = centreZ + (float)(Math.Sin(angle) * radius),
+                    Kind = i % 3,
+                };
+            }
+            viewer.SetEntities(entities);
+
+            phase += 0.05;
+            try
+            {
+                await Task.Delay(50, feeding.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+    }, feeding.Token);
+
+    Console.WriteLine("renderer running in-process; close the window to return");
+
+    // Blocking, and it owns the window and the event loop - so it gets this
+    // thread and the feed gets another.
+    int code = viewer.Run();
+
+    await feeding.CancelAsync();
+    try
+    {
+        await feeder;
+    }
+    catch (OperationCanceledException)
+    {
+    }
+
+    Console.WriteLine($"renderer closed with {code}");
+    return code;
 }

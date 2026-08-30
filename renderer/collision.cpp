@@ -336,9 +336,41 @@ std::vector<uint8_t> Collision::rasteriseWalkable(uint32_t size, const Vec3& cen
     return mask;
 }
 
+std::optional<float> Collision::closestGroundAt(float x, float z, float y) const
+{
+    if (triangles_.empty())
+    {
+        return std::nullopt;
+    }
+
+    const std::vector<uint32_t>* candidates = nullptr;
+    std::vector<uint32_t> scratch;
+    forEachNear(x, z, x, z, candidates, scratch);
+
+    std::optional<float> best;
+    for (uint32_t index : *candidates)
+    {
+        const Triangle& triangle = triangles_[index];
+        if (!triangle.walkable)
+        {
+            continue;
+        }
+        const std::optional<float> height = heightAt(triangle.a, triangle.b, triangle.c, x, z);
+        if (!height)
+        {
+            continue;
+        }
+        if (!best || std::fabs(*height - y) < std::fabs(*best - y))
+        {
+            best = height;
+        }
+    }
+    return best;
+}
+
 std::optional<Vec3> Collision::nearestGround(float x, float z, float near, float maxRadius) const
 {
-    if (const std::optional<float> here = groundAt(x, z, near))
+    if (const std::optional<float> here = closestGroundAt(x, z, near))
     {
         return Vec3{x, *here, z};
     }
@@ -355,7 +387,7 @@ std::optional<Vec3> Collision::nearestGround(float x, float z, float near, float
             const float angle = 6.28318531f * static_cast<float>(i) / static_cast<float>(steps);
             const float px = x + std::cos(angle) * radius;
             const float pz = z + std::sin(angle) * radius;
-            if (const std::optional<float> y = groundAt(px, pz, near))
+            if (const std::optional<float> y = closestGroundAt(px, pz, near))
             {
                 return Vec3{px, *y, pz};
             }

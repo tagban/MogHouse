@@ -1,109 +1,119 @@
-// Implementation of the C ABI declared in moghouse_interop.h.
-//
-// NOT YET BUILD-VERIFIED - there is no CMake/Ninja/Vulkan SDK toolchain in
-// this environment yet, so nothing below has been compiled. It is written
-// against the real lotus::Game / lotus::Engine / FFXIGame signatures (read
-// directly from engine/lotus/game.cppm, engine/lotus/engine.cppm and
-// ffxi-engine/ffxi/game.cppm on 2026-08-27), not guessed, but treat it as a
-// design draft until it's actually built. See ../README.md for the known
-// open questions (module/CMake target linkage in particular).
-
-import ffxi;
-import lotus;
-
 #include "moghouse_interop.h"
 
-#include <chrono>
+#include "viewer.h"
+
+#include <cstdio>
+#include <exception>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace
 {
-// Subclasses FFXIGame (not lotus::Game directly) so we keep lotus-ffxi's
-// existing DAT/zone/model loading in `entry()` for free, and only add a
-// callback hook on top of its `tick()`.
-class MogHouseGame : public FFXIGame
+/// Copies a borrowed C string, treating null as absent.
+std::optional<std::string> borrow(const char* text)
 {
-public:
-    explicit MogHouseGame(const lotus::Settings& settings) : FFXIGame(settings) {}
-
-    PjTickCallback tick_callback{nullptr};
-    void* tick_user_data{nullptr};
-    PjErrorCallback error_callback{nullptr};
-    void* error_user_data{nullptr};
-
-protected:
-    // lotus::Engine's main loop coroutine calls this once per frame via
-    // Game::tick_all (see engine/lotus/game.cppm). We forward to FFXIGame's
-    // own tick first so zone/entity simulation still happens, then notify
-    // the managed side.
-    lotus::Task<> tick(lotus::time_point time, lotus::duration delta) override
+    if (!text)
     {
-        co_await FFXIGame::tick(time, delta);
-
-        if (tick_callback)
-        {
-            const double delta_seconds = std::chrono::duration<double>(delta).count();
-            tick_callback(delta_seconds, tick_user_data);
-        }
+        return std::nullopt;
     }
-};
+    return std::string{text};
+}
+
+std::string borrowOr(const char* text, const char* fallback)
+{
+    return text ? std::string{text} : std::string{fallback};
+}
 } // namespace
 
-struct PjGame
+/// The options are copied at create time and the link outlives every call, so
+/// the caller is free to release its own strings immediately and nothing here
+/// reaches back into managed memory.
+struct MhViewer
 {
-    lotus::Settings settings;
-    MogHouseGame game;
-
-    PjGame(std::string app_name, uint32_t app_version) : settings(make_settings(std::move(app_name), app_version)), game(settings) {}
-
-private:
-    static lotus::Settings make_settings(std::string app_name, uint32_t app_version)
-    {
-        lotus::Settings s;
-        s.app_name = std::move(app_name);
-        s.app_version = app_version;
-        return s;
-    }
+    mh::ViewerOptions options;
+    mh::ViewerLink link;
 };
 
-extern "C"
+extern "C" {
+
+MhViewerHandle mh_viewer_create(const MhViewerOptions* options)
 {
-    MH_API PjGameHandle mh_game_create(const char* app_name, uint32_t app_version)
+    if (!options)
     {
-        return new PjGame(app_name ? std::string(app_name) : std::string("MogHouse"), app_version);
+        return nullptr;
     }
 
-    MH_API void mh_game_destroy(PjGameHandle game)
+    auto* viewer = new MhViewer{};
+    viewer->options.zonePath = borrowOr(options->zone_path, "");
+    viewer->options.keyTablePath = borrowOr(options->key_table_path, "");
+    viewer->options.keyTable2Path = borrowOr(options->key_table2_path, "");
+    viewer->options.look = borrow(options->look);
+    viewer->options.characterAt = borrow(options->character_at);
+    viewer->options.characterFacing = borrow(options->character_facing);
+    if (options->time_of_day >= 0)
     {
-        delete game;
+        viewer->options.timeOfDay = options->time_of_day;
+    }
+    return viewer;
+}
+
+int32_t mh_viewer_run(MhViewerHandle viewer)
+{
+    if (!viewer)
+    {
+        return 2;
     }
 
-    MH_API void mh_game_set_tick_callback(PjGameHandle game, PjTickCallback callback, void* user_data)
+    // Nothing may cross this boundary as an exception. A C++ throw unwinding
+    // into managed code arrives as an opaque SEHException with no message,
+    // which turns "the key table path was wrong" into "external component has
+    // thrown an exception".
+    try
     {
-        game->game.tick_callback = callback;
-        game->game.tick_user_data = user_data;
+        return static_cast<int32_t>(mh::runViewer(viewer->options, &viewer->link));
     }
-
-    MH_API void mh_game_set_error_callback(PjGameHandle game, PjErrorCallback callback, void* user_data)
+    catch (const std::exception& error)
     {
-        game->game.error_callback = callback;
-        game->game.error_user_data = user_data;
+        std::fprintf(stderr, "renderer: %s\n", error.what());
+        std::fflush(stderr);
+        return 1;
     }
-
-    MH_API void mh_game_run(PjGameHandle game)
+    catch (...)
     {
-        // FFXIGame::run() (inherited from lotus::Game) blocks until
-        // engine->close() is called - see engine/lotus/engine.cppm. Any
-        // unhandled exception here is not yet routed to error_callback;
-        // that's the one real gap in this draft, left as a TODO because
-        // lotus::Engine::run()'s exception-handling behavior wasn't
-        // confirmed by reading the .cpp (only the .cppm interface was
-        // available to inspect).
-        game->game.run();
-    }
-
-    MH_API void mh_game_close(PjGameHandle game)
-    {
-        game->game.engine->close();
+        std::fprintf(stderr, "renderer: unknown failure\n");
+        std::fflush(stderr);
+        return 1;
     }
 }
+
+void mh_viewer_set_entities(MhViewerHandle viewer, const MhRadarEntity* entities, int32_t count)
+{
+    if (!viewer)
+    {
+        return;
+    }
+
+    std::vector<mh::RadarEntity> copied;
+    if (entities && count > 0)
+    {
+        copied.reserve(static_cast<size_t>(count));
+        for (int32_t i = 0; i < count; ++i)
+        {
+            copied.push_back(mh::RadarEntity{entities[i].x, entities[i].z, entities[i].kind});
+        }
+    }
+    viewer->link.setEntities(std::move(copied));
+}
+
+void mh_viewer_stop(MhViewerHandle viewer)
+{
+    if (viewer)
+    {
+        viewer->link.stop();
+    }
+}
+
+void mh_viewer_destroy(MhViewerHandle viewer) { delete viewer; }
+
+} // extern "C"

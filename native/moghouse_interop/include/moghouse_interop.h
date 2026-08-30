@@ -1,11 +1,12 @@
-// C ABI boundary between the lotus-ffxi/lotus-engine C++ core and the
-// MogHouse.Core C# game-logic layer. Plain C so either side can be
-// consumed without a C++ toolchain.
+// The C ABI between the MogHouse renderer and the C# client.
 //
-// NOT YET BUILD-VERIFIED. See ../README.md for the open CMake question
-// (the `ffxi` CMake target in ffxi-engine owns its module sources via a
-// FILE_SET, so this header's implementation can't just target_link_libraries
-// against it yet) and for the other assumptions this design makes.
+// MogHouse ships as one application. The renderer is C++ because the asset
+// pipeline is; the game logic is C# because the protocol work is. This is the
+// seam, and it is plain C so neither side needs the other's toolchain.
+//
+// Deliberately narrow. Everything the client has to say to the renderer today
+// is "open this zone", "here is what is nearby" and "please close". Anything
+// wider would be guessing at what the two halves will want of each other.
 #ifndef MOGHOUSE_INTEROP_H
 #define MOGHOUSE_INTEROP_H
 
@@ -21,33 +22,64 @@ extern "C" {
 #define MH_API __attribute__((visibility("default")))
 #endif
 
-typedef struct PjGame* PjGameHandle;
+typedef struct MhViewer* MhViewerHandle;
 
-// Called once per frame from the engine's own main-loop thread (see
-// mh_game_run below), after the engine's internal tick has run. Must return
-// quickly - do real game-logic work on another thread and use this only to
-// hand off timing/signals.
-typedef void (*PjTickCallback)(double delta_seconds, void* user_data);
+/// Kinds match MogHouse.Core's FfxiEntityKind, so the C# side can cast.
+enum
+{
+    MH_ENTITY_PLAYER = 0,
+    MH_ENTITY_NPC = 1,
+    MH_ENTITY_ENEMY = 2
+};
 
-// Called if the engine hits an unhandled exception in a tick. `message` is
-// only valid for the duration of the call - copy it if you need to keep it.
-typedef void (*PjErrorCallback)(const char* message, void* user_data);
+/// One thing on the radar, in world coordinates. Height is not carried: the
+/// radar is a plan view, and a dot above you is still a dot.
+typedef struct MhRadarEntity
+{
+    float x;
+    float z;
+    int32_t kind;
+} MhRadarEntity;
 
-// Creates a game instance. Does not start the engine loop.
-MH_API PjGameHandle mh_game_create(const char* app_name, uint32_t app_version);
-MH_API void mh_game_destroy(PjGameHandle game);
+/// What to open. Every string is borrowed for the duration of the create call
+/// and copied, so the caller may free them straight afterwards. A null string
+/// means "not set", which for several of these is different from empty.
+typedef struct MhViewerOptions
+{
+    const char* zone_path;
+    const char* key_table_path;
+    const char* key_table2_path;
 
-MH_API void mh_game_set_tick_callback(PjGameHandle game, PjTickCallback callback, void* user_data);
-MH_API void mh_game_set_error_callback(PjGameHandle game, PjErrorCallback callback, void* user_data);
+    /// "race,face,head,body,hands,legs,feet", or null for no character.
+    const char* look;
 
-// Blocking - runs the engine's main loop on the calling thread until
-// mh_game_close() is observed. Call this from a dedicated background thread
-// on the managed side; never from a UI thread.
-MH_API void mh_game_run(PjGameHandle game);
+    /// "x,y,z" to stand the character at, or null to pick somewhere.
+    const char* character_at;
 
-// Signals the running loop to stop after the current frame. Safe to call
-// from any thread, including from within a PjTickCallback.
-MH_API void mh_game_close(PjGameHandle game);
+    /// Compass degrees, or null.
+    const char* character_facing;
+
+    /// Vana'diel clock as hhmm, or -1 to let the day run.
+    int32_t time_of_day;
+} MhViewerOptions;
+
+/// Creates a viewer. Does not open a window - see mh_viewer_run.
+MH_API MhViewerHandle mh_viewer_create(const MhViewerOptions* options);
+
+/// Opens the window and runs until it closes. Blocking, and it owns the event
+/// loop while it runs, so callers give it a thread of its own. Returns a
+/// process-style exit code: 0 for a clean close.
+MH_API int32_t mh_viewer_run(MhViewerHandle viewer);
+
+/// Replaces what the radar shows. Safe to call from another thread while
+/// mh_viewer_run is going, which is the point of the whole file.
+MH_API void mh_viewer_set_entities(MhViewerHandle viewer, const MhRadarEntity* entities, int32_t count);
+
+/// Asks a running viewer to close. mh_viewer_run returns shortly after.
+MH_API void mh_viewer_stop(MhViewerHandle viewer);
+
+/// Frees the viewer. Stop it and let mh_viewer_run return first.
+MH_API void mh_viewer_destroy(MhViewerHandle viewer);
 
 #ifdef __cplusplus
 }

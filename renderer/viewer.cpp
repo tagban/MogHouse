@@ -369,7 +369,23 @@ bool writeBmp(const char* path, const uint8_t* bgra, uint32_t width, uint32_t he
 }
 } // namespace
 
-int mh::runViewer(const ViewerOptions& options)
+void mh::ViewerLink::setEntities(std::vector<RadarEntity> entities)
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+    entities_ = std::move(entities);
+}
+
+std::vector<mh::RadarEntity> mh::ViewerLink::entities() const
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+    return entities_;
+}
+
+void mh::ViewerLink::stop() { stop_ = true; }
+
+bool mh::ViewerLink::stopping() const { return stop_; }
+
+int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
 
@@ -1553,6 +1569,18 @@ int mh::runViewer(const ViewerOptions& options)
 
         // A capture walks the animation a frame at a time; otherwise the clock
         // is either pinned or real.
+        // Whatever the client has posted since the last frame. Copied out
+        // under the lock rather than read in place, so a long draw never holds
+        // up the thread feeding it.
+        if (link)
+        {
+            radarEntities = link->entities();
+            if (link->stopping())
+            {
+                running = false;
+            }
+        }
+
         const float animationSeconds =
             sequenceCount > 0 && playing ? static_cast<float>(std::max(shotIndex, 0)) * playing->frameSeconds()
             : pinnedFrame >= 0.0f && playing

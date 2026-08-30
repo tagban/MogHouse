@@ -77,6 +77,11 @@ add_library(ffxi-dat STATIC
 )
 target_include_directories(ffxi-dat PUBLIC ffxi)
 
+# The C ABI shim, so the C# client can load the renderer instead of talking to
+# a second process. Lives outside renderer/ because it is the boundary, not the
+# renderer.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../native/moghouse_interop moghouse_interop)
+
 add_executable(ffxi-datdump ffxi/datdump_main.cpp)
 target_link_libraries(ffxi-datdump PRIVATE ffxi-dat)
 

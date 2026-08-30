@@ -1,0 +1,221 @@
+using System.Reflection;
+using System.Runtime.InteropServices;
+
+namespace MogHouse.Core.Interop;
+
+/// <summary>What the radar shows, in world coordinates.</summary>
+/// <remarks>
+/// Blittable and laid out to match MhRadarEntity, so an array of these crosses
+/// the boundary as a pointer with no marshalling.
+/// </remarks>
+[StructLayout(LayoutKind.Sequential)]
+public struct NativeRadarEntity
+{
+    public float X;
+    public float Z;
+
+    /// <summary>Cast from <see cref="Ffxi.FfxiEntityKind"/>; the values match.</summary>
+    public int Kind;
+}
+
+/// <summary>What to open the viewer on.</summary>
+public sealed record NativeViewerOptions
+{
+    public required string ZonePath { get; init; }
+    public required string KeyTablePath { get; init; }
+    public required string KeyTable2Path { get; init; }
+
+    /// <summary>"race,face,head,body,hands,legs,feet", or null for no character.</summary>
+    public string? Look { get; init; }
+
+    /// <summary>"x,y,z", or null to let the viewer pick somewhere standable.</summary>
+    public string? CharacterAt { get; init; }
+
+    /// <summary>Compass degrees.</summary>
+    public string? CharacterFacing { get; init; }
+
+    /// <summary>Vana'diel clock as hhmm, or null to let the day run.</summary>
+    public int? TimeOfDay { get; init; }
+}
+
+/// <summary>
+/// The renderer, loaded into this process rather than run as a second one.
+///
+/// MogHouse ships as a single application, so the client owns the renderer
+/// rather than talking to it. <see cref="Run"/> blocks and owns the window and
+/// its event loop, so it wants a thread of its own; everything else here is
+/// safe to call from another one while it runs.
+/// </summary>
+public sealed partial class NativeViewer : IDisposable
+{
+    private const string LibraryName = "moghouse_interop";
+
+    private IntPtr _handle;
+    private bool _disposed;
+
+    static NativeViewer()
+    {
+        // The native library sits with the renderer build rather than beside
+        // the managed assemblies, and it needs Dawn and SDL from that same
+        // directory. Resolving it explicitly beats copying four DLLs around
+        // and getting one of them stale.
+        NativeLibrary.SetDllImportResolver(typeof(NativeViewer).Assembly, Resolve);
+    }
+
+    private static IntPtr Resolve(string name, Assembly assembly, DllImportSearchPath? path)
+    {
+        if (name != LibraryName)
+        {
+            return IntPtr.Zero;
+        }
+
+        foreach (string directory in SearchDirectories())
+        {
+            string candidate = Path.Combine(directory, OperatingSystem.IsWindows()
+                ? $"{LibraryName}.dll"
+                : OperatingSystem.IsMacOS() ? $"lib{LibraryName}.dylib" : $"lib{LibraryName}.so");
+
+            if (File.Exists(candidate) && NativeLibrary.TryLoad(candidate, out IntPtr loaded))
+            {
+                return loaded;
+            }
+        }
+
+        // Fall through to the default search, which is right once everything
+        // is published into one directory.
+        return IntPtr.Zero;
+    }
+
+    private static IEnumerable<string> SearchDirectories()
+    {
+        if (Environment.GetEnvironmentVariable("MOGHOUSE_NATIVE_DIR") is { Length: > 0 } configured)
+        {
+            yield return configured;
+        }
+
+        yield return AppContext.BaseDirectory;
+
+        // The development layout: the renderer builds into build-renderer at
+        // the repository root, which is several levels above bin/Debug/net10.0.
+        string? walk = AppContext.BaseDirectory;
+        for (int i = 0; i < 6 && walk is not null; i++)
+        {
+            yield return Path.Combine(walk, "build-renderer", "moghouse_interop");
+            walk = Path.GetDirectoryName(walk.TrimEnd(Path.DirectorySeparatorChar));
+        }
+    }
+
+    public NativeViewer(NativeViewerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        // Every string is copied on the native side during the create call, so
+        // these can be freed the moment it returns.
+        IntPtr zone = Utf8(options.ZonePath);
+        IntPtr keys = Utf8(options.KeyTablePath);
+        IntPtr keys2 = Utf8(options.KeyTable2Path);
+        IntPtr look = Utf8(options.Look);
+        IntPtr at = Utf8(options.CharacterAt);
+        IntPtr facing = Utf8(options.CharacterFacing);
+
+        try
+        {
+            Options native = new()
+            {
+                ZonePath = zone,
+                KeyTablePath = keys,
+                KeyTable2Path = keys2,
+                Look = look,
+                CharacterAt = at,
+                CharacterFacing = facing,
+                TimeOfDay = options.TimeOfDay ?? -1,
+            };
+
+            _handle = mh_viewer_create(in native);
+            if (_handle == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("the renderer refused to start");
+            }
+        }
+        finally
+        {
+            foreach (IntPtr held in new[] { zone, keys, keys2, look, at, facing })
+            {
+                if (held != IntPtr.Zero)
+                {
+                    Marshal.FreeCoTaskMem(held);
+                }
+            }
+        }
+    }
+
+    /// <summary>Opens the window and runs until it closes. Blocking.</summary>
+    public int Run()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return mh_viewer_run(_handle);
+    }
+
+    /// <summary>Replaces what the radar shows. Safe to call while Run is going.</summary>
+    public void SetEntities(ReadOnlySpan<NativeRadarEntity> entities)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+        mh_viewer_set_entities(_handle, entities, entities.Length);
+    }
+
+    /// <summary>Asks the viewer to close. Run returns shortly afterwards.</summary>
+    public void Stop()
+    {
+        if (!_disposed)
+        {
+            mh_viewer_stop(_handle);
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+        _disposed = true;
+
+        if (_handle != IntPtr.Zero)
+        {
+            mh_viewer_destroy(_handle);
+            _handle = IntPtr.Zero;
+        }
+    }
+
+    private static IntPtr Utf8(string? text) => text is null ? IntPtr.Zero : Marshal.StringToCoTaskMemUTF8(text);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Options
+    {
+        public IntPtr ZonePath;
+        public IntPtr KeyTablePath;
+        public IntPtr KeyTable2Path;
+        public IntPtr Look;
+        public IntPtr CharacterAt;
+        public IntPtr CharacterFacing;
+        public int TimeOfDay;
+    }
+
+    [LibraryImport(LibraryName)]
+    private static partial IntPtr mh_viewer_create(in Options options);
+
+    [LibraryImport(LibraryName)]
+    private static partial int mh_viewer_run(IntPtr viewer);
+
+    [LibraryImport(LibraryName)]
+    private static partial void mh_viewer_set_entities(IntPtr viewer, ReadOnlySpan<NativeRadarEntity> entities, int count);
+
+    [LibraryImport(LibraryName)]
+    private static partial void mh_viewer_stop(IntPtr viewer);
+
+    [LibraryImport(LibraryName)]
+    private static partial void mh_viewer_destroy(IntPtr viewer);
+}

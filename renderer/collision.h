@@ -51,6 +51,16 @@ public:
     std::optional<float> groundAt(float x, float z, float near,
                                   float maxDrop = std::numeric_limits<float>::max()) const;
 
+    /// The walkable surface closest to `y`, above or below, however far.
+    ///
+    /// This is what placing a character wants, and it is a different question
+    /// from what a step wants. groundAt answers "what can I step onto from
+    /// here", which is bounded by the step height on purpose - ask it to place
+    /// a character whose requested height is a couple of units under the floor
+    /// they belong on and it will refuse that floor and drop them through the
+    /// world instead.
+    std::optional<float> closestGroundAt(float x, float z, float y) const;
+
     /// The nearest point with ground under it, searching outward from (x, z).
     ///
     /// A zone's bounding box is a rectangle and the zone is not, so an obvious

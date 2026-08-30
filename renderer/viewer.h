@@ -11,7 +11,9 @@
 // this - it is how the renderer gets exercised without the client, which is
 // worth keeping.
 
+#include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -83,6 +85,36 @@ struct ViewerOptions
     float shaderMode{};
 };
 
+/// The live half of a running viewer: what a caller on another thread can
+/// change while it runs, and how to ask it to stop.
+///
+/// Deliberately tiny. Everything the client needs to say to the renderer today
+/// is "here is what is nearby" and "please close", and a narrow surface is what
+/// makes the C ABI over it worth having rather than a chore to maintain.
+///
+/// The viewer owns the window and the event loop on whatever thread calls
+/// runViewer, so every method here is safe to call from another one.
+class ViewerLink
+{
+public:
+    /// Replaces the radar contents. Wholesale rather than merged: the tracker
+    /// on the other side already answers "what can be seen right now", and
+    /// merging here would mean two places deciding when something has gone.
+    void setEntities(std::vector<RadarEntity> entities);
+
+    /// A copy, so the render loop is never holding the lock while it draws.
+    std::vector<RadarEntity> entities() const;
+
+    /// Asks the viewer to close its window and return.
+    void stop();
+    bool stopping() const;
+
+private:
+    mutable std::mutex mutex_;
+    std::vector<RadarEntity> entities_;
+    std::atomic<bool> stop_{false};
+};
+
 /// Reads the options the standalone viewer has always taken: the zone from
 /// argv[1] and everything else from MOGHOUSE_* in the environment.
 ViewerOptions optionsFromEnvironment(int argc, char** argv);
@@ -92,5 +124,7 @@ ViewerOptions optionsFromEnvironment(int argc, char** argv);
 /// Blocking, and it owns the window and the event loop while it runs - the
 /// same shape the engine this replaced had. A caller that needs to keep doing
 /// its own work runs this on its own thread.
-int runViewer(const ViewerOptions& options);
+///
+/// `link`, if given, is how that caller feeds it afterwards.
+int runViewer(const ViewerOptions& options, ViewerLink* link = nullptr);
 } // namespace mh
