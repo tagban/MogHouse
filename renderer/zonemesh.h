@@ -28,10 +28,15 @@ struct Batch
     std::string texture; ///< empty means untextured, e.g. collision geometry
     uint32_t indexOffset{};
     uint32_t indexCount{};
-    /// From the mesh header. Bit 0x8000 marks the surfaces that want an alpha
-    /// cutout - foliage and the like - as against terrain, where alpha is a
-    /// blend factor and testing against it punches holes in the ground.
-    uint16_t blending{};
+    /// Whether to treat alpha as a cutout.
+    ///
+    /// Not from the mesh header: its blending field marks base against overlay
+    /// within a tile, and the same texture appears under both - sar_kk2 has 53
+    /// meshes at 0x0000 and 52 at 0x8000 - so it says nothing about
+    /// transparency. Orientation does separate them. Grass and foliage are
+    /// vertical billboards whose black background must be discarded; ground is
+    /// flat and its alpha is a blend factor, so testing it punches holes.
+    bool cutout{};
 };
 
 struct ZoneMesh

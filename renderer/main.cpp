@@ -539,6 +539,8 @@ int main(int argc, char** argv)
 
     const char* modeEnv = std::getenv("PORTJEUNO_SHADER_MODE");
     const float shaderMode = modeEnv ? static_cast<float>(std::atof(modeEnv)) : 0.0f;
+    const char* cutoutEnv = std::getenv("PORTJEUNO_CUTOUT");
+    const int cutoutMode = cutoutEnv ? std::atoi(cutoutEnv) : 2;
 
     uint64_t previousTicks = SDL_GetTicksNS();
     bool running = true;
@@ -684,7 +686,12 @@ int main(int argc, char** argv)
                 const pj::Batch& batch = zone->batches[i];
                 // 0x8000 marks the surfaces that want a cutout. Terrain does
                 // not, and testing its alpha removes most of the ground.
-                const bool cutout = (batch.blending & 0x8000) != 0;
+                // cutoutMode: 0 never cuts out, 1 always, otherwise the
+                // mesh's own 0x8000 bit decides. The override exists because
+                // which surfaces want a cutout is still not settled.
+                const bool cutout = cutoutMode == 0   ? false
+                                    : cutoutMode == 1 ? true
+                                                      : batch.cutout;
                 pass.SetPipeline(cutout ? cutoutPipeline : pipeline);
                 pass.SetBindGroup(0, batchBindGroups[i]);
                 pass.DrawIndexed(batch.indexCount, 1, batch.indexOffset);

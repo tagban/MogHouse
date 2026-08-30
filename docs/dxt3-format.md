@@ -74,12 +74,25 @@ Testing against alpha on those removes most of the ground and leaves a
 checkerboard of holes. The colour is meaningful everywhere, so terrain is simply
 drawn opaque and its alpha ignored.
 
-Which surfaces do want a cutout comes from **the mesh header's `blending`
-field**, not from the texture: bit `0x8000` is set on 212 of a zone's 480
-meshes, and those are the ones - foliage and similar - that need discarding.
-Without the split, one choice is wrong for half the world either way: cut out
-everything and the ground disappears, cut out nothing and every tree is a black
-rectangle.
+Which surfaces want a cutout is **not** in the mesh header. `blending` marks base
+against overlay within a tile, and the same texture appears under both flags -
+`sar_kk2` has 53 meshes at `0x0000` and 52 at `0x8000` - so it says nothing about
+transparency.
+
+What separates them is **orientation, measured from the triangles**. Foliage is
+vertical billboards whose black background must be discarded; ground is flat and
+its alpha is a blend factor, so testing it punches holes.
+
+The measurement has to come from the geometry, not the stored normals. **Grass
+billboards carry normals pointing straight up** - the usual trick so they light
+like the ground they stand on rather than edge-on - so by stored normal they read
+as flat and get treated as terrain, leaving their black backgrounds undiscarded.
+Face normals computed from the triangle positions give the right answer.
+
+This is a heuristic, not something the format states. It should misfire on a
+vertical surface that genuinely wants opaque alpha - a wall or cliff face with
+alpha-zero regions - so holes in a rock wall would be this rule rather than a new
+bug.
 
 ## Still to work out
 

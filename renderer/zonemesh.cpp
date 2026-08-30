@@ -14,6 +14,11 @@ namespace
 /// the distances a zone spans.
 constexpr float kLayerSeparation = 0.004f;
 
+/// Below this average |face normal .y| a mesh counts as standing up rather than
+/// lying flat. Taken from the triangles rather than the stored normals, which
+/// grass billboards deliberately point upward.
+constexpr float kUprightThreshold = 0.5f;
+
 struct Bounds
 {
     Vec3 lo{std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
@@ -133,7 +138,7 @@ ZoneMesh buildPlacedMesh(const ffxi::Zone& zone, const std::unordered_map<std::s
     };
     // Keyed by texture and blending together: one draw needs both a single
     // texture and a single alpha treatment.
-    std::map<std::pair<std::string, uint16_t>, Group> groups;
+    std::map<std::pair<std::string, bool>, Group> groups;
     Bounds bounds;
 
     for (const ffxi::Placement& placement : zone.placements)
@@ -152,7 +157,35 @@ ZoneMesh buildPlacedMesh(const ffxi::Zone& zone, const std::unordered_map<std::s
         uint32_t meshIndex = 0;
         for (const ffxi::ModelMesh& mesh : found->second.meshes)
         {
-            Group& group = groups[{mesh.texture, mesh.blending}];
+            // A mesh standing up is foliage; one lying flat is ground.
+            //
+            // Measured from the triangles, not from the stored normals. Grass
+            // billboards carry normals pointing straight up - the usual trick so
+            // they light like the ground they stand on rather than edge-on - so
+            // by stored normal they look flat and get treated as terrain, which
+            // leaves their black background undiscarded. The geometry does not
+            // lie about which way a quad faces.
+            float verticality = 0.0f;
+            uint32_t faces = 0;
+            for (size_t i = 0; i + 2 < mesh.indices.size(); i += 3)
+            {
+                const uint16_t ia = mesh.indices[i], ib = mesh.indices[i + 1], ic = mesh.indices[i + 2];
+                if (ia >= mesh.vertices.size() || ib >= mesh.vertices.size() || ic >= mesh.vertices.size())
+                {
+                    continue;
+                }
+                const float* pa = mesh.vertices[ia].position;
+                const float* pb = mesh.vertices[ib].position;
+                const float* pc = mesh.vertices[ic].position;
+                const Vec3 face = normalise(cross(Vec3{pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]},
+                                                  Vec3{pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]}));
+                verticality += std::fabs(face.y);
+                ++faces;
+            }
+            verticality = faces ? verticality / static_cast<float>(faces) : 1.0f;
+            const bool cutout = verticality < kUprightThreshold;
+
+            Group& group = groups[{mesh.texture, cutout}];
             const uint32_t base = static_cast<uint32_t>(group.vertices.size());
 
             // A model's meshes are layered and coplanar - a base surface with
