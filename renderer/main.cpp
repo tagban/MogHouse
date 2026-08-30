@@ -801,6 +801,8 @@ int main(int argc, char** argv)
             uniforms.eye[0] = eyePoint.x;
             uniforms.eye[1] = eyePoint.y;
             uniforms.eye[2] = eyePoint.z;
+            // Seconds since start, for the water surface.
+            uniforms.eye[3] = static_cast<float>(SDL_GetTicksNS() / 1000000ull) / 1000.0f;
 
             // With no lighting data, fall back to a plain lit look rather than
             // a black zone.
