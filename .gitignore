@@ -37,3 +37,6 @@ build-dawn
 /build-renderer
 # Derived index of the local retail install - regenerable, install-specific
 /ffxi-index.json
+
+# Key tables lifted from the retail client - regenerate with tools/keytables.py
+/keys/

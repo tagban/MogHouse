@@ -92,6 +92,24 @@ Those heights match the game, which is the check that matters: nothing in the
 files states them, so they can only come out right if the bone chain, the
 skinning and the mirroring are all correct together.
 
+## Running it
+
+The MZB and MMB readers need two 256-byte key tables taken from the retail
+client, so they are not committed. Generate them from the `ffxi-engine`
+submodule once:
+
+```
+python tools/keytables.py
+```
+
+Then, with the retail install present:
+
+```
+PORTJEUNO_FFXI_KEYTABLE=keys/mzb_key_table.bin PORTJEUNO_FFXI_KEYTABLE2=keys/mmb_key_table2.bin PORTJEUNO_LOOK=1,0,0,1,1,1,1 PORTJEUNO_ANIMATION=wlk0   build-renderer/portjeuno-renderer "<install>/ROM/1/0.DAT"
+```
+
+`ROM/1/0.DAT` is East Sarutabaruta. Any zone DAT works.
+
 ## Driving it
 
 | variable | meaning |
