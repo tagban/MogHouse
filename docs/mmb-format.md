@@ -53,9 +53,22 @@ into a zone's asset list.
 ## LOD
 
 Names end in `_h`, `_m` or `_l` - high, medium and low detail. `_sal_w01_h`,
-`_sal_w01_m` and `_sal_w01_l` are three versions of one object, so a renderer
-gets to choose, and a naive one that draws all three will draw everything three
-times.
+`_sal_w01_m` and `_sal_w01_l` are three versions of one object.
+
+**The placement data picks which one.** Measured across East Sarutabaruta: of
+4,918 placements, 4,321 name a `_m` model and 33 name a `_h` one, and of the 82
+objects that have LOD variants at all, **none is placed at more than one**. So a
+renderer draws what it is told and needs no distance policy for static geometry,
+and the fear that a naive renderer would draw everything three times does not
+arise - at least here.
+
+Worth re-checking on a zone built for a later expansion before treating it as
+universal.
+
+## Asset reuse
+
+Those 4,918 placements resolve to **98 distinct models** - about 50 uses each.
+Repetition across a zone is how the game is built, not a bug in the reader.
 
 ## Mesh data
 
