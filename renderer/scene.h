@@ -38,6 +38,12 @@ struct Scene
     std::vector<float> instances;   ///< 16 floats per placement, column major
     std::vector<InstancedDraw> draws;
 
+    /// Water surfaces, as flat quads. Not instanced - each cell's plane is its
+    /// own rectangle - and not placed by the placement table: water comes from a
+    /// height carried on each collision grid entry.
+    std::vector<Vertex> waterVertices;
+    std::vector<uint32_t> waterIndices;
+
     Vec3 boundsMin{};
     Vec3 boundsMax{};
 

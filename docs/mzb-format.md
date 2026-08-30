@@ -131,3 +131,26 @@ predicts.
   neither per-vertex nor per-triangle
 - What the four floats at offset 52 of a placement select
 - The `0x1C`-typed chunks appear twice in some DATs (`24.DAT` has two zones)
+
+## Water
+
+Water is not placed by the placement table - the models exist in the DAT and
+nothing references them. It comes from a **height carried on each collision grid
+entry**, 164 bytes into the entry's placement block, as fixed point:
+
+```
+height = ((packed << 6) >> 10) / 1024.0
+```
+
+The shifts drop the top six and bottom four bits, which carry something else.
+Zero means no water over that cell.
+
+East Sarutabaruta has water on 9,291 of 49,128 cells at heights -27 to 25;
+Bastok Markets on 4,664 of 10,844 at -4 to 8. So it is a large part of a zone
+rather than an occasional feature.
+
+The surface is a flat plane at that height covering the cell, **not** the
+collision mesh translated upward - lotus leaves a TODO saying exactly that. The
+renderer builds one quad per cell spanning where that cell's geometry reaches.
+
+No water texture is stored anywhere; lotus generates one procedurally.

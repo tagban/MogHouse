@@ -250,6 +250,24 @@ int main(int argc, char** argv)
                         hi[axis] = std::max(hi[axis], instance.transform[12 + axis]);
                     }
                 }
+                size_t withWater = 0;
+                float waterLo = 1e30f;
+                float waterHi = -1e30f;
+                for (const ffxi::CollisionInstance& instance : zone.instances)
+                {
+                    if (instance.waterHeight != 0.0f)
+                    {
+                        ++withWater;
+                        waterLo = std::min(waterLo, instance.waterHeight);
+                        waterHi = std::max(waterHi, instance.waterHeight);
+                    }
+                }
+                if (withWater)
+                {
+                    std::printf("  water: %zu of %zu instances, heights %.1f to %.1f\n", withWater,
+                                zone.instances.size(), waterLo, waterHi);
+                }
+
                 if (!zone.instances.empty())
                 {
                     std::printf("  instance origins  x %.1f..%.1f  y %.1f..%.1f  z %.1f..%.1f\n",

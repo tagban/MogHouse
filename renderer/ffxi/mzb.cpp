@@ -237,6 +237,12 @@ Zone parseMzb(const Chunk& chunk, const KeyTable& keys)
 
                 CollisionInstance instance{};
                 instance.mesh = found->second;
+
+                // Fixed point with the top six and bottom four bits carrying
+                // something else: shift left to put the sign where it belongs,
+                // then back plus four to drop the low bits.
+                const int32_t packed = read<int32_t>(buffer, placementOffset + 164);
+                instance.waterHeight = static_cast<float>((packed << 6) >> 10) / 1024.0f;
                 // Straight copy, no transpose. Transposing puts elements 3, 7
                 // and 11 - the constant (0,0,0,1) column - into the translation
                 // slot, which reads as every instance sitting exactly on the

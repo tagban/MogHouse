@@ -18,6 +18,7 @@
 #include "scene.h"
 #include "surface.h"
 #include "sky_shader.h"
+#include "water_shader.h"
 #include "zone_shader.h"
 #include "zonemesh.h"
 
@@ -380,6 +381,11 @@ int main(int argc, char** argv)
     wgpu::Buffer vertexBuffer;
     wgpu::Buffer indexBuffer;
     wgpu::Buffer instanceBuffer;
+    wgpu::Buffer waterVertexBuffer;
+    wgpu::Buffer waterIndexBuffer;
+    wgpu::RenderPipeline waterPipeline;
+    wgpu::BindGroup waterBindGroup;
+    uint32_t waterIndexCount = 0;
     wgpu::Buffer uniformBuffer;
     wgpu::RenderPipeline pipeline;
     wgpu::RenderPipeline cutoutPipeline;
@@ -488,6 +494,60 @@ int main(int argc, char** argv)
 
         whiteTexture = pj::createWhiteTexture(device);
         const wgpu::TextureView whiteView = whiteTexture.CreateView();
+
+        if (!zone->waterIndices.empty())
+        {
+            waterVertexBuffer = createBuffer(device, zone->waterVertices.data(),
+                                             zone->waterVertices.size() * sizeof(pj::Vertex), wgpu::BufferUsage::Vertex);
+            waterIndexBuffer = createBuffer(device, zone->waterIndices.data(),
+                                            zone->waterIndices.size() * sizeof(uint32_t), wgpu::BufferUsage::Index);
+            waterIndexCount = static_cast<uint32_t>(zone->waterIndices.size());
+
+            wgpu::ShaderSourceWGSL waterWgsl;
+            waterWgsl.code = pj::kWaterShader;
+            wgpu::ShaderModuleDescriptor waterModuleDescriptor{.nextInChain = &waterWgsl};
+            wgpu::ShaderModule waterModule = device.CreateShaderModule(&waterModuleDescriptor);
+
+            // Blended, and writing no depth: water is a surface you see through,
+            // and letting it write depth hides whatever is under it.
+            wgpu::BlendState waterBlend{};
+            waterBlend.color.operation = wgpu::BlendOperation::Add;
+            waterBlend.color.srcFactor = wgpu::BlendFactor::SrcAlpha;
+            waterBlend.color.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
+            waterBlend.alpha.operation = wgpu::BlendOperation::Add;
+            waterBlend.alpha.srcFactor = wgpu::BlendFactor::One;
+            waterBlend.alpha.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
+
+            wgpu::ColorTargetState waterTarget{.format = surfaceFormat, .blend = &waterBlend};
+            wgpu::FragmentState waterFragment{
+                .module = waterModule, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &waterTarget};
+            wgpu::DepthStencilState waterDepth{.format = kDepthFormat,
+                                               .depthWriteEnabled = wgpu::OptionalBool::False,
+                                               .depthCompare = wgpu::CompareFunction::Less};
+
+            wgpu::BindGroupLayoutEntry waterLayoutEntry{};
+            waterLayoutEntry.binding = 0;
+            waterLayoutEntry.visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+            waterLayoutEntry.buffer.type = wgpu::BufferBindingType::Uniform;
+            wgpu::BindGroupLayoutDescriptor waterBglDescriptor{.entryCount = 1, .entries = &waterLayoutEntry};
+            wgpu::BindGroupLayout waterBgl = device.CreateBindGroupLayout(&waterBglDescriptor);
+            wgpu::PipelineLayoutDescriptor waterPlDescriptor{.bindGroupLayoutCount = 1, .bindGroupLayouts = &waterBgl};
+            wgpu::PipelineLayout waterPl = device.CreatePipelineLayout(&waterPlDescriptor);
+
+            wgpu::RenderPipelineDescriptor waterPipelineDescriptor{
+                .layout = waterPl,
+                .vertex = {.module = waterModule, .entryPoint = "vertexMain", .bufferCount = 1, .buffers = &vertexLayout},
+                .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
+                .depthStencil = &waterDepth,
+                .fragment = &waterFragment};
+            waterPipeline = device.CreateRenderPipeline(&waterPipelineDescriptor);
+
+            wgpu::BindGroupEntry waterEntry{.binding = 0, .buffer = uniformBuffer, .size = sizeof(Uniforms)};
+            wgpu::BindGroupDescriptor waterBgDescriptor{.layout = waterBgl, .entryCount = 1, .entries = &waterEntry};
+            waterBindGroup = device.CreateBindGroup(&waterBgDescriptor);
+
+            std::printf("water: %zu quads\n", zone->waterIndices.size() / 6);
+        }
 
         std::unordered_map<std::string, wgpu::TextureView> uploadedViews;
         size_t uploaded = 0;
@@ -769,6 +829,15 @@ int main(int argc, char** argv)
                 pass.SetPipeline(cutout ? cutoutPipeline : pipeline);
                 pass.SetBindGroup(0, batchBindGroups[i]);
                 pass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
+            }
+
+            if (waterIndexCount && waterPipeline)
+            {
+                pass.SetPipeline(waterPipeline);
+                pass.SetBindGroup(0, waterBindGroup);
+                pass.SetVertexBuffer(0, waterVertexBuffer);
+                pass.SetIndexBuffer(waterIndexBuffer, wgpu::IndexFormat::Uint32);
+                pass.DrawIndexed(waterIndexCount);
             }
         }
 

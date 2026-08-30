@@ -171,6 +171,66 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
         }
     }
 
+    // Water. Each collision grid entry carries the height of the water over its
+    // cell, and lotus notes in passing that the surface should be a flat plane
+    // rather than a translated copy of the collision mesh - so that is what this
+    // builds: one quad per cell, spanning where that cell's geometry reaches.
+    for (const ffxi::CollisionInstance& instance : zone.instances)
+    {
+        if (instance.waterHeight == 0.0f || instance.mesh >= zone.collision.size())
+        {
+            continue;
+        }
+        const ffxi::CollisionMesh& mesh = zone.collision[instance.mesh];
+        if (mesh.vertices.size() < 3)
+        {
+            continue;
+        }
+
+        float minX = std::numeric_limits<float>::max();
+        float maxX = std::numeric_limits<float>::lowest();
+        float minZ = std::numeric_limits<float>::max();
+        float maxZ = std::numeric_limits<float>::lowest();
+        for (size_t v = 0; v + 2 < mesh.vertices.size(); v += 3)
+        {
+            const Vec3 world = transformPoint(instance.transform,
+                                              {mesh.vertices[v], mesh.vertices[v + 1], mesh.vertices[v + 2]});
+            minX = std::min(minX, world.x);
+            maxX = std::max(maxX, world.x);
+            minZ = std::min(minZ, world.z);
+            maxZ = std::max(maxZ, world.z);
+        }
+        if (maxX <= minX || maxZ <= minZ)
+        {
+            continue;
+        }
+
+        // Y is negated on the way out, as everywhere else.
+        const float y = -instance.waterHeight;
+        const uint32_t base = static_cast<uint32_t>(scene.waterVertices.size());
+        const float corners[4][2] = {{minX, minZ}, {maxX, minZ}, {maxX, maxZ}, {minX, maxZ}};
+        for (const auto& corner : corners)
+        {
+            Vertex vertex{};
+            vertex.position[0] = corner[0];
+            vertex.position[1] = y;
+            vertex.position[2] = corner[1];
+            vertex.normal[1] = 1.0f;
+            // Tiled generously so a ripple texture would repeat rather than
+            // stretch across a whole cell.
+            vertex.uv[0] = corner[0] * 0.05f;
+            vertex.uv[1] = corner[1] * 0.05f;
+            scene.waterVertices.push_back(vertex);
+
+            lo = {std::min(lo.x, vertex.position[0]), std::min(lo.y, y), std::min(lo.z, vertex.position[2])};
+            hi = {std::max(hi.x, vertex.position[0]), std::max(hi.y, y), std::max(hi.z, vertex.position[2])};
+        }
+        for (uint32_t index : {0u, 1u, 2u, 0u, 2u, 3u})
+        {
+            scene.waterIndices.push_back(base + index);
+        }
+    }
+
     scene.boundsMin = lo;
     scene.boundsMax = hi;
     return scene;

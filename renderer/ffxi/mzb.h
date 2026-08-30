@@ -59,6 +59,11 @@ struct CollisionInstance
 {
     float transform[16]; // column major, ready for a shader
     uint32_t mesh{};
+
+    /// Height of the water surface over this cell, or 0 for none. Water is not
+    /// placed by the placement table - the models exist but nothing references
+    /// them - it is a plane at this height covering the cell.
+    float waterHeight{};
 };
 
 /// A parsed MZB chunk.
