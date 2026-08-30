@@ -241,6 +241,84 @@ std::optional<float> Collision::groundAt(float x, float z, float near) const
     return best;
 }
 
+std::vector<uint8_t> Collision::rasteriseWalkable(uint32_t size, const Vec3& centre, float halfExtent) const
+{
+    std::vector<uint8_t> mask(static_cast<size_t>(size) * size, 0);
+    if (triangles_.empty() || size == 0 || halfExtent <= 0.0f)
+    {
+        return mask;
+    }
+
+    const float scale = static_cast<float>(size) / (halfExtent * 2.0f);
+    const float originX = centre.x - halfExtent;
+    const float originZ = centre.z - halfExtent;
+
+    for (const Triangle& triangle : triangles_)
+    {
+        if (!triangle.walkable)
+        {
+            continue;
+        }
+
+        // Into texel space. Only x and z matter - this is a plan view, and a
+        // ramp counts as ground wherever its footprint falls.
+        const float ax = (triangle.a.x - originX) * scale;
+        const float az = (triangle.a.z - originZ) * scale;
+        const float bx = (triangle.b.x - originX) * scale;
+        const float bz = (triangle.b.z - originZ) * scale;
+        const float cx = (triangle.c.x - originX) * scale;
+        const float cz = (triangle.c.z - originZ) * scale;
+
+        int minX = static_cast<int>(std::floor(std::min({ax, bx, cx})));
+        int maxX = static_cast<int>(std::ceil(std::max({ax, bx, cx})));
+        int minZ = static_cast<int>(std::floor(std::min({az, bz, cz})));
+        int maxZ = static_cast<int>(std::ceil(std::max({az, bz, cz})));
+
+        minX = std::max(minX, 0);
+        minZ = std::max(minZ, 0);
+        maxX = std::min(maxX, static_cast<int>(size) - 1);
+        maxZ = std::min(maxZ, static_cast<int>(size) - 1);
+        if (minX > maxX || minZ > maxZ)
+        {
+            continue;
+        }
+
+        const float area = (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
+        if (std::fabs(area) < 1e-9f)
+        {
+            continue;
+        }
+
+        for (int z = minZ; z <= maxZ; ++z)
+        {
+            for (int x = minX; x <= maxX; ++x)
+            {
+                const float px = static_cast<float>(x) + 0.5f;
+                const float pz = static_cast<float>(z) + 0.5f;
+
+                // Barycentric, with the winding folded into the sign of the
+                // area - collision winding is not consistent across a zone, so
+                // testing for "all positive" would drop half the triangles.
+                const float w0 = ((bz - cz) * (px - cx) + (cx - bx) * (pz - cz));
+                const float w1 = ((cz - az) * (px - cx) + (ax - cx) * (pz - cz));
+                const float d = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
+                if (std::fabs(d) < 1e-9f)
+                {
+                    continue;
+                }
+                const float u = w0 / d;
+                const float v = w1 / d;
+                if (u < 0.0f || v < 0.0f || u + v > 1.0f)
+                {
+                    continue;
+                }
+                mask[static_cast<size_t>(z) * size + x] = 255;
+            }
+        }
+    }
+    return mask;
+}
+
 std::optional<Vec3> Collision::nearestGround(float x, float z, float near, float maxRadius) const
 {
     if (const std::optional<float> here = groundAt(x, z, near))

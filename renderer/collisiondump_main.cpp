@@ -8,6 +8,7 @@
 #include "ffxi/mzb.h"
 
 #include <cmath>
+#include <vector>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -142,6 +143,32 @@ int main(int argc, char** argv)
         }
         std::printf("  %zu of %zu probes found ground (%.0f%%)\n", hits, probes,
                     100.0 * static_cast<double>(hits) / static_cast<double>(probes));
+
+        // The walkability mask, as a plain grey PGM - no encoder needed and
+        // anything can open it.
+        {
+            const float half = std::max(hi.x - lo.x, hi.z - lo.z) * 0.5f;
+            const mh::Vec3 middle{(lo.x + hi.x) * 0.5f, 0.0f, (lo.z + hi.z) * 0.5f};
+            constexpr uint32_t kSize = 1024;
+            const std::vector<uint8_t> mask = collision.rasteriseWalkable(kSize, middle, half);
+            size_t set = 0;
+            for (uint8_t value : mask)
+            {
+                set += value ? 1 : 0;
+            }
+            std::printf("  walkable mask: %zu of %zu texels (%.0f%%)\n", set, mask.size(),
+                        100.0 * static_cast<double>(set) / static_cast<double>(mask.size()));
+            if (const char* out = std::getenv("MOGHOUSE_MASK"))
+            {
+                if (std::FILE* file = std::fopen(out, "wb"))
+                {
+                    std::fprintf(file, "P5\n%u %u\n255\n", kSize, kSize);
+                    std::fwrite(mask.data(), 1, mask.size(), file);
+                    std::fclose(file);
+                    std::printf("  wrote %s\n", out);
+                }
+            }
+        }
 
         // Standing somewhere is not the same as being able to go anywhere. From
         // each spot with ground, try to walk ten units in four directions and
