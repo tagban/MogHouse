@@ -153,4 +153,18 @@ The surface is a flat plane at that height covering the cell, **not** the
 collision mesh translated upward - lotus leaves a TODO saying exactly that. The
 renderer builds one quad per cell spanning where that cell's geometry reaches.
 
-No water texture is stored anywhere; lotus generates one procedurally.
+Heights are discrete - East Sarutabaruta has 13 distinct values across 9,291
+cells, clean integers like -7, 1, 2, 25 - one per body of water. So a step
+between neighbouring cells is a real boundary between separate bodies, not a
+rounding artefact.
+
+Beware computing the height in Python: `(packed << 6) >> 10` relies on the left
+shift discarding the top bits at 32 bits, which Python's arbitrary-precision
+integers do not do. Without masking to 32 bits and sign-extending by hand it
+produces plausible-looking values in the thousands.
+
+**No water texture is stored anywhere** - lotus generates one procedurally, and
+so does this renderer. That means the *appearance* of water is invented: where
+it is and how high it sits come from the file, but the colour, wave pattern,
+fresnel and specular are all made up. Matching the retail look would be an
+exercise in comparing against screenshots, not in reading the format.
