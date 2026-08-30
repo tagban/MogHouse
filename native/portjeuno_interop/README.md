@@ -83,3 +83,34 @@ reference usage is safer to copy than inventing a different lifecycle.
    not a registered gitlink) is still unresolved - hit a local permission
    error cloning it tonight, unrelated to anything above. Not blocking this
    design.
+
+---
+
+## Superseded, 2026-08-29
+
+**Do not compile this to validate it - the architecture it is built on has been
+abandoned.**
+
+This design drives `lotus::Engine::run()` and overrides `FFXIGame::tick()`, so
+it depends on lotus-engine's Vulkan renderer owning the main loop. That renderer
+cannot run on macOS at all: MoltenVK implements none of
+`VK_KHR_ray_tracing_pipeline`, `VK_KHR_ray_query` or
+`VK_KHR_acceleration_structure`, which lotus's only working render mode
+requires. macOS is a hard requirement, so the renderer is being replaced with
+WebGPU via Dawn - see `docs/renderer-webgpu.md`.
+
+Getting this to compile would therefore prove a design we are not going to
+ship. The toolchain excuse in the status note above is no longer the reason to
+leave it alone; the design is.
+
+**What is still worth keeping** is the analysis above of *where the seam is* -
+that the engine owns a blocking main loop on its own thread and that host code
+drives it through a per-frame callback rather than pumping frames from outside.
+That ownership question is the same whatever the renderer is, and the answer
+here is likely still right. The mechanism (subclassing `FFXIGame`, calling
+`lotus::Engine::run`) is what does not carry over.
+
+The working interop that replaced it is `ffxi-engine/interop/`, a C ABI shared
+library verified end to end from C# into the retail DATs - see
+`docs/engine-build.md`. That one is also renderer-independent, which is why it
+survives this change.

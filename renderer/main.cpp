@@ -141,6 +141,15 @@ int main(int, char**)
     int pixel_width = 0;
     int pixel_height = 0;
     SDL_GetWindowSizeInPixels(window, &pixel_width, &pixel_height);
+
+    // Worth printing rather than assuming: points and pixels differ on any
+    // scaled display, not just retina, and a swapchain sized in the wrong one
+    // renders at the wrong resolution without failing.
+    int point_width = 0;
+    int point_height = 0;
+    SDL_GetWindowSize(window, &point_width, &point_height);
+    std::printf("window: %dx%d points, %dx%d pixels\n", point_width, point_height, pixel_width, pixel_height);
+
     configure(static_cast<uint32_t>(pixel_width), static_cast<uint32_t>(pixel_height));
 
     wgpu::Queue queue = device.GetQueue();
