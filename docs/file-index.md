@@ -87,9 +87,29 @@ come from somewhere with clear terms.
 
 | source | licence | what it gives |
 | --- | --- | --- |
-| POLUtils | Apache 2.0 | container and encryption docs, text and data DATs |
+| [POLUtils](https://github.com/Windower/POLUtils) | **Apache 2.0** | container and encryption docs, text and data DATs, and MassExtractor |
+| [LandSandBoat/UpdateExtractor](https://github.com/LandSandBoat/UpdateExtractor) | **MIT** | turns MassExtractor output into server data, and handles id shifts across updates |
 | LandSandBoat | GPL-3.0 | zone ids and names, item and NPC ids |
 | Altana Viewer | - | model tables, kept current with each game update |
+
+The first two matter more than they look. **The whole existing pipeline for
+re-deriving ids after a patch is permissively licensed**: POLUtils MassExtractor
+does the extraction under Apache 2.0, and UpdateExtractor sanitises it under
+MIT, explicitly handling the id shifts that come with each update.
+
+What it does *not* cover is 3D. Its outputs are the client version string,
+titles, status effects, zone text ids and item SQL - all server-side data.
+Nothing permissive covers zone geometry, models or skeletons, which is why the
+readers in `renderer/ffxi/` were written from the bytes.
+
+So the division is: **the text and data side already has a permissive answer we
+can use; the geometry side is ours to derive.**
+
+LandSandBoat itself is GPL-3.0 and its ids are hardcoded and revised by hand each
+update - `tools/client/animation_timing.py` carries base file ids commented as
+coming from `FFXiMain.dll`'s data section. Which points at where the client's own
+mapping actually lives, and at a more durable approach than hardcoding: read
+those tables per install rather than pinning them per version.
 
 LandSandBoat is **GPL-3.0**, so its files cannot be copied into PortJeuno. What
 we can do - and what fits the pattern already used for the compression tables
