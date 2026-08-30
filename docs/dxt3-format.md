@@ -74,25 +74,37 @@ Testing against alpha on those removes most of the ground and leaves a
 checkerboard of holes. The colour is meaningful everywhere, so terrain is simply
 drawn opaque and its alpha ignored.
 
-Which surfaces want a cutout is **not** in the mesh header. `blending` marks base
-against overlay within a tile, and the same texture appears under both flags -
-`sar_kk2` has 53 meshes at `0x0000` and 52 at `0x8000` - so it says nothing about
-transparency.
+Which surfaces want a cutout is **not** stated anywhere in the format. Two
+candidates were tried and abandoned:
 
-What separates them is **orientation, measured from the triangles**. Foliage is
-vertical billboards whose black background must be discarded; ground is flat and
-its alpha is a blend factor, so testing it punches holes.
+- **The mesh header's `blending` field** marks base against overlay within a
+  tile, not transparency. The same texture appears under both flags - `sar_kk2`
+  has 53 meshes at `0x0000` and 52 at `0x8000` - so it could never have
+  separated foliage from ground.
+- **Surface orientation.** Plausible, since foliage is billboards and ground is
+  flat, but a grass tuft is crossed, splayed quads measuring 0.57 rather than 0,
+  and no threshold separated it from ground without also cutting holes through
+  cliff faces. Worth noting that grass billboards carry normals pointing
+  straight up - so they light like the ground beneath - which makes stored
+  normals useless here even before that.
 
-The measurement has to come from the geometry, not the stored normals. **Grass
-billboards carry normals pointing straight up** - the usual trick so they light
-like the ground they stand on rather than edge-on - so by stored normal they read
-as flat and get treated as terrain, leaving their black backgrounds undiscarded.
-Face normals computed from the triangle positions give the right answer.
+What does work is **how transparent the texture is**, measured at load:
 
-This is a heuristic, not something the format states. It should misfire on a
-vertical surface that genuinely wants opaque alpha - a wall or cliff face with
-alpha-zero regions - so holes in a rock wall would be this rule rather than a new
-bug.
+| texture | alpha-zero | treatment |
+| --- | --- | --- |
+| `sar_hg_0` (grass) | 0.95 | cutout |
+| `sar_kaw1` (river) | 0.80 | opaque |
+| `sar_kk2` (ground) | 0.60 | opaque |
+| `sar_w1` (rock) | 0.51 | opaque |
+
+The threshold sits at **0.88**, bracketed between the river and the grass. Each
+neighbour was established by a visible failure: below 0.80 the river edges break
+up, above 0.95 the grass renders as black boxes.
+
+**This is fitted, not derived.** The margin is 0.15, tuned against one field
+zone. A texture landing between 0.80 and 0.95 elsewhere is a coin toss, and this
+is the first thing to look at when a town or later-expansion zone renders
+wrongly.
 
 ## Still to work out
 

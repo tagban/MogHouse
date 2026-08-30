@@ -14,14 +14,18 @@ namespace
 /// the distances a zone spans.
 constexpr float kLayerSeparation = 0.004f;
 
-/// Below this average |face normal .y| a mesh counts as standing up rather than
-/// lying flat. Taken from the triangles rather than the stored normals, which
-/// grass billboards deliberately point upward.
-constexpr float kUprightThreshold = 0.5f;
-
 /// How transparent a texture must be before its alpha is read as a cutout mask
-/// rather than a blend factor. Rock sits at 0.51, grass at 0.95.
-constexpr float kMostlyTransparent = 0.75f;
+/// rather than a blend factor.
+///
+/// Bracketed by measurement rather than chosen: ground 0.60, rock 0.51 and the
+/// river surface 0.80 must all stay opaque - cutting the river out puts holes
+/// along its edges - while grass at 0.95 must be cut out. 0.88 sits between the
+/// closest pair, so it is the widest margin available on this zone.
+///
+/// That margin is 0.15, which is not much. A texture landing between 0.80 and
+/// 0.95 in another zone would be a coin toss, and this is the first thing to
+/// revisit when a town or later expansion renders wrongly.
+constexpr float kMostlyTransparent = 0.88f;
 
 struct Bounds
 {
@@ -162,39 +166,19 @@ ZoneMesh buildPlacedMesh(const ffxi::Zone& zone, const std::unordered_map<std::s
         uint32_t meshIndex = 0;
         for (const ffxi::ModelMesh& mesh : found->second.meshes)
         {
-            // A mesh standing up is foliage; one lying flat is ground.
+            // Whether alpha is a cutout mask or a blend factor is a property of
+            // the texture, and measuring it is the only thing that has held up.
+            // Grass is 95% alpha-zero, rock 51%, ground 60% - a wide, clean gap.
             //
-            // Measured from the triangles, not from the stored normals. Grass
-            // billboards carry normals pointing straight up - the usual trick so
-            // they light like the ground they stand on rather than edge-on - so
-            // by stored normal they look flat and get treated as terrain, which
-            // leaves their black background undiscarded. The geometry does not
-            // lie about which way a quad faces.
-            float verticality = 0.0f;
-            uint32_t faces = 0;
-            for (size_t i = 0; i + 2 < mesh.indices.size(); i += 3)
-            {
-                const uint16_t ia = mesh.indices[i], ib = mesh.indices[i + 1], ic = mesh.indices[i + 2];
-                if (ia >= mesh.vertices.size() || ib >= mesh.vertices.size() || ic >= mesh.vertices.size())
-                {
-                    continue;
-                }
-                const float* pa = mesh.vertices[ia].position;
-                const float* pb = mesh.vertices[ib].position;
-                const float* pc = mesh.vertices[ic].position;
-                const Vec3 face = normalise(cross(Vec3{pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]},
-                                                  Vec3{pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]}));
-                verticality += std::fabs(face.y);
-                ++faces;
-            }
-            verticality = faces ? verticality / static_cast<float>(faces) : 1.0f;
-            // Vertical alone is not enough: a cliff face is vertical too, and
-            // cutting it out puts arches through the mountains. Foliage is also
-            // overwhelmingly transparent - grass is 94.7% alpha-zero against
-            // rock's 51% - so both have to hold.
+            // Geometry was tried twice as a discriminator and abandoned. The
+            // mesh header's blending field marks base against overlay, not
+            // transparency. Orientation looked promising but a grass tuft is
+            // crossed, splayed quads measuring 0.57 rather than 0, so no
+            // threshold separated it from ground without also cutting holes in
+            // cliff faces.
             auto texture = textures.find(mesh.texture);
             const float transparency = texture == textures.end() ? 0.0f : texture->second.alphaZero;
-            const bool cutout = verticality < kUprightThreshold && transparency > kMostlyTransparent;
+            const bool cutout = transparency > kMostlyTransparent;
 
             Group& group = groups[{mesh.texture, cutout}];
             const uint32_t base = static_cast<uint32_t>(group.vertices.size());
