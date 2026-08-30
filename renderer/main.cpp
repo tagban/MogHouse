@@ -126,9 +126,36 @@ std::optional<pj::ZoneMesh> loadZone(const char* datPath, const char* keyPath, c
                             modelsFailed, resolved, missing);
             }
         }
-        if (mesh.vertices.empty())
+        // Collision geometry is drawn alongside the models, not instead of
+        // them. The collision hulls were recognisable as the zone - terrain,
+        // bridges - while the placed models alone are sparse, so the two are
+        // evidently not the same set of surfaces.
+        pj::ZoneMesh collision = pj::buildZoneMesh(zone);
+        if (!collision.indices.empty())
         {
-            mesh = pj::buildZoneMesh(zone);
+            const uint32_t vertexBase = static_cast<uint32_t>(mesh.vertices.size());
+            const uint32_t indexStart = static_cast<uint32_t>(mesh.indices.size());
+            mesh.vertices.insert(mesh.vertices.end(), collision.vertices.begin(), collision.vertices.end());
+            for (uint32_t index : collision.indices)
+            {
+                mesh.indices.push_back(vertexBase + index);
+            }
+            mesh.batches.push_back(pj::Batch{"", indexStart, static_cast<uint32_t>(mesh.indices.size()) - indexStart});
+
+            if (mesh.vertices.size() == collision.vertices.size())
+            {
+                mesh.boundsMin = collision.boundsMin;
+                mesh.boundsMax = collision.boundsMax;
+            }
+            else
+            {
+                mesh.boundsMin = {std::min(mesh.boundsMin.x, collision.boundsMin.x),
+                                  std::min(mesh.boundsMin.y, collision.boundsMin.y),
+                                  std::min(mesh.boundsMin.z, collision.boundsMin.z)};
+                mesh.boundsMax = {std::max(mesh.boundsMax.x, collision.boundsMax.x),
+                                  std::max(mesh.boundsMax.y, collision.boundsMax.y),
+                                  std::max(mesh.boundsMax.z, collision.boundsMax.z)};
+            }
         }
 
         if (!best || mesh.vertices.size() > best->vertices.size())
