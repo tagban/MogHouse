@@ -12,6 +12,7 @@
 #include "ffxi/texture.h"
 #include "gputexture.h"
 #include "camera.h"
+#include "coverage.h"
 #include "math.h"
 #include "surface.h"
 #include "sky_shader.h"
@@ -138,6 +139,19 @@ std::optional<pj::ZoneMesh> loadZone(const char* datPath, const char* keyPath, c
         // flags field with only two values across all 5,921 of them, so it
         // references no material - it is genuine collision, not terrain, and
         // drawing it just covers the world in untextured white.
+        // Compare against the collision geometry's footprint. If collision
+        // covers far more ground than the placed models, the terrain surface is
+        // not coming from the placement table at all.
+        {
+            pj::ZoneMesh collision = pj::buildZoneMesh(zone);
+            if (!collision.indices.empty())
+            {
+                const pj::Coverage c = pj::measureCoverage(collision);
+                std::printf("  collision footprint: %.1f%% any, %.1f%% horizontal (%zu triangles)\n",
+                            c.anyGeometry * 100.0f, c.groundLike * 100.0f, collision.indices.size() / 3);
+            }
+        }
+
         if (mesh.vertices.empty())
         {
             mesh = pj::buildZoneMesh(zone);
@@ -198,6 +212,9 @@ int main(int argc, char** argv)
         std::printf("zone %s: %zu triangles\n", zoneId.c_str(), zone->indices.size() / 3);
         std::printf("  bounds x %.1f..%.1f  y %.1f..%.1f  z %.1f..%.1f\n", zone->boundsMin.x, zone->boundsMax.x,
                     zone->boundsMin.y, zone->boundsMax.y, zone->boundsMin.z, zone->boundsMax.z);
+        const pj::Coverage coverage = pj::measureCoverage(*zone);
+        std::printf("  ground coverage: %.1f%% has geometry over it, %.1f%% has a horizontal face\n",
+                    coverage.anyGeometry * 100.0f, coverage.groundLike * 100.0f);
     }
     else
     {
