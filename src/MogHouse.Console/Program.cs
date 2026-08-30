@@ -416,6 +416,17 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                     // agree by accident.
                     var tracker = new FfxiEntityTracker { SelfUniqueNo = handoff.ServerId };
 
+                    // --view opens the renderer in this same process and lets
+                    // the tracker drive its radar. The two halves have agreed
+                    // on shape and coordinates for a while; this is the wire.
+                    LiveRadar? liveRadar = null;
+                    if (flags.ContainsKey("view"))
+                    {
+                        liveRadar = zoneState is null
+                            ? null
+                            : LiveRadar.Open(selected.Zone, zoneState.X, zoneState.Vertical, zoneState.Depth);
+                    }
+
                     // The first sighting of each entity, raw. Which byte says
                     // "this is a shopkeeper, not a crab" is not derivable from
                     // the struct - bitfield blocks and a misaligned uint8 sit
@@ -489,6 +500,7 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                                     int count = entitiesSeen.GetValueOrDefault(entity.UniqueNo).Count + 1;
                                     entitiesSeen[entity.UniqueNo] = (entity.PacketId, isSelf, count);
                                     tracker.Observe(entity, DateTimeOffset.UtcNow);
+                                    liveRadar?.Publish(tracker);
                                     if (!rawFirstSeen.ContainsKey(entity.UniqueNo))
                                     {
                                         rawFirstSeen[entity.UniqueNo] = reply.Plaintext.AsSpan(offset, size).ToArray();
@@ -575,6 +587,8 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                         }
                         Console.WriteLine();
                     }
+
+                    liveRadar?.Dispose();
 
                     IReadOnlyList<FfxiTrackedEntity> visible = tracker.Visible(DateTimeOffset.UtcNow);
                     Console.WriteLine();
@@ -741,4 +755,120 @@ static async Task<int> ViewAsync(Dictionary<string, string> flags)
 
     Console.WriteLine($"renderer closed with {code}");
     return code;
+}
+
+/// <summary>
+/// The renderer, opened beside a live session and fed from its entity tracker.
+///
+/// The viewer owns a window and an event loop, so it gets a thread of its own
+/// and the session keeps this one. Publishing is a copy under no lock beyond
+/// the one inside the native link - the list is small and replaced whole.
+/// </summary>
+sealed class LiveRadar : IDisposable
+{
+    private readonly NativeViewer _viewer;
+    private readonly Thread _thread;
+    private bool _closed;
+
+    private LiveRadar(NativeViewer viewer)
+    {
+        _viewer = viewer;
+        _thread = new Thread(() => _viewer.Run()) { IsBackground = true, Name = "moghouse-renderer" };
+        _thread.Start();
+    }
+
+    /// <summary>
+    /// Opens the zone the character is actually standing in, at the position
+    /// the server reported. Returns null, with a reason, if anything needed is
+    /// missing - a radar is not worth failing a login over.
+    /// </summary>
+    public static LiveRadar? Open(int zoneId, float x, float vertical, float depth)
+    {
+        string keys = Environment.GetEnvironmentVariable("MOGHOUSE_FFXI_KEYTABLE") ?? "";
+        string keys2 = Environment.GetEnvironmentVariable("MOGHOUSE_FFXI_KEYTABLE2") ?? "";
+        if (keys.Length == 0)
+        {
+            Console.WriteLine("--view needs MOGHOUSE_FFXI_KEYTABLE; run tools/keytables.py");
+            return null;
+        }
+
+        string? zonePath;
+        try
+        {
+            var table = new FfxiFileTable(FfxiFileTable.DefaultInstallRoot());
+            zonePath = table.ZonePath(zoneId);
+        }
+        catch (Exception error)
+        {
+            Console.WriteLine($"--view could not read the file table: {error.Message}");
+            return null;
+        }
+
+        if (zonePath is null || !File.Exists(zonePath))
+        {
+            Console.WriteLine($"--view: zone {zoneId} is not installed");
+            return null;
+        }
+
+        Console.WriteLine($"--view: opening zone {zoneId} from {zonePath}");
+
+        var options = new NativeViewerOptions
+        {
+            ZonePath = zonePath,
+            KeyTablePath = keys,
+            KeyTable2Path = keys2,
+            Look = Environment.GetEnvironmentVariable("MOGHOUSE_LOOK") ?? "1,0,0,1,1,1,1",
+            // The renderer works in Y-up; the protocol reports FFXI's Y-down
+            // vertical, so it is negated on the way across. The horizontal axes
+            // need no conversion, which the radar dots already demonstrated.
+            CharacterAt = string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"{x},{-vertical},{depth}"),
+
+            // Set MOGHOUSE_SCREENSHOT to check the live radar without watching
+            // it. The wait is in frames, and it has to outlast the first few
+            // entity updates or the shot shows an empty radar.
+            ScreenshotPath = Environment.GetEnvironmentVariable("MOGHOUSE_SCREENSHOT"),
+            ScreenshotAfterFrames =
+                int.TryParse(Environment.GetEnvironmentVariable("MOGHOUSE_SCREENSHOT_AFTER"), out int after)
+                    ? after
+                    : 0,
+        };
+
+        return new LiveRadar(new NativeViewer(options));
+    }
+
+    /// <summary>Pushes what the tracker currently believes is nearby.</summary>
+    public void Publish(FfxiEntityTracker tracker)
+    {
+        if (_closed)
+        {
+            return;
+        }
+
+        IReadOnlyList<FfxiTrackedEntity> visible = tracker.Visible(DateTimeOffset.UtcNow);
+        var entities = new NativeRadarEntity[visible.Count];
+        for (int i = 0; i < visible.Count; i++)
+        {
+            entities[i] = new NativeRadarEntity
+            {
+                X = visible[i].X,
+                Z = visible[i].Depth,
+                Kind = (int)visible[i].Kind,
+            };
+        }
+        _viewer.SetEntities(entities);
+    }
+
+    public void Dispose()
+    {
+        if (_closed)
+        {
+            return;
+        }
+        _closed = true;
+
+        _viewer.Stop();
+        _thread.Join(TimeSpan.FromSeconds(5));
+        _viewer.Dispose();
+    }
 }

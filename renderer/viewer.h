@@ -75,6 +75,12 @@ struct ViewerOptions
     /// something on it, and this is how it gets checked without a server.
     std::vector<RadarEntity> testEntities;
 
+    /// How many frames to let pass before taking a screenshot. The default
+    /// is just enough to let the first frames settle; a caller feeding the
+    /// viewer from outside wants longer, because a shot taken before anything
+    /// has been posted shows an empty radar and proves nothing.
+    int settleFrames{5};
+
     /// Writes the baked top-down map out as a BMP, for looking at directly.
     std::optional<std::string> mapPath;
 

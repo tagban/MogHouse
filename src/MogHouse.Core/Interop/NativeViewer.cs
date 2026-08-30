@@ -36,6 +36,12 @@ public sealed record NativeViewerOptions
 
     /// <summary>Vana'diel clock as hhmm, or null to let the day run.</summary>
     public int? TimeOfDay { get; init; }
+
+    /// <summary>Writes one frame here and closes. For checking unattended.</summary>
+    public string? ScreenshotPath { get; init; }
+
+    /// <summary>Frames to wait before that shot.</summary>
+    public int ScreenshotAfterFrames { get; init; }
 }
 
 /// <summary>
@@ -117,6 +123,7 @@ public sealed partial class NativeViewer : IDisposable
         IntPtr look = Utf8(options.Look);
         IntPtr at = Utf8(options.CharacterAt);
         IntPtr facing = Utf8(options.CharacterFacing);
+        IntPtr shot = Utf8(options.ScreenshotPath);
 
         try
         {
@@ -129,6 +136,8 @@ public sealed partial class NativeViewer : IDisposable
                 CharacterAt = at,
                 CharacterFacing = facing,
                 TimeOfDay = options.TimeOfDay ?? -1,
+                ScreenshotPath = shot,
+                ScreenshotAfterFrames = options.ScreenshotAfterFrames,
             };
 
             _handle = mh_viewer_create(in native);
@@ -139,7 +148,7 @@ public sealed partial class NativeViewer : IDisposable
         }
         finally
         {
-            foreach (IntPtr held in new[] { zone, keys, keys2, look, at, facing })
+            foreach (IntPtr held in new[] { zone, keys, keys2, look, at, facing, shot })
             {
                 if (held != IntPtr.Zero)
                 {
@@ -202,6 +211,8 @@ public sealed partial class NativeViewer : IDisposable
         public IntPtr CharacterAt;
         public IntPtr CharacterFacing;
         public int TimeOfDay;
+        public IntPtr ScreenshotPath;
+        public int ScreenshotAfterFrames;
     }
 
     [LibraryImport(LibraryName)]

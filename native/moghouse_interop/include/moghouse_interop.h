@@ -61,6 +61,14 @@ typedef struct MhViewerOptions
 
     /// Vana'diel clock as hhmm, or -1 to let the day run.
     int32_t time_of_day;
+
+    /// Writes one frame to this path and closes, or null to stay open. Meant
+    /// for checking what the viewer produced without someone watching it.
+    const char* screenshot_path;
+
+    /// Frames to wait first. A shot taken before the caller has posted
+    /// anything shows an empty radar and proves nothing.
+    int32_t screenshot_after_frames;
 } MhViewerOptions;
 
 /// Creates a viewer. Does not open a window - see mh_viewer_run.

@@ -55,6 +55,11 @@ MhViewerHandle mh_viewer_create(const MhViewerOptions* options)
     {
         viewer->options.timeOfDay = options->time_of_day;
     }
+    viewer->options.screenshotPath = borrow(options->screenshot_path);
+    if (options->screenshot_after_frames > 0)
+    {
+        viewer->options.settleFrames = options->screenshot_after_frames;
+    }
     return viewer;
 }
 

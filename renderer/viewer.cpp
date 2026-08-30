@@ -1342,7 +1342,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // eighteen launches of a program that spends most of its time loading a
     // zone.
     const int sequenceCount = options.screenshotSequence;
-    int shotIndex = -5; // let the first frames settle
+    int shotIndex = -options.settleFrames; // let the first frames settle
     wgpu::Buffer readbackBuffer;
 
     // `animation` names one of the character's own animations - idl0

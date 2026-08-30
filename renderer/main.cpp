@@ -53,6 +53,11 @@ ViewerOptions optionsFromEnvironment(int argc, char** argv)
     options.screenshotPath = fromEnvironment("MOGHOUSE_SCREENSHOT");
     options.mapPath = fromEnvironment("MOGHOUSE_MAP");
 
+    if (const std::optional<std::string> settle = fromEnvironment("MOGHOUSE_SCREENSHOT_AFTER"))
+    {
+        options.settleFrames = std::atoi(settle->c_str());
+    }
+
     if (const std::optional<std::string> entities = fromEnvironment("MOGHOUSE_ENTITIES"))
     {
         size_t at = 0;
