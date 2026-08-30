@@ -128,7 +128,7 @@ std::optional<pj::ZoneMesh> loadZone(const char* datPath, const char* keyPath, c
         {
             size_t resolved = 0;
             size_t missing = 0;
-            mesh = pj::buildPlacedMesh(zone, models, resolved, missing);
+            mesh = pj::buildPlacedMesh(zone, models, textures, resolved, missing);
             if (!mesh.vertices.empty())
             {
                 std::printf("  %zu models (%zu unreadable), %zu placements drawn, %zu with no model\n", models.size(),

@@ -4,6 +4,7 @@
 
 #include "ffxi/mmb.h"
 #include "ffxi/mzb.h"
+#include "ffxi/texture.h"
 #include "math.h"
 
 #include <cstdint>
@@ -66,5 +67,6 @@ ZoneMesh buildZoneMesh(const ffxi::Zone& zone);
 /// copy of the geometry per placement, which is the obvious thing to fix next,
 /// but it reuses one pipeline and made the placement maths verifiable first.
 ZoneMesh buildPlacedMesh(const ffxi::Zone& zone, const std::unordered_map<std::string, ffxi::Model>& models,
-                         size_t& placementsResolved, size_t& placementsMissing);
+                         const std::unordered_map<std::string, ffxi::Texture>& textures, size_t& placementsResolved,
+                         size_t& placementsMissing);
 } // namespace pj

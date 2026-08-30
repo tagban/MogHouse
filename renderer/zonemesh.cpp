@@ -19,6 +19,10 @@ constexpr float kLayerSeparation = 0.004f;
 /// grass billboards deliberately point upward.
 constexpr float kUprightThreshold = 0.5f;
 
+/// How transparent a texture must be before its alpha is read as a cutout mask
+/// rather than a blend factor. Rock sits at 0.51, grass at 0.95.
+constexpr float kMostlyTransparent = 0.75f;
+
 struct Bounds
 {
     Vec3 lo{std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
@@ -124,7 +128,8 @@ ZoneMesh buildZoneMesh(const ffxi::Zone& zone)
 }
 
 ZoneMesh buildPlacedMesh(const ffxi::Zone& zone, const std::unordered_map<std::string, ffxi::Model>& models,
-                         size_t& placementsResolved, size_t& placementsMissing)
+                         const std::unordered_map<std::string, ffxi::Texture>& textures, size_t& placementsResolved,
+                         size_t& placementsMissing)
 {
     placementsResolved = 0;
     placementsMissing = 0;
@@ -183,7 +188,13 @@ ZoneMesh buildPlacedMesh(const ffxi::Zone& zone, const std::unordered_map<std::s
                 ++faces;
             }
             verticality = faces ? verticality / static_cast<float>(faces) : 1.0f;
-            const bool cutout = verticality < kUprightThreshold;
+            // Vertical alone is not enough: a cliff face is vertical too, and
+            // cutting it out puts arches through the mountains. Foliage is also
+            // overwhelmingly transparent - grass is 94.7% alpha-zero against
+            // rock's 51% - so both have to hold.
+            auto texture = textures.find(mesh.texture);
+            const float transparency = texture == textures.end() ? 0.0f : texture->second.alphaZero;
+            const bool cutout = verticality < kUprightThreshold && transparency > kMostlyTransparent;
 
             Group& group = groups[{mesh.texture, cutout}];
             const uint32_t base = static_cast<uint32_t>(group.vertices.size());

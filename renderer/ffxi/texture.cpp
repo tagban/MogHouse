@@ -94,6 +94,21 @@ Texture parseTexture(const Chunk& chunk)
         texture.format = TextureFormat::Bc2;
         texture.pixels.resize(size);
         std::memcpy(texture.pixels.data(), data.data() + kBlockDataOffset, size);
+
+        // BC2 packs a 4x4 block into 16 bytes: 8 of 4-bit alpha, then colour.
+        size_t zero = 0;
+        size_t texels = 0;
+        for (size_t block = 0; block + 16 <= texture.pixels.size(); block += 16)
+        {
+            for (size_t i = 0; i < 8; ++i)
+            {
+                const uint8_t byte = texture.pixels[block + i];
+                zero += (byte & 0x0F) == 0;
+                zero += (byte >> 4) == 0;
+                texels += 2;
+            }
+        }
+        texture.alphaZero = texels ? static_cast<float>(zero) / static_cast<float>(texels) : 0.0f;
         break;
     }
     case 0xB1:

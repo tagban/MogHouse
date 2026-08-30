@@ -24,6 +24,12 @@ struct Texture
     uint32_t height{};
     TextureFormat format{TextureFormat::Bc2};
     std::vector<uint8_t> pixels;
+
+    /// Fraction of texels with zero alpha. Ground textures sit around 0.5 and
+    /// their alpha is a blend factor; foliage is far higher and genuinely wants
+    /// cutting out. Measured here because it is a property of the artwork, and
+    /// nothing in the headers says which a texture is.
+    float alphaZero{};
 };
 
 /// Reads one texture chunk. Texture chunks are not obfuscated, unlike MZB and
