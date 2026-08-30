@@ -7,6 +7,7 @@
 // installed.
 
 #include "ffxi/dat.h"
+#include "ffxi/mmb.h"
 #include "ffxi/mzb.h"
 #include "math.h"
 #include "surface.h"
@@ -23,6 +24,8 @@
 #include <cstring>
 #include <iterator>
 #include <optional>
+#include <stdexcept>
+#include <unordered_map>
 #include <string>
 
 namespace
@@ -52,7 +55,7 @@ const char* backendName(wgpu::BackendType backend)
 
 // Loads the largest MZB in a DAT. Largest because the ferry DATs hold both a
 // world and a vessel, and the world is the interesting one.
-std::optional<pj::ZoneMesh> loadZone(const char* datPath, const char* keyPath, std::string& zoneId)
+std::optional<pj::ZoneMesh> loadZone(const char* datPath, const char* keyPath, const char* key2Path, std::string& zoneId)
 {
     auto keys = ffxi::KeyTable::load(keyPath);
     if (!keys)
@@ -62,11 +65,54 @@ std::optional<pj::ZoneMesh> loadZone(const char* datPath, const char* keyPath, s
     }
 
     ffxi::DatFile dat{std::filesystem::path{datPath}};
+
+    // Every model in the DAT, keyed by the name a placement refers to it by.
+    std::unordered_map<std::string, ffxi::Model> models;
+    size_t modelsFailed = 0;
+    if (key2Path)
+    {
+        if (auto keys2 = ffxi::KeyTable::load(key2Path))
+        {
+            for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkMmb))
+            {
+                try
+                {
+                    ffxi::Model model = ffxi::parseMmb(chunk, *keys, *keys2);
+                    std::string key = model.name;
+                    models.emplace(std::move(key), std::move(model));
+                }
+                catch (const std::exception&)
+                {
+                    ++modelsFailed;
+                }
+            }
+        }
+    }
+
     std::optional<pj::ZoneMesh> best;
     for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkMzb))
     {
         ffxi::Zone zone = ffxi::parseMzb(chunk, *keys);
-        pj::ZoneMesh mesh = pj::buildZoneMesh(zone);
+
+        // Placed models are the visible world; collision geometry is the
+        // fallback when the model key table is not available.
+        pj::ZoneMesh mesh;
+        if (!models.empty())
+        {
+            size_t resolved = 0;
+            size_t missing = 0;
+            mesh = pj::buildPlacedMesh(zone, models, resolved, missing);
+            if (!mesh.vertices.empty())
+            {
+                std::printf("  %zu models (%zu unreadable), %zu placements drawn, %zu with no model\n", models.size(),
+                            modelsFailed, resolved, missing);
+            }
+        }
+        if (mesh.vertices.empty())
+        {
+            mesh = pj::buildZoneMesh(zone);
+        }
+
         if (!best || mesh.vertices.size() > best->vertices.size())
         {
             best = std::move(mesh);
@@ -80,7 +126,21 @@ wgpu::Buffer createBuffer(const wgpu::Device& device, const void* data, size_t s
 {
     wgpu::BufferDescriptor descriptor{.usage = usage | wgpu::BufferUsage::CopyDst, .size = size};
     wgpu::Buffer buffer = device.CreateBuffer(&descriptor);
-    device.GetQueue().WriteBuffer(buffer, 0, data, size);
+    if (!buffer)
+    {
+        std::printf("failed to create a %zu byte buffer\n", size);
+        return buffer;
+    }
+
+    // Written in chunks rather than one call: a single multi-megabyte
+    // WriteBuffer stages the whole thing at once, and it is cheap to avoid.
+    constexpr size_t kChunk = 4u * 1024u * 1024u;
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    for (size_t written = 0; written < size; written += kChunk)
+    {
+        const size_t amount = std::min(kChunk, size - written);
+        device.GetQueue().WriteBuffer(buffer, written, bytes + written, amount);
+    }
     return buffer;
 }
 } // namespace
@@ -99,7 +159,7 @@ int main(int argc, char** argv)
             std::printf("set PORTJEUNO_FFXI_KEYTABLE to the 256-byte MZB key table to load a zone\n");
             return 2;
         }
-        zone = loadZone(argv[1], keyPath, zoneId);
+        zone = loadZone(argv[1], keyPath, std::getenv("PORTJEUNO_FFXI_KEYTABLE2"), zoneId);
         if (!zone)
         {
             return 1;
@@ -240,6 +300,7 @@ int main(int argc, char** argv)
         indexBuffer = createBuffer(device, zone->indices.data(), zone->indices.size() * sizeof(uint32_t),
                                    wgpu::BufferUsage::Index);
         indexCount = static_cast<uint32_t>(zone->indices.size());
+        std::printf("buffers created\n");
 
         wgpu::BufferDescriptor uniformDescriptor{.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
                                                  .size = sizeof(Uniforms)};

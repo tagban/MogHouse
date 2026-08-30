@@ -155,8 +155,14 @@ Zone parseMzb(const Chunk& chunk, const KeyTable& keys)
     {
         const size_t base = kPlacementsOffset + i * kPlacementSize;
         Placement placement;
+        // Names are space padded, not null terminated, and MMB trims the same
+        // way - without this every lookup misses by trailing whitespace.
         const char* name = reinterpret_cast<const char*>(buffer.data() + base);
         placement.model.assign(name, ::strnlen(name, 16));
+        while (!placement.model.empty() && placement.model.back() == ' ')
+        {
+            placement.model.pop_back();
+        }
         std::memcpy(placement.translate, buffer.data() + base + 16, sizeof(placement.translate));
         std::memcpy(placement.rotate, buffer.data() + base + 28, sizeof(placement.rotate));
         std::memcpy(placement.scale, buffer.data() + base + 40, sizeof(placement.scale));

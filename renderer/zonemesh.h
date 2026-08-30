@@ -2,10 +2,13 @@
 
 // Turns MZB collision meshes into something a GPU can draw.
 
+#include "ffxi/mmb.h"
 #include "ffxi/mzb.h"
 #include "math.h"
 
 #include <cstdint>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace pj
@@ -40,4 +43,14 @@ struct ZoneMesh
 /// still unknown. Face normals are correct, need no such answer, and give flat
 /// shading that suits collision geometry anyway.
 ZoneMesh buildZoneMesh(const ffxi::Zone& zone);
+
+/// Builds the visible world: every MZB placement resolved to its MMB model,
+/// transformed into place.
+///
+/// Transforms are baked into the vertices rather than instanced. A zone is a
+/// few million vertices that way, which is fine for a static buffer, and it
+/// reuses the collision pipeline unchanged. Instancing is the obvious next step
+/// but not a prerequisite for seeing whether the placement maths is right.
+ZoneMesh buildPlacedMesh(const ffxi::Zone& zone, const std::unordered_map<std::string, ffxi::Model>& models,
+                         size_t& placementsResolved, size_t& placementsMissing);
 } // namespace pj
