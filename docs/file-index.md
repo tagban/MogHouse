@@ -56,3 +56,54 @@ other projects have already worked out and published.
 That split matters: **the structure comes from the data, the names come from
 research.** Anything derived from the install is a fact about bytes and can be
 regenerated; anything that is a name someone assigned needs a source.
+
+## File ids move between game versions
+
+**This is the constraint that shapes everything else here.** The ids that
+address content are not stable - they shift when Square Enix patches the game.
+LandSandBoat carries ids for items and NPCs that are offsets into the DATs, and
+those have to be revised each update for the same reason.
+
+So no table mapping ids to content can ever be shipped with PortJeuno. Whatever
+we know about a particular install is only true of that install, at that
+version, until the next patch.
+
+Three consequences worth stating plainly:
+
+1. **The index is derived, never vendored.** `tools/buildindex.py` regenerates
+   it from whatever is actually on disk, in about four minutes.
+2. **A transcode cache must key on install state**, not on a version string, and
+   rebuilding after a patch is structural rather than an optimisation. Ids
+   moving underneath a stale cache would silently load the wrong asset, which is
+   worse than failing.
+3. **Names are the stable part, ids are not.** "West Ronfaure" does not change;
+   which file id holds its geometry does. So the durable mapping is
+   name -> content signature, with ids resolved fresh each time.
+
+## Sources for names
+
+Structure is derivable. Names are not - someone assigned them, and they have to
+come from somewhere with clear terms.
+
+| source | licence | what it gives |
+| --- | --- | --- |
+| POLUtils | Apache 2.0 | container and encryption docs, text and data DATs |
+| LandSandBoat | GPL-3.0 | zone ids and names, item and NPC ids |
+| Altana Viewer | - | model tables, kept current with each game update |
+
+LandSandBoat is **GPL-3.0**, so its files cannot be copied into PortJeuno. What
+we can do - and what fits the pattern already used for the compression tables
+and the MZB key table - is read the user's own LandSandBoat checkout when they
+have one, rather than vendoring anything.
+
+Its `sql/zone_settings.sql` holds 300 zones as `zoneid` and `name`, and is worth
+reading for one detail alone:
+
+```sql
+INSERT INTO `zone_settings` VALUES (0,'127.0.0.1',54230,'unknown');
+-- Demonstration Area from pre-release: Has no client side mesh, use wallhack to get around.
+```
+
+Zone 0 is the pre-release demonstration area, and "has no client side mesh" is
+the same phenomenon as the ferry zones: nothing to collide with, so nothing to
+stand on.
