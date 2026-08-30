@@ -98,7 +98,16 @@ position and normal.
 | colour (u32) | 24 | 36 |
 | uv | 28 | 40 |
 
-**Indices** follow: a `u16` count in a 4-byte field, then that many `u16`.
+**Indices** follow: a `u16` count in a 4-byte field, then that many `u16`, and
+then **padding to a 4-byte boundary**.
+
+That padding is easy to miss and expensive to miss. An odd index count leaves
+the cursor two bytes short, so the next mesh header reads misaligned - its
+texture name comes back with two leading nulls - and every mesh after it in that
+model is rubbish. In East Sarutabaruta it silently degraded 1,238 of 4,918
+placements while only 12 models reported an outright failure, because a parser
+that stops at the first bad offset returns a partial model rather than an
+error.
 
 They are a **triangle strip** unless the chunk id begins `MMB` or the chunk uses
 the 48-byte layout, in which case they are a plain list. Strips use degenerate
@@ -115,10 +124,9 @@ geometry rather than a parsing fault.
 
 ## Still to work out
 
-- **12 of 168 models in one zone fail to parse**, all named `hit_...`, with
-  offsets running past the end of the chunk. The name suggests hit boxes -
-  collision proxies rather than anything drawn - but that is a guess, and they
-  may simply use a variant layout.
+- `hit_...` models are exactly 64 bytes: a header and nothing else. They are
+  collision proxies with no geometry, so an empty model is the correct result
+  rather than a parse failure.
 - Texture names look like two 8-byte halves rather than one 16-byte string:
   `model   sar_kk2` reads as `model` and `sar_kk2` padded separately.
 - How a texture name reaches the DXT3 chunk that holds the image

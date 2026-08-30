@@ -135,6 +135,13 @@ Model parseMmb(const Chunk& chunk, const KeyTable& keys, const KeyTable& keys2)
     }
     const uint32_t blockHeaderOffset = read<uint32_t>(buffer, 60);
 
+    // Some models are exactly a header and nothing else - the hit_ ones, which
+    // are collision proxies. That is empty, not broken.
+    if (buffer.size() <= 64)
+    {
+        return model;
+    }
+
     if (pieces < 0 || pieces > 4096)
     {
         throw std::runtime_error("MMB: implausible piece count");
@@ -261,6 +268,11 @@ Model parseMmb(const Chunk& chunk, const KeyTable& keys, const KeyTable& keys2)
                 }
             }
             offset += static_cast<size_t>(indexCount) * 2;
+            // The index block is padded so the next mesh header starts on a
+            // 4-byte boundary. Without this, any mesh following an odd index
+            // count reads two bytes early and the rest of the model collapses -
+            // which silently cost 1,238 of one zone's 4,918 placements.
+            offset = (offset + 3) & ~static_cast<size_t>(3);
 
             model.meshes.push_back(std::move(mesh));
         }
