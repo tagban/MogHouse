@@ -14,6 +14,7 @@
 #include "camera.h"
 #include "math.h"
 #include "surface.h"
+#include "sky_shader.h"
 #include "zone_shader.h"
 #include "zonemesh.h"
 
@@ -41,6 +42,13 @@ struct Uniforms
 {
     float viewProjection[16];
     float lightDirection[4];
+};
+
+struct SkyUniforms
+{
+    float forward[4];
+    float right[4];
+    float up[4];
 };
 
 const char* backendName(wgpu::BackendType backend)
@@ -126,36 +134,13 @@ std::optional<pj::ZoneMesh> loadZone(const char* datPath, const char* keyPath, c
                             modelsFailed, resolved, missing);
             }
         }
-        // Collision geometry is drawn alongside the models, not instead of
-        // them. The collision hulls were recognisable as the zone - terrain,
-        // bridges - while the placed models alone are sparse, so the two are
-        // evidently not the same set of surfaces.
-        pj::ZoneMesh collision = pj::buildZoneMesh(zone);
-        if (!collision.indices.empty())
+        // Collision geometry is deliberately not drawn. Its meshes carry a
+        // flags field with only two values across all 5,921 of them, so it
+        // references no material - it is genuine collision, not terrain, and
+        // drawing it just covers the world in untextured white.
+        if (mesh.vertices.empty())
         {
-            const uint32_t vertexBase = static_cast<uint32_t>(mesh.vertices.size());
-            const uint32_t indexStart = static_cast<uint32_t>(mesh.indices.size());
-            mesh.vertices.insert(mesh.vertices.end(), collision.vertices.begin(), collision.vertices.end());
-            for (uint32_t index : collision.indices)
-            {
-                mesh.indices.push_back(vertexBase + index);
-            }
-            mesh.batches.push_back(pj::Batch{"", indexStart, static_cast<uint32_t>(mesh.indices.size()) - indexStart});
-
-            if (mesh.vertices.size() == collision.vertices.size())
-            {
-                mesh.boundsMin = collision.boundsMin;
-                mesh.boundsMax = collision.boundsMax;
-            }
-            else
-            {
-                mesh.boundsMin = {std::min(mesh.boundsMin.x, collision.boundsMin.x),
-                                  std::min(mesh.boundsMin.y, collision.boundsMin.y),
-                                  std::min(mesh.boundsMin.z, collision.boundsMin.z)};
-                mesh.boundsMax = {std::max(mesh.boundsMax.x, collision.boundsMax.x),
-                                  std::max(mesh.boundsMax.y, collision.boundsMax.y),
-                                  std::max(mesh.boundsMax.z, collision.boundsMax.z)};
-            }
+            mesh = pj::buildZoneMesh(zone);
         }
 
         if (!best || mesh.vertices.size() > best->vertices.size())
@@ -312,6 +297,17 @@ int main(int argc, char** argv)
 
     wgpu::Queue queue = device.GetQueue();
 
+    // The sky is drawn before anything else, at the far plane, with no depth
+    // writes - it is a backdrop rather than a surface.
+    wgpu::ShaderSourceWGSL skyWgsl;
+    skyWgsl.code = pj::kSkyShader;
+    wgpu::ShaderModuleDescriptor skyModuleDescriptor{.nextInChain = &skyWgsl};
+    wgpu::ShaderModule skyModule = device.CreateShaderModule(&skyModuleDescriptor);
+
+    wgpu::BufferDescriptor skyUniformDescriptor{.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
+                                                .size = sizeof(SkyUniforms)};
+    wgpu::Buffer skyUniformBuffer = device.CreateBuffer(&skyUniformDescriptor);
+
     wgpu::SurfaceCapabilities capabilities{};
     surface.GetCapabilities(adapter, &capabilities);
     const wgpu::TextureFormat surfaceFormat = capabilities.formats[0];
@@ -324,6 +320,26 @@ int main(int argc, char** argv)
     int pointHeight = 0;
     SDL_GetWindowSize(window, &pointWidth, &pointHeight);
     std::printf("window: %dx%d points, %dx%d pixels\n", pointWidth, pointHeight, pixelWidth, pixelHeight);
+
+    wgpu::ColorTargetState skyTarget{.format = surfaceFormat};
+    wgpu::FragmentState skyFragment{
+        .module = skyModule, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &skyTarget};
+    // Depth is compared but never written, so geometry drawn afterwards always
+    // wins and the sky fills only what is left.
+    wgpu::DepthStencilState skyDepth{.format = kDepthFormat,
+                                     .depthWriteEnabled = wgpu::OptionalBool::False,
+                                     .depthCompare = wgpu::CompareFunction::Always};
+    wgpu::RenderPipelineDescriptor skyPipelineDescriptor{
+        .vertex = {.module = skyModule, .entryPoint = "vertexMain"},
+        .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
+        .depthStencil = &skyDepth,
+        .fragment = &skyFragment};
+    wgpu::RenderPipeline skyPipeline = device.CreateRenderPipeline(&skyPipelineDescriptor);
+
+    wgpu::BindGroupEntry skyEntry{.binding = 0, .buffer = skyUniformBuffer, .size = sizeof(SkyUniforms)};
+    wgpu::BindGroupDescriptor skyBindGroupDescriptor{
+        .layout = skyPipeline.GetBindGroupLayout(0), .entryCount = 1, .entries = &skyEntry};
+    wgpu::BindGroup skyBindGroup = device.CreateBindGroup(&skyBindGroupDescriptor);
 
     wgpu::Texture depthTexture;
     auto configure = [&](uint32_t width, uint32_t height)
@@ -552,10 +568,34 @@ int main(int argc, char** argv)
                                                      .depthClearValue = 1.0f};
         wgpu::RenderPassDescriptor passDescriptor{.colorAttachmentCount = 1,
                                                   .colorAttachments = &colour,
-                                                  .depthStencilAttachment = indexCount ? &depth : nullptr};
+                                                  .depthStencilAttachment = &depth};
 
         wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
         wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&passDescriptor);
+
+        {
+            const float aspect = static_cast<float>(width) / static_cast<float>(height);
+            const float tanHalfFov = std::tan(1.05f * 0.5f);
+            const pj::Vec3 f = camera.orbiting ? pj::normalise(camera.lookAtPoint() - camera.eye()) : camera.forward();
+            const pj::Vec3 r = pj::normalise(pj::cross(f, pj::Vec3{0.0f, 1.0f, 0.0f}));
+            const pj::Vec3 u = pj::cross(r, f);
+
+            SkyUniforms skyUniforms{};
+            skyUniforms.forward[0] = f.x;
+            skyUniforms.forward[1] = f.y;
+            skyUniforms.forward[2] = f.z;
+            skyUniforms.right[0] = r.x * tanHalfFov * aspect;
+            skyUniforms.right[1] = r.y * tanHalfFov * aspect;
+            skyUniforms.right[2] = r.z * tanHalfFov * aspect;
+            skyUniforms.up[0] = u.x * tanHalfFov;
+            skyUniforms.up[1] = u.y * tanHalfFov;
+            skyUniforms.up[2] = u.z * tanHalfFov;
+            queue.WriteBuffer(skyUniformBuffer, 0, &skyUniforms, sizeof(skyUniforms));
+
+            pass.SetPipeline(skyPipeline);
+            pass.SetBindGroup(0, skyBindGroup);
+            pass.Draw(3);
+        }
 
         if (indexCount)
         {
