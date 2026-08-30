@@ -429,14 +429,16 @@ int main(int argc, char** argv)
     pj::Camera camera;
     camera.target = centre;
     camera.distance = radius * 2.4f;
-    // Start standing near the middle of the zone rather than orbiting it. An
-    // outside view cannot tell you whether a zone looks right; being in it can.
-    camera.position = {centre.x, zone ? zone->boundsMin.y + pj::kEyeHeight + 2.0f : 0.0f, centre.z};
+    // Start at the middle of the zone in all three axes. Starting from the
+    // bottom of the bounds put the camera 25 units under the terrain in
+    // Sarutabaruta, looking at the underside of the world - which reads as the
+    // zone being mostly missing rather than as being in the wrong place.
+    camera.position = centre;
     camera.pitch = 0.0f;
     bool dragging = false;
 
     std::printf("wasd to walk, mouse drag to look, space and ctrl for up and down,\n");
-    std::printf("shift to move faster, tab to orbit the whole zone, escape to quit\n");
+    std::printf("shift to move faster, tab to orbit, p to print position, escape to quit\n");
 
     uint64_t previousTicks = SDL_GetTicksNS();
     bool running = true;
@@ -458,6 +460,12 @@ int main(int argc, char** argv)
                 else if (event.key.key == SDLK_TAB)
                 {
                     camera.orbiting = !camera.orbiting;
+                }
+                else if (event.key.key == SDLK_P)
+                {
+                    const pj::Vec3 at = camera.eye();
+                    std::printf("at %.1f %.1f %.1f   zone y runs %.1f to %.1f\n", at.x, at.y, at.z,
+                                zone->boundsMin.y, zone->boundsMax.y);
                 }
             }
             else if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED)
