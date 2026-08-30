@@ -814,6 +814,134 @@ int mh::runViewer(const ViewerOptions& options)
                     uploaded, untextured);
     }
 
+    // --- the map ------------------------------------------------------------
+    // Baked once, straight down, through the pipeline that draws the zone - so
+    // the radar shows the world as it actually looks rather than a schematic
+    // redrawn from the same data.
+    wgpu::Texture mapTexture;
+    if (zone && pipeline && !zone->draws.empty())
+    {
+        constexpr uint32_t kMapSize = 2048;
+
+        wgpu::TextureDescriptor mapDescriptor{
+            .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding |
+                     wgpu::TextureUsage::CopySrc,
+            .dimension = wgpu::TextureDimension::e2D,
+            .size = {kMapSize, kMapSize, 1},
+            .format = surfaceFormat,
+            .mipLevelCount = 1,
+            .sampleCount = 1};
+        mapTexture = device.CreateTexture(&mapDescriptor);
+
+        wgpu::TextureDescriptor mapDepthDescriptor{.usage = wgpu::TextureUsage::RenderAttachment,
+                                                   .dimension = wgpu::TextureDimension::e2D,
+                                                   .size = {kMapSize, kMapSize, 1},
+                                                   .format = kDepthFormat,
+                                                   .mipLevelCount = 1,
+                                                   .sampleCount = 1};
+        wgpu::Texture mapDepth = device.CreateTexture(&mapDepthDescriptor);
+
+        // A square covering the zone, so the map keeps the world aspect and a
+        // step north is the same number of pixels as a step east.
+        const mh::Vec3 lo = zone->boundsMin;
+        const mh::Vec3 hi = zone->boundsMax;
+        const float half = std::max(hi.x - lo.x, hi.z - lo.z) * 0.5f;
+        const mh::Vec3 middle = zone->centre();
+
+        Uniforms mapUniforms{};
+        // Straight down. The up vector has to differ from the view direction,
+        // and +z puts north at the top.
+        const mh::Mat4 mapView = mh::lookAt({middle.x, hi.y + 100.0f, middle.z}, middle, {0.0f, 0.0f, 1.0f});
+        const mh::Mat4 mapProjection = mh::orthographic(-half, half, -half, half, 1.0f, (hi.y - lo.y) + 400.0f);
+        const mh::Mat4 mapViewProjection = mapProjection * mapView;
+        std::memcpy(mapUniforms.viewProjection, mapViewProjection.m, sizeof(mapUniforms.viewProjection));
+
+        // Flat and unfogged. A map lit from an angle reads as terrain in
+        // shadow rather than as ground, and fog would erase the far half.
+        const mh::Vec3 down = mh::normalise(mh::Vec3{0.0f, 1.0f, 0.0f});
+        mapUniforms.lightDirection[0] = down.x;
+        mapUniforms.lightDirection[1] = down.y;
+        mapUniforms.lightDirection[2] = down.z;
+        mapUniforms.ambient[0] = mapUniforms.ambient[1] = mapUniforms.ambient[2] = 0.75f;
+        mapUniforms.sunlight[0] = mapUniforms.sunlight[1] = mapUniforms.sunlight[2] = 0.35f;
+        mapUniforms.fogRange[0] = 1e9f;
+        mapUniforms.fogRange[1] = 1e9f;
+        queue.WriteBuffer(uniformBuffer, 0, &mapUniforms, sizeof(mapUniforms));
+
+        wgpu::RenderPassColorAttachment mapColour{.view = mapTexture.CreateView(),
+                                                  .loadOp = wgpu::LoadOp::Clear,
+                                                  .storeOp = wgpu::StoreOp::Store,
+                                                  .clearValue = {0.0f, 0.0f, 0.0f, 0.0f}};
+        wgpu::RenderPassDepthStencilAttachment mapDepthAttachment{.view = mapDepth.CreateView(),
+                                                                  .depthLoadOp = wgpu::LoadOp::Clear,
+                                                                  .depthStoreOp = wgpu::StoreOp::Store,
+                                                                  .depthClearValue = 1.0f};
+        wgpu::RenderPassDescriptor mapPassDescriptor{.colorAttachmentCount = 1,
+                                                     .colorAttachments = &mapColour,
+                                                     .depthStencilAttachment = &mapDepthAttachment};
+
+        wgpu::CommandEncoder mapEncoder = device.CreateCommandEncoder();
+        wgpu::RenderPassEncoder mapPass = mapEncoder.BeginRenderPass(&mapPassDescriptor);
+        mapPass.SetVertexBuffer(0, vertexBuffer);
+        mapPass.SetVertexBuffer(1, instanceBuffer);
+        mapPass.SetIndexBuffer(indexBuffer, wgpu::IndexFormat::Uint32);
+        for (size_t i = 0; i < zone->draws.size() && i < batchBindGroups.size(); ++i)
+        {
+            const mh::InstancedDraw& draw = zone->draws[i];
+            mapPass.SetPipeline(draw.cutout ? cutoutPipeline : pipeline);
+            mapPass.SetBindGroup(0, batchBindGroups[i]);
+            mapPass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
+        }
+        if (waterIndexCount && waterPipeline)
+        {
+            mapPass.SetPipeline(waterPipeline);
+            mapPass.SetBindGroup(0, waterBindGroup);
+            mapPass.SetVertexBuffer(0, waterVertexBuffer);
+            mapPass.SetIndexBuffer(waterIndexBuffer, wgpu::IndexFormat::Uint32);
+            mapPass.DrawIndexed(waterIndexCount);
+        }
+        mapPass.End();
+        wgpu::CommandBuffer mapCommands = mapEncoder.Finish();
+        queue.Submit(1, &mapCommands);
+
+        std::printf("map: baked %ux%u covering %.0f units, centred on %.0f %.0f\n", kMapSize, kMapSize, half * 2.0f,
+                    middle.x, middle.z);
+
+        // mapPath writes the bake out so it can be looked at directly.
+        if (options.mapPath)
+        {
+            const uint32_t bytesPerRow = (kMapSize * 4 + 255) / 256 * 256;
+            wgpu::BufferDescriptor readDescriptor{.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead,
+                                                  .size = static_cast<uint64_t>(bytesPerRow) * kMapSize};
+            wgpu::Buffer readback = device.CreateBuffer(&readDescriptor);
+
+            wgpu::CommandEncoder copyEncoder = device.CreateCommandEncoder();
+            wgpu::TexelCopyTextureInfo source{.texture = mapTexture};
+            wgpu::TexelCopyBufferInfo destination{
+                .layout = {.bytesPerRow = bytesPerRow, .rowsPerImage = kMapSize}, .buffer = readback};
+            const wgpu::Extent3D extent{kMapSize, kMapSize, 1};
+            copyEncoder.CopyTextureToBuffer(&source, &destination, &extent);
+            wgpu::CommandBuffer copyCommands = copyEncoder.Finish();
+            queue.Submit(1, &copyCommands);
+
+            bool mapped = false;
+            wgpu::Future future = readback.MapAsync(wgpu::MapMode::Read, 0, wgpu::kWholeMapSize,
+                                                    wgpu::CallbackMode::AllowProcessEvents,
+                                                    [&](wgpu::MapAsyncStatus status, wgpu::StringView)
+                                                    { mapped = status == wgpu::MapAsyncStatus::Success; });
+            instance.WaitAny(future, UINT64_MAX);
+            if (mapped)
+            {
+                const auto* pixels = static_cast<const uint8_t*>(readback.GetConstMappedRange());
+                if (pixels && writeBmp(options.mapPath->c_str(), pixels, kMapSize, kMapSize, bytesPerRow))
+                {
+                    std::printf("wrote %s\n", options.mapPath->c_str());
+                }
+                readback.Unmap();
+            }
+        }
+    }
+
     // `characterPath` is a semicolon-separated list of DATs to assemble
     // one character from, and MOGHOUSE_CHARACTER_AT is where to stand it.
     std::optional<LoadedCharacter> character;

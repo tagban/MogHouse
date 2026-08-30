@@ -78,6 +78,21 @@ inline Mat4 perspective(float fovY, float aspect, float near, float far)
     return out;
 }
 
+/// Orthographic, depth mapped to 0..1 the way WebGPU wants. Used to bake a
+/// zone into a flat map: perspective would give the middle of the zone a
+/// different scale from the edges, which is the one thing a map must not do.
+inline Mat4 orthographic(float left, float right, float bottom, float top, float near, float far)
+{
+    Mat4 out = Mat4::identity();
+    out.m[0] = 2.0f / (right - left);
+    out.m[5] = 2.0f / (top - bottom);
+    out.m[10] = 1.0f / (near - far);
+    out.m[12] = (left + right) / (left - right);
+    out.m[13] = (bottom + top) / (bottom - top);
+    out.m[14] = near / (near - far);
+    return out;
+}
+
 inline Mat4 lookAt(const Vec3& eye, const Vec3& target, const Vec3& up)
 {
     const Vec3 forward = normalise(target - eye);

@@ -57,6 +57,9 @@ struct ViewerOptions
     std::optional<std::string> screenshotPath;
     int screenshotSequence{};
 
+    /// Writes the baked top-down map out as a BMP, for looking at directly.
+    std::optional<std::string> mapPath;
+
     /// 0 never cuts out, 1 always, anything else lets each texture decide.
     int cutoutMode{2};
 

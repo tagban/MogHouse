@@ -50,6 +50,7 @@ ViewerOptions optionsFromEnvironment(int argc, char** argv)
     options.cameraLook = fromEnvironment("MOGHOUSE_CAMERA_LOOK");
     options.animation = fromEnvironment("MOGHOUSE_ANIMATION");
     options.screenshotPath = fromEnvironment("MOGHOUSE_SCREENSHOT");
+    options.mapPath = fromEnvironment("MOGHOUSE_MAP");
 
     if (const std::optional<std::string> frame = fromEnvironment("MOGHOUSE_FRAME"))
     {
