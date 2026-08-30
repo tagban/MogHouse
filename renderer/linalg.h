@@ -66,11 +66,23 @@ inline Mat4 operator*(const Mat4& a, const Mat4& b)
 }
 
 /// Right-handed, depth mapped to 0..1 the way WebGPU wants rather than -1..1.
+///
+/// The x scale is negative on purpose, and it is not a fudge - it is half of
+/// the conversion out of FFXI's coordinates.
+///
+/// FFXI's vertical points down. The DAT readers negate it so everything above
+/// them can assume y is up, and negating a single axis is a reflection: it
+/// converts the handedness of the frame and mirrors what is drawn. Flipping a
+/// horizontal axis as well restores it. Doing that here, once, covers
+/// everything that reaches the screen through a projection.
+///
+/// The symptom was a mirrored world that reads as plausible: in Bastok Markets
+/// the water sits left of the auction house, and it was on the right.
 inline Mat4 perspective(float fovY, float aspect, float near, float far)
 {
     const float f = 1.0f / std::tan(fovY * 0.5f);
     Mat4 out;
-    out.m[0] = f / aspect;
+    out.m[0] = -f / aspect;
     out.m[5] = f;
     out.m[10] = far / (near - far);
     out.m[11] = -1.0f;
@@ -81,10 +93,13 @@ inline Mat4 perspective(float fovY, float aspect, float near, float far)
 /// Orthographic, depth mapped to 0..1 the way WebGPU wants. Used to bake a
 /// zone into a flat map: perspective would give the middle of the zone a
 /// different scale from the edges, which is the one thing a map must not do.
+/// The same handedness correction as perspective - see there. The map bake
+/// used to swap its left and right arguments to get this; now both projections
+/// carry it in the same place.
 inline Mat4 orthographic(float left, float right, float bottom, float top, float near, float far)
 {
     Mat4 out = Mat4::identity();
-    out.m[0] = 2.0f / (right - left);
+    out.m[0] = -2.0f / (right - left);
     out.m[5] = 2.0f / (top - bottom);
     out.m[10] = 1.0f / (near - far);
     out.m[12] = (left + right) / (left - right);

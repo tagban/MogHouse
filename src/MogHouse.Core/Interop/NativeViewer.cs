@@ -180,6 +180,20 @@ public sealed partial class NativeViewer : IDisposable
         mh_viewer_set_entities(_handle, entities, entities.Length);
     }
 
+    /// <summary>
+    /// Where the character has walked to, or false before the first frame.
+    /// Y is up; FFXI's own vertical is the negation.
+    /// </summary>
+    public bool TryGetCharacter(out float x, out float y, out float z, out float heading)
+    {
+        x = y = z = heading = 0;
+        if (_disposed)
+        {
+            return false;
+        }
+        return mh_viewer_get_character(_handle, out x, out y, out z, out heading) != 0;
+    }
+
     /// <summary>Asks the viewer to close. Run returns shortly afterwards.</summary>
     public void Stop()
     {
@@ -229,6 +243,10 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static partial void mh_viewer_set_entities(IntPtr viewer, ReadOnlySpan<NativeRadarEntity> entities, int count);
+
+    [LibraryImport(LibraryName)]
+    private static partial int mh_viewer_get_character(IntPtr viewer, out float x, out float y, out float z,
+                                                       out float heading);
 
     [LibraryImport(LibraryName)]
     private static partial void mh_viewer_stop(IntPtr viewer);

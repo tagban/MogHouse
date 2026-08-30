@@ -35,10 +35,17 @@ struct Camera
         return normalise({std::cos(pitch) * std::sin(yaw), std::sin(pitch), std::cos(pitch) * std::cos(yaw)});
     }
 
+    /// Screen right, which is cross(up, forward) rather than the other way
+    /// round.
+    ///
+    /// The projection mirrors x - half of the conversion out of FFXI's
+    /// Y-down coordinates, see linalg.h - so what lands on the right of the
+    /// screen is +x, and the other order gives -x. With that reversed,
+    /// strafing goes the opposite way to the picture.
     Vec3 right() const
     {
         const Vec3 f = forward();
-        return normalise(cross(f, Vec3{0.0f, 1.0f, 0.0f}));
+        return normalise(cross(Vec3{0.0f, 1.0f, 0.0f}, f));
     }
 
     Vec3 eye() const

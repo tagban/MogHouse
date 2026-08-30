@@ -120,10 +120,23 @@ public:
     void stop();
     bool stopping() const;
 
+    /// Where the character has walked to, posted every frame.
+    ///
+    /// The client needs this because it, not the renderer, talks to the
+    /// server: without it a character walks around on screen while standing
+    /// still in the world, which is exactly what it looks like - present,
+    /// named, and not moving.
+    ///
+    /// Y is up here, as everywhere past the DAT readers. The caller converts.
+    void setCharacter(float x, float y, float z, float heading);
+    bool character(float& x, float& y, float& z, float& heading) const;
+
 private:
     mutable std::mutex mutex_;
     std::vector<RadarEntity> entities_;
     std::atomic<bool> stop_{false};
+    float character_[4]{};
+    bool haveCharacter_{false};
 };
 
 /// Reads the options the standalone viewer has always taken: the zone from

@@ -477,6 +477,14 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                         followCharId: flags.TryGetValue("zone-follow", out string? followSpec) && uint.TryParse(followSpec, out uint followId) ? followId : null,
                         gmCommand: flags.TryGetValue("zone-command", out string? gmCmd) && gmCmd.Length > 0 ? gmCmd : null,
                         stopFile: flags.TryGetValue("zone-stopfile", out string? stopPath) && stopPath.Length > 0 ? stopPath : null,
+                        // With --view the renderer is where the character
+                        // actually is, so that is what gets reported. Without
+                        // it nothing is driving movement and the heartbeat
+                        // keeps repeating the spawn, which reads on the server
+                        // as a character standing perfectly still.
+                        positionProvider: liveRadar is null
+                            ? null
+                            : () => liveRadar.Position() ?? (posX, posY, posZ, zoneState.Direction),
                         tellTo: flags.TryGetValue("zone-tell", out string? tellTarget) && tellTarget.Length > 0 ? tellTarget : null,
                         tellText: flags.GetValueOrDefault("zone-tell-text", "hello from MogHouse"),
                         onReply: reply =>
@@ -849,6 +857,24 @@ sealed class LiveRadar : IDisposable
         };
 
         return new LiveRadar(new NativeViewer(options));
+    }
+
+    /// <summary>
+    /// Where the renderer has walked the character, in the protocol's own
+    /// terms: FFXI's vertical points down, so it is the negation of the
+    /// renderer's, and direction is a byte over the full circle rather than
+    /// radians.
+    /// </summary>
+    public (float X, float Vertical, float Depth, sbyte Direction)? Position()
+    {
+        if (_closed || !_viewer.TryGetCharacter(out float x, out float y, out float z, out float heading))
+        {
+            return null;
+        }
+
+        double turns = heading / (Math.PI * 2);
+        turns -= Math.Floor(turns);
+        return (x, -y, z, (sbyte)(byte)Math.Round(turns * 256) );
     }
 
     /// <summary>Pushes what the tracker currently believes is nearby.</summary>

@@ -87,6 +87,12 @@ MH_API int32_t mh_viewer_run(MhViewerHandle viewer);
 /// mh_viewer_run is going, which is the point of the whole file.
 MH_API void mh_viewer_set_entities(MhViewerHandle viewer, const MhRadarEntity* entities, int32_t count);
 
+/// Where the character has walked to. Returns 0 before the first frame.
+///
+/// The client owns the connection, so movement only reaches the server if it
+/// asks for it. Y is up; FFXI's own vertical is the negation.
+MH_API int32_t mh_viewer_get_character(MhViewerHandle viewer, float* x, float* y, float* z, float* heading);
+
 /// Asks a running viewer to close. mh_viewer_run returns shortly after.
 MH_API void mh_viewer_stop(MhViewerHandle viewer);
 

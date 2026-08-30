@@ -382,6 +382,30 @@ std::vector<mh::RadarEntity> mh::ViewerLink::entities() const
     return entities_;
 }
 
+void mh::ViewerLink::setCharacter(float x, float y, float z, float heading)
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+    character_[0] = x;
+    character_[1] = y;
+    character_[2] = z;
+    character_[3] = heading;
+    haveCharacter_ = true;
+}
+
+bool mh::ViewerLink::character(float& x, float& y, float& z, float& heading) const
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+    if (!haveCharacter_)
+    {
+        return false;
+    }
+    x = character_[0];
+    y = character_[1];
+    z = character_[2];
+    heading = character_[3];
+    return true;
+}
+
 void mh::ViewerLink::stop() { stop_ = true; }
 
 bool mh::ViewerLink::stopping() const { return stop_; }
@@ -879,16 +903,11 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         Uniforms mapUniforms{};
         // Straight down, with +z up the screen so north is at the top.
         //
-        // The left and right of the projection are swapped on purpose. Looking
-        // straight down with north up, this look-at puts the world -x axis to
-        // screen right - the map comes out mirrored east to west, which is
-        // invisible on terrain this irregular and would send a player walking
-        // east sliding west across the radar. Swapping the projection mirrors
-        // it back. Measured, not reasoned: with both axes as they were, only
-        // 80% of walkable texels landed on drawn terrain, against 100% once
-        // corrected.
+        // This used to swap its own left and right to undo the mirror. The
+        // correction now lives in the projections themselves, so swapping here
+        // as well would put it back.
         const mh::Mat4 mapView = mh::lookAt({middle.x, hi.y + 100.0f, middle.z}, middle, {0.0f, 0.0f, 1.0f});
-        const mh::Mat4 mapProjection = mh::orthographic(half, -half, -half, half, 1.0f, (hi.y - lo.y) + 400.0f);
+        const mh::Mat4 mapProjection = mh::orthographic(-half, half, -half, half, 1.0f, (hi.y - lo.y) + 400.0f);
         const mh::Mat4 mapViewProjection = mapProjection * mapView;
         std::memcpy(mapUniforms.viewProjection, mapViewProjection.m, sizeof(mapUniforms.viewProjection));
 
@@ -1551,7 +1570,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             // what makes it read as steering a person rather than nudging a
             // point on a map.
             const mh::Vec3 forward = mh::normalise(mh::Vec3{std::sin(camera.yaw), 0.0f, std::cos(camera.yaw)});
-            const mh::Vec3 right = mh::normalise(mh::cross(forward, mh::Vec3{0.0f, 1.0f, 0.0f}));
+            const mh::Vec3 right = mh::normalise(mh::cross(mh::Vec3{0.0f, 1.0f, 0.0f}, forward));
 
             const mh::Vec3 wanted{characterAt.x + forward.x * ahead + right.x * side, characterAt.y,
                                   characterAt.z + forward.z * ahead + right.z * side};
@@ -1648,6 +1667,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         if (link)
         {
             radarEntities = link->entities();
+            link->setCharacter(characterAt.x, characterAt.y, characterAt.z, characterFacing);
             if (link->stopping())
             {
                 running = false;
@@ -1696,9 +1716,12 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             skyUniforms.forward[0] = f.x;
             skyUniforms.forward[1] = f.y;
             skyUniforms.forward[2] = f.z;
-            skyUniforms.right[0] = r.x * tanHalfFov * aspect;
-            skyUniforms.right[1] = r.y * tanHalfFov * aspect;
-            skyUniforms.right[2] = r.z * tanHalfFov * aspect;
+            // Negated to match the projection's x flip. The sky builds its rays
+            // from this basis rather than through a projection, so without it
+            // the sky would slide the opposite way to the world under it.
+            skyUniforms.right[0] = -r.x * tanHalfFov * aspect;
+            skyUniforms.right[1] = -r.y * tanHalfFov * aspect;
+            skyUniforms.right[2] = -r.z * tanHalfFov * aspect;
             skyUniforms.up[0] = u.x * tanHalfFov;
             skyUniforms.up[1] = u.y * tanHalfFov;
             skyUniforms.up[2] = u.z * tanHalfFov;
