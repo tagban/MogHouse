@@ -19,6 +19,7 @@
 #include "gputexture.h"
 #include "camera.h"
 #include "character.h"
+#include "collision.h"
 #include "coverage.h"
 #include "linalg.h"
 #include "scene.h"
@@ -192,7 +193,8 @@ std::optional<LoadedCharacter> loadCharacter(const std::vector<std::string>& dat
 }
 
 std::optional<pj::Scene> loadZone(const char* datPath, const char* keyPath, const char* key2Path, std::string& zoneId,
-                                     std::unordered_map<std::string, ffxi::Texture>& textures, ffxi::Lighting& lighting)
+                                     std::unordered_map<std::string, ffxi::Texture>& textures, ffxi::Lighting& lighting,
+                                     pj::Collision& collision)
 {
     auto keys = ffxi::KeyTable::load(keyPath);
     if (!keys)
@@ -275,6 +277,9 @@ std::optional<pj::Scene> loadZone(const char* datPath, const char* keyPath, cons
         {
             best = std::move(mesh);
             zoneId = zone.id;
+            // The same chunk that produced the visible world produces the
+            // ground to stand on, so they cannot disagree.
+            collision = pj::Collision{zone};
         }
     }
     return best;
@@ -358,6 +363,7 @@ int main(int argc, char** argv)
 
     std::string zoneId;
     std::optional<pj::Scene> zone;
+    pj::Collision collision;
     std::unordered_map<std::string, ffxi::Texture> textures;
     ffxi::Lighting lighting;
     if (argc > 1)
@@ -368,7 +374,8 @@ int main(int argc, char** argv)
             std::printf("set PORTJEUNO_FFXI_KEYTABLE to the 256-byte MZB key table to load a zone\n");
             return 2;
         }
-        zone = loadZone(argv[1], keyPath, std::getenv("PORTJEUNO_FFXI_KEYTABLE2"), zoneId, textures, lighting);
+        zone = loadZone(argv[1], keyPath, std::getenv("PORTJEUNO_FFXI_KEYTABLE2"), zoneId, textures, lighting,
+                        collision);
         if (!zone)
         {
             return 1;
@@ -376,6 +383,7 @@ int main(int argc, char** argv)
         // The character is loaded after the zone so it can share the texture
         // map: a PC in a town wears textures the zone never mentions, and a
         // zone texture the character happens to name should not be read twice.
+        std::printf("collision: %zu triangles\n", collision.triangleCount());
         std::printf("zone %s: %zu triangles\n", zoneId.c_str(), zone->indices.size() / 3);
         std::printf("  bounds x %.1f..%.1f  y %.1f..%.1f  z %.1f..%.1f\n", zone->boundsMin.x, zone->boundsMax.x,
                     zone->boundsMin.y, zone->boundsMax.y, zone->boundsMin.z, zone->boundsMax.z);
@@ -967,6 +975,15 @@ int main(int argc, char** argv)
     }
     auto placeCharacter = [&](const pj::Vec3& where) {
         characterAt = where;
+        // Snap to the floor, and if there is none directly below, to the
+        // nearest spot there is. Without collision at all - a zone we could
+        // not parse - the character stays where it was put rather than being
+        // trapped somewhere arbitrary.
+        if (const std::optional<pj::Vec3> ground =
+                collision.nearestGround(where.x, where.z, where.y + 1.0f, 60.0f))
+        {
+            characterAt = *ground;
+        }
         if (characterInstanceBuffer)
         {
             const float c = std::cos(characterFacing);
@@ -977,6 +994,11 @@ int main(int argc, char** argv)
         }
     };
     placeCharacter(characterAt);
+    if (character)
+    {
+        std::printf("character stands at %.1f %.1f %.1f%s\n", characterAt.x, characterAt.y, characterAt.z,
+                    collision.empty() ? " (no collision - movement unconstrained)" : "");
+    }
 
     // Framing a shot from a script needs the camera to be settable; dragging
     // it into place by hand cannot be repeated.
@@ -996,7 +1018,8 @@ int main(int argc, char** argv)
     bool dragging = false;
 
     std::printf("wasd to walk, mouse drag to look, space and ctrl for up and down,\n");
-    std::printf("shift to move faster, tab to orbit, p to print position, c to place the character,\n");
+    std::printf("shift to run, tab to orbit, p to print position, c to place the character,\n");
+    std::printf("f to swap between driving the character and flying the camera,\n");
     std::printf("escape to quit\n");
 
     // PORTJEUNO_SCREENSHOT writes one frame to a BMP and quits. Without it
@@ -1020,8 +1043,24 @@ int main(int argc, char** argv)
     // triangles is nothing next to a zone, and it keeps the pose maths
     // somewhere it can be read.
     const ffxi::Animation* playing = nullptr;
+    const ffxi::Animation* idleClip = nullptr;
+    const ffxi::Animation* walkClip = nullptr;
+    const ffxi::Animation* runClip = nullptr;
+    // PORTJEUNO_ANIMATION pins one clip; without it, movement picks.
+    const bool pinnedClip = std::getenv("PORTJEUNO_ANIMATION") != nullptr;
+    float animationOffset = 0.0f;
+    bool driving = character.has_value();
+
     if (character && !character->animations.empty())
     {
+        auto find = [&](const char* name) -> const ffxi::Animation* {
+            auto found = character->animations.find(name);
+            return found == character->animations.end() ? nullptr : &found->second;
+        };
+        idleClip = find("idl0");
+        walkClip = find("wlk0");
+        runClip = find("run0");
+
         const char* wanted = std::getenv("PORTJEUNO_ANIMATION");
         auto found = character->animations.find(wanted ? wanted : "idl0");
         if (found == character->animations.end() && wanted)
@@ -1089,6 +1128,16 @@ int main(int argc, char** argv)
                     std::printf("at %.1f %.1f %.1f   zone y runs %.1f to %.1f\n", at.x, at.y, at.z,
                                 zone->boundsMin.y, zone->boundsMax.y);
                 }
+                else if (event.key.key == SDLK_F && character)
+                {
+                    driving = !driving;
+                    camera.orbiting = driving;
+                    if (!driving)
+                    {
+                        camera.position = camera.eye();
+                    }
+                    std::printf("%s\n", driving ? "driving the character" : "flying the camera");
+                }
                 else if (event.key.key == SDLK_C && character)
                 {
                     // Stand the character where the camera is. Nothing knows
@@ -1138,7 +1187,57 @@ int main(int argc, char** argv)
         const float ahead = (held[SDL_SCANCODE_W] ? speed : 0.0f) - (held[SDL_SCANCODE_S] ? speed : 0.0f);
         const float side = (held[SDL_SCANCODE_D] ? speed : 0.0f) - (held[SDL_SCANCODE_A] ? speed : 0.0f);
         const float lift = (held[SDL_SCANCODE_SPACE] ? speed : 0.0f) - (held[SDL_SCANCODE_LCTRL] ? speed : 0.0f);
-        camera.walk(ahead, side, lift);
+
+        // Two ways to move: fly the camera around to look at the zone, or
+        // drive the character and have the camera follow. A character in the
+        // world starts in the second.
+        float moved = 0.0f;
+        if (driving && character)
+        {
+            // Movement is relative to where the camera is looking, which is
+            // what makes it read as steering a person rather than nudging a
+            // point on a map.
+            const pj::Vec3 forward = pj::normalise(pj::Vec3{std::sin(camera.yaw), 0.0f, std::cos(camera.yaw)});
+            const pj::Vec3 right = pj::normalise(pj::cross(forward, pj::Vec3{0.0f, 1.0f, 0.0f}));
+
+            const pj::Vec3 wanted{characterAt.x + forward.x * ahead + right.x * side, characterAt.y,
+                                  characterAt.z + forward.z * ahead + right.z * side};
+            if (wanted.x != characterAt.x || wanted.z != characterAt.z)
+            {
+                const pj::Vec3 stepped = collision.empty() ? wanted : collision.move(characterAt, wanted, 0.5f);
+                const float dx = stepped.x - characterAt.x;
+                const float dz = stepped.z - characterAt.z;
+                moved = std::sqrt(dx * dx + dz * dz);
+                if (moved > 1e-5f)
+                {
+                    // Face the way we are actually going, not the way we
+                    // asked to go - sliding along a wall should turn you.
+                    characterFacing = std::atan2(dz, dx);
+                }
+                placeCharacter(stepped);
+            }
+
+            // The camera sits behind and above the character, at head height.
+            camera.orbiting = true;
+            camera.target = {characterAt.x, characterAt.y + 1.2f, characterAt.z};
+            camera.distance = std::clamp(camera.distance - lift * 0.6f, 1.5f, 25.0f);
+        }
+        else
+        {
+            camera.walk(ahead, side, lift);
+        }
+
+        // Idle, walk or run, chosen by what the character is actually doing.
+        if (!pinnedClip)
+        {
+            const bool running = held[SDL_SCANCODE_LSHIFT] || held[SDL_SCANCODE_RSHIFT];
+            const ffxi::Animation* wanted = moved > 1e-4f ? (running ? runClip : walkClip) : idleClip;
+            if (wanted && wanted != playing)
+            {
+                playing = wanted;
+                animationOffset = static_cast<float>(SDL_GetTicksNS() / 1000000ull) / 1000.0f;
+            }
+        }
 
         // A capture walks the animation a frame at a time; otherwise the clock
         // is either pinned or real.
@@ -1146,7 +1245,7 @@ int main(int argc, char** argv)
             sequenceCount > 0 && playing ? static_cast<float>(std::max(shotIndex, 0)) * playing->frameSeconds()
             : pinnedFrame >= 0.0f && playing
                 ? pinnedFrame * playing->frameSeconds()
-                : static_cast<float>(SDL_GetTicksNS() / 1000000ull) / 1000.0f;
+                : static_cast<float>(SDL_GetTicksNS() / 1000000ull) / 1000.0f - animationOffset;
 
         wgpu::SurfaceTexture surfaceTexture;
         surface.GetCurrentTexture(&surfaceTexture);

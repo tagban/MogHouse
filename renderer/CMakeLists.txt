@@ -28,6 +28,7 @@ endif()
 
 add_executable(portjeuno-renderer
     character.cpp
+    collision.cpp
     main.cpp
     scene.cpp
     zonemesh.cpp
@@ -76,3 +77,9 @@ target_link_libraries(ffxi-datdump PRIVATE ffxi-dat)
 add_executable(ffxi-chardump chardump_main.cpp character.cpp)
 target_include_directories(ffxi-chardump PRIVATE .)
 target_link_libraries(ffxi-chardump PRIVATE ffxi-dat)
+
+# Probing the ground query needs no GPU either, and finding out whether it
+# answers from inside a render loop costs a rebuild per guess.
+add_executable(ffxi-collisiondump collisiondump_main.cpp collision.cpp)
+target_include_directories(ffxi-collisiondump PRIVATE .)
+target_link_libraries(ffxi-collisiondump PRIVATE ffxi-dat)

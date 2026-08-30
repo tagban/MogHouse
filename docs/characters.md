@@ -118,10 +118,16 @@ PORTJEUNO_FFXI_KEYTABLE=keys/mzb_key_table.bin PORTJEUNO_FFXI_KEYTABLE2=keys/mmb
 | `PORTJEUNO_CHARACTER` | semicolon-separated DAT paths, for an NPC that lives in one file |
 | `PORTJEUNO_CHARACTER_AT` | `x,y,z` to stand it at |
 | `PORTJEUNO_CHARACTER_FACING` | heading in degrees; the model faces east at zero |
-| `PORTJEUNO_ANIMATION` | animation name, `idl0` by default |
+| `PORTJEUNO_ANIMATION` | pins one animation; without it, movement picks |
 | `PORTJEUNO_FRAME` | pins the animation clock, for a repeatable screenshot |
 
-`c` in the window stands the character wherever the camera is.
+In the window: **wasd** drives the character, **shift** runs, **c** stands them
+where the camera is, **f** swaps between driving the character and flying the
+camera, **tab** orbits, **p** prints the position.
+
+The character walks on the terrain and stops at walls — see
+[collision.md](collision.md). Idle, walk and run are chosen by what they are
+actually doing, unless `PORTJEUNO_ANIMATION` pins one.
 
 ## Not done yet
 
@@ -129,7 +135,7 @@ PORTJEUNO_FFXI_KEYTABLE=keys/mzb_key_table.bin PORTJEUNO_FFXI_KEYTABLE2=keys/mmb
 - Weapons, which have their own slots in the same layout.
 - The item table, which is what maps an item to a model id.
 - Blending between animations, so a walk does not snap into an idle.
-- Standing on the ground: nothing yet asks the collision mesh how high it is.
+- Falling: a character walked off a ledge stops at the edge rather than dropping.
 - A blended pass. Some headgear carries a dark eye slot that reads as a flat
   black bar. Both cutout modes render it identically and no texture is missing,
   so it is genuinely opaque in the sheet - but the retail client may blend it,
