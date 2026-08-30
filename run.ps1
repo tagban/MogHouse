@@ -10,8 +10,12 @@
 # In the window: wasd walks, drag looks, c drops the character where you are
 # standing, tab orbits, p prints the position, escape quits.
 param(
-    # race,face,head,body,hands,legs,feet - see docs/characters.md
-    [string]$Look = "",
+    # race,face,head,body,hands,legs,feet - see docs/characters.md.
+    #
+    # Typed as an array so an unquoted 1,0,0,1,1,1,1 works: PowerShell parses
+    # that as seven values, and binding it to a [string] would silently join
+    # them with spaces instead of commas.
+    [string[]]$Look = @(),
     # An NPC that lives in one DAT, as a path. Ignored if -Look is given.
     [string]$Character = "",
     [string]$Animation = "idl0",
@@ -56,9 +60,10 @@ print(path if path else '')
 $env:PORTJEUNO_FFXI_KEYTABLE = Join-Path $keys "mzb_key_table.bin"
 $env:PORTJEUNO_FFXI_KEYTABLE2 = Join-Path $keys "mmb_key_table2.bin"
 $env:PORTJEUNO_FFXI_INSTALL = $Install
-$env:PORTJEUNO_LOOK = if ($Look) { $Look } else { $null }
+$lookValue = $Look -join ","
+$env:PORTJEUNO_LOOK = if ($lookValue) { $lookValue } else { $null }
 $env:PORTJEUNO_CHARACTER = if ($Character) { $Character } else { $null }
-$env:PORTJEUNO_ANIMATION = if ($Look -or $Character) { $Animation } else { $null }
+$env:PORTJEUNO_ANIMATION = if ($lookValue -or $Character) { $Animation } else { $null }
 $env:PORTJEUNO_CHARACTER_AT = if ($At) { $At } else { $null }
 $env:PORTJEUNO_CHARACTER_FACING = if ($Facing) { $Facing } else { $null }
 $env:PORTJEUNO_TIME = if ($Time) { $Time } else { $null }
