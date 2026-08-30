@@ -56,6 +56,7 @@ add_library(ffxi-dat STATIC
     ffxi/dat.cpp
     ffxi/mmb.cpp
     ffxi/mzb.cpp
+    ffxi/texture.cpp
 )
 target_include_directories(ffxi-dat PUBLIC ffxi)
 

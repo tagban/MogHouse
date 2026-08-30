@@ -14,6 +14,7 @@ namespace ffxi
 inline constexpr uint8_t kChunkEnd = 0x00;
 inline constexpr uint8_t kChunkDirectory = 0x01;
 inline constexpr uint8_t kChunkMzb = 0x1C;
+inline constexpr uint8_t kChunkTexture = 0x20;
 inline constexpr uint8_t kChunkSk2 = 0x29;
 inline constexpr uint8_t kChunkMmb = 0x2E;
 

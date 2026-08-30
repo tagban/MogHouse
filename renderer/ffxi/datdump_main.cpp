@@ -5,6 +5,7 @@
 #include "dat.h"
 #include "mmb.h"
 #include "mzb.h"
+#include "texture.h"
 
 #include <cmath>
 #include <cstdio>
@@ -122,6 +123,54 @@ int main(int argc, char** argv)
                     {
                         std::printf("  models that failed to parse: %zu, first %s\n", failed, firstFailure.c_str());
                     }
+                }
+            }
+        }
+
+        // Textures. BC2 stores one byte per pixel, so payload size should equal
+        // width * height exactly - a cheap check that the header was read right.
+        {
+            size_t textures = 0, bc2 = 0, paletted = 0, sizeMismatch = 0, failed = 0;
+            std::string texSample, texFailure;
+            for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkTexture))
+            {
+                try
+                {
+                    ffxi::Texture t = ffxi::parseTexture(chunk);
+                    ++textures;
+                    if (t.format == ffxi::TextureFormat::Bc2)
+                    {
+                        ++bc2;
+                        if (t.pixels.size() != static_cast<size_t>(t.width) * t.height)
+                        {
+                            ++sizeMismatch;
+                        }
+                    }
+                    else
+                    {
+                        ++paletted;
+                    }
+                    if (texSample.empty())
+                    {
+                        texSample = t.name + " " + std::to_string(t.width) + "x" + std::to_string(t.height);
+                    }
+                }
+                catch (const std::exception& e)
+                {
+                    ++failed;
+                    if (texFailure.empty())
+                    {
+                        texFailure = std::string(chunk.id, 4) + ": " + e.what();
+                    }
+                }
+            }
+            if (textures || failed)
+            {
+                std::printf("textures %zu (bc2 %zu, paletted %zu, failed %zu)\n", textures, bc2, paletted, failed);
+                std::printf("  e.g. %s   size mismatches: %zu\n", texSample.c_str(), sizeMismatch);
+                if (failed)
+                {
+                    std::printf("  first failure %s\n", texFailure.c_str());
                 }
             }
         }
