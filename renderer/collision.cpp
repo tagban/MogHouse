@@ -30,7 +30,19 @@ constexpr float kWalkableNormalY = 0.64f;
 /// rather than walked into, and the two have to agree. Blocking on obstacles
 /// the ground query would happily carry you onto stops a character dead in
 /// open country - Sarutabaruta is covered in ankle-high rocks.
-constexpr float kStepUp = 1.2f;
+///
+/// Swept, not guessed. It was 1.2 - two thirds of a character's height - which
+/// climbed the ankle-high rocks it is meant to and also let a character step up
+/// onto a bridge railing instead of being stopped by it. The Bastok Markets
+/// risers are 0.9, so 0.95 is the tightest value that still climbs a staircase,
+/// and zone-wide mobility is unchanged at it: 89% either way.
+///
+/// This is a stopgap, not the right answer. One global height cannot tell a
+/// stair from a railing, because the difference is not height - it is that a
+/// railing is too thin to stand on. Testing whether the surface being stepped
+/// onto is wide enough to hold a character is the fix; this only narrows the
+/// window.
+constexpr float kStepUp = 0.95f;
 
 /// How tall the character is, for deciding which walls are in the way. A
 /// barrier entirely above their head does not block them.
