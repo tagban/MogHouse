@@ -168,32 +168,6 @@ int main(int argc, char** argv)
     }
     std::printf("%zu models\n", models.size());
 
-    // What the mesh header's blending field actually holds. The reference
-    // implementation switches blend state on the equivalent flag; this reads
-    // the field and throws it away, so the first question is what is in it.
-    if (std::getenv("MOGHOUSE_BLEND_TALLY"))
-    {
-        std::map<uint16_t, size_t> tally;
-        std::map<uint16_t, size_t> underscore;
-        for (const auto& entry : models)
-        {
-            for (const ffxi::ModelMesh& mesh : entry.second.meshes)
-            {
-                ++tally[mesh.blending];
-                if (!entry.first.empty() && entry.first[0] == '_')
-                {
-                    ++underscore[mesh.blending];
-                }
-            }
-        }
-        std::printf("  blending values across every mesh:\n");
-        for (const auto& one : tally)
-        {
-            const size_t under = underscore.count(one.first) ? underscore[one.first] : 0;
-            std::printf("    0x%04X  %6zu meshes  (%zu on _-prefixed models)\n", one.first, one.second, under);
-        }
-    }
-
     const std::unordered_map<std::string, ffxi::Texture> noTextures;
 
     // --points reads "x y z name" a line on stdin, in FFXI's own coordinates,
