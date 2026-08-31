@@ -44,6 +44,9 @@ switch (args[0])
     case "create-account":
         return await CreateAccountAsync(ParseFlags(args));
 
+    case "play":
+        return await PlayAsync(ParseFlags(args));
+
     case "view":
         return await ViewAsync(ParseFlags(args));
 
@@ -966,6 +969,176 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
 /// around the character, which is enough to prove the cross-thread feed
 /// reaches the radar - the dots have to move.
 /// </summary>
+/// <summary>
+/// Opens the renderer on a live session, rather than on the older hold loop.
+///
+/// The difference that matters is zoning. FfxiGameSession knows the zone lines,
+/// notices when the character walks onto one, asks the server to move them, and
+/// follows the handover to the next zone server. The hold loop `login --view`
+/// uses does none of that: it posts position to whichever zone server it first
+/// met until something stops it.
+///
+/// Movement still belongs to the renderer, which walks against the zone's own
+/// collision mesh - the session's navmesh is a coarser thing. The renderer says
+/// where it ended up and PlaceAt takes it from there.
+/// </summary>
+static async Task<int> PlayAsync(Dictionary<string, string> flags)
+{
+    if (!TryMergeCredentialsFile(flags))
+    {
+        return 1;
+    }
+
+    FfxiServerProfile? profile = null;
+    if (flags.TryGetValue("profile", out string? idOrName))
+    {
+        profile = FfxiServerProfileStore.Find(idOrName)
+            ?? FfxiServerProfileStore.Profiles.FirstOrDefault(p => p.Name.Equals(idOrName, StringComparison.OrdinalIgnoreCase));
+        if (profile is null)
+        {
+            Console.WriteLine($"No saved profile matches '{idOrName}'.");
+            return 1;
+        }
+    }
+    else if (flags.TryGetValue("host", out string? host) &&
+             flags.TryGetValue("username", out string? username) &&
+             flags.TryGetValue("password", out string? password))
+    {
+        profile = new FfxiServerProfile { Host = host, Username = username, Password = password };
+    }
+    else
+    {
+        Console.WriteLine("play needs --profile, or --host/--username/--password, or --credentials-file.");
+        return 1;
+    }
+
+    if (!flags.TryGetValue("character", out string? wanted))
+    {
+        Console.WriteLine("play needs --character <name>.");
+        return 1;
+    }
+
+    FfxiHuffmanTables? tables = FfxiHuffmanTables.TryLoadDefault();
+    if (tables is null)
+    {
+        Console.WriteLine($"Compression tables not found - set MOGHOUSE_FFXI_RES to a directory with " +
+                          $"{FfxiHuffmanTables.EncodeFileName} and {FfxiHuffmanTables.DecodeFileName}.");
+        return 1;
+    }
+
+    using var session = new FfxiGameSession(new FfxiHuffman(tables),
+                                            Environment.GetEnvironmentVariable("MOGHOUSE_FFXI_NAVMESHES"),
+                                            Environment.GetEnvironmentVariable("MOGHOUSE_FFXI_ZONEDATA"));
+    session.Status += message => Console.WriteLine($"  {message}");
+
+    (FfxiLoginResponse login, IReadOnlyList<FfxiCharacter> characters) = await session.LoginAsync(profile);
+    if (login.Result != FfxiLoginResult.Success || login.SessionHash is null)
+    {
+        Console.WriteLine($"Login failed: {login.Result}");
+        return 1;
+    }
+
+    FfxiCharacter? selected = characters.FirstOrDefault(
+        c => c.Name.Equals(wanted, StringComparison.OrdinalIgnoreCase));
+    if (selected is null)
+    {
+        Console.WriteLine($"No character named '{wanted}' in the roster.");
+        return 1;
+    }
+
+    await session.ConnectToZoneAsync(selected, login.SessionHash, profile.Host);
+    if (session.ZoneState is null)
+    {
+        Console.WriteLine("The zone server did not answer.");
+        return 1;
+    }
+
+    await session.StartHeartbeatAsync();
+
+    // The tracker is ours rather than the session's: it holds everything worked
+    // out about what an entity looks like and whether it should be drawn, and
+    // the session only reports the updates.
+    var tracker = new FfxiEntityTracker { SelfUniqueNo = session.ZoneState.UniqueNo };
+    session.EntitiesChanged += updates =>
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        foreach (FfxiEntityUpdate update in updates)
+        {
+            tracker.Observe(update, now);
+        }
+    };
+
+    string look = $"{selected.Race},{selected.Face},0,0,0,0,0";
+    LiveRadar? radar = LiveRadar.Open((int)session.ZoneState.ZoneNo, session.PosX, session.PosVertical, session.PosDepth,
+                                      session.ZoneState.GameTime, selected.Name, look);
+    if (radar is null)
+    {
+        Console.WriteLine("Could not open the renderer.");
+        return 1;
+    }
+
+    session.ChatReceived += line => radar?.Say(line.Sender, line.Text);
+
+    // Zoning. The renderer holds one zone's geometry, collision and name table,
+    // and none of it survives a move - so it is opened again on the other side.
+    // The real client shows a loading screen here for the same reason.
+    uint currentZone = session.ZoneState.ZoneNo;
+    session.ZoneChanged += zone =>
+    {
+        if (zone == currentZone)
+        {
+            return;
+        }
+
+        Console.WriteLine($"Zoned to {zone} - reopening the window.");
+        currentZone = zone;
+
+        LiveRadar? old = radar;
+        radar = null;
+        old?.Dispose();
+
+        // Nothing from the old zone belongs in the new one.
+        tracker.Clear();
+        radar = LiveRadar.Open((int)zone, session.PosX, session.PosVertical, session.PosDepth,
+                               session.ZoneState?.GameTime ?? 0, selected.Name, look);
+        if (radar is not null)
+        {
+            radar.Say("", $"Now in zone {zone}.");
+        }
+    };
+
+    Console.WriteLine($"Playing as {selected.Name} in zone {currentZone}. Close the window to stop.");
+
+    while (radar is not null && session.IsConnected)
+    {
+        // Where the renderer walked to, which is what the zone-line check runs
+        // against.
+        if (radar.Position() is (float x, float vertical, float depth, sbyte direction))
+        {
+            session.PlaceAt(x, vertical, depth, direction);
+        }
+
+        while (radar?.TakeChat() is { Length: > 0 } typed)
+        {
+            await session.SayAsync(typed);
+        }
+
+        radar?.Publish(tracker);
+
+        if (radar is not null && radar.Closed)
+        {
+            break;
+        }
+
+        await Task.Delay(50);
+    }
+
+    Console.WriteLine("Leaving.");
+    await session.LogoutAsync();
+    radar?.Dispose();
+    return 0;
+}
+
 static async Task<int> ViewAsync(Dictionary<string, string> flags)
 {
     if (!flags.TryGetValue("zone", out string? zonePath))
