@@ -64,6 +64,18 @@ public sealed record FfxiEntityUpdate(
     public const ushort NpcPacketId = 0x00E;
 
     /// <summary>
+    /// The server says this one is not to be seen.
+    ///
+    /// Plenty of entities exist to be targeted rather than looked at - an
+    /// auction counter, a ??? on the ground - and the game draws none of them.
+    /// Drawing them anyway fills a room with bodies that are not there.
+    ///
+    /// Two bits, both in the second flags word: hide at 1, invisible at 29.
+    /// </summary>
+    public bool IsHidden =>
+        RawFlags1 is uint flags && (((flags >> 1) & 1) != 0 || ((flags >> 29) & 1) != 0);
+
+    /// <summary>
     /// Whether this is a player, a friendly NPC or something hostile.
     ///
     /// Three plausible discriminators are wrong, each measured against live

@@ -15,6 +15,7 @@ public sealed record FfxiTrackedEntity(
     float Vertical,
     float Depth,
     sbyte Direction,
+    bool Hidden,
     byte? HealthPercent,
     DateTimeOffset LastSeen);
 
@@ -41,11 +42,17 @@ public sealed class FfxiEntityTracker
     /// never be mentioned a second time, and a short timeout would delete
     /// every stationary NPC in the zone while they were still standing there.
     ///
+    /// Five minutes was still too short. A player standing still is mentioned
+    /// exactly as often as a shopkeeper is - which is to say once - and their
+    /// name vanished off them after five minutes while they were plainly
+    /// there. Despawn is read from the packet now, so this is only a backstop
+    /// against a despawn lost in transit, and it can afford to be long.
+    ///
     /// The despawn packet is the exact signal and is parsed now, so this is
     /// only a backstop - for an entity that goes away without one, or a
     /// despawn lost to the transport.
     /// </summary>
-    public static readonly TimeSpan DefaultForgetAfter = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan DefaultForgetAfter = TimeSpan.FromHours(1);
 
     public FfxiEntityTracker(TimeSpan? forgetAfter = null)
     {
@@ -99,6 +106,9 @@ public sealed class FfxiEntityTracker
             Vertical: update.Vertical,
             Depth: update.Depth,
             Direction: update.Direction,
+            // Sticky the way the name is: a later update that carries no flags
+            // must not turn an invisible thing visible.
+            Hidden: update.RawFlags1 is null ? known?.Hidden ?? false : update.IsHidden,
             HealthPercent: update.HealthPercent ?? known?.HealthPercent,
             LastSeen: now);
     }

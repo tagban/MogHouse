@@ -917,7 +917,11 @@ sealed class LiveRadar : IDisposable
             return;
         }
 
-        IReadOnlyList<FfxiTrackedEntity> visible = tracker.Visible(DateTimeOffset.UtcNow);
+        // Anything the server has hidden is left off entirely - no body, no
+        // name, no dot. An auction counter is an NPC you talk to and never
+        // see, and drawing one puts a hume male behind the counter.
+        IReadOnlyList<FfxiTrackedEntity> visible =
+            [.. tracker.Visible(DateTimeOffset.UtcNow).Where(e => !e.Hidden)];
         var entities = new NativeRadarEntity[visible.Count];
         for (int i = 0; i < visible.Count; i++)
         {

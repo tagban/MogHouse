@@ -2330,7 +2330,7 @@ constexpr float kGravity = 26.0f;
                 std::memcpy(plate.viewProjection, viewProjection.m, sizeof(plate.viewProjection));
 
                 const float windowAspect = static_cast<float>(width) / static_cast<float>(height);
-                plate.counts[1] = 0.006f;      // glyph pixel height in NDC
+                plate.counts[1] = 0.0085f;     // glyph pixel height in NDC
                 plate.counts[2] = windowAspect;
 
                 int named = 0;

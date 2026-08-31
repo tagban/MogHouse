@@ -102,9 +102,24 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
         let left = screen.x - width * 0.5;
         let bottom = screen.y;
 
+        let textHeight = glyphHeight * f32(kGlyphHeight);
+
+        // A panel behind the whole name, with a little air around it, rather
+        // than a dark square behind each character. Names sit over stone that
+        // is nearly the same value as the glyphs, and per-cell shading leaves
+        // them legible only where a stroke happens to fall.
+        let padX = glyphWidth * 1.5;
+        let padY = glyphHeight * 1.5;
         let local = vec2<f32>(in.ndc.x - left, in.ndc.y - bottom);
-        if (local.x < 0.0 || local.x >= width || local.y < 0.0 ||
-            local.y >= glyphHeight * f32(kGlyphHeight)) {
+        if (local.x < -padX || local.x >= width + padX || local.y < -padY ||
+            local.y >= textHeight + padY) {
+            continue;
+        }
+
+        colour = vec3<f32>(0.02, 0.02, 0.04);
+        alpha = max(alpha, 0.55);
+
+        if (local.x < 0.0 || local.x >= width || local.y < 0.0 || local.y >= textHeight) {
             continue;
         }
 
@@ -121,11 +136,6 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
         if (((glyph >> u32(inColumn * kGlyphHeight + row)) & 1u) == 1u) {
             colour = vec3<f32>(0.98, 0.98, 1.0);
             alpha = 1.0;
-        } else {
-            // A dark backing only where a glyph cell actually is, so the name
-            // stays readable against pale stone without a full panel behind it.
-            colour = vec3<f32>(0.0, 0.0, 0.0);
-            alpha = max(alpha, 0.45);
         }
     }
 
