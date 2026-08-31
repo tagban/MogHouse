@@ -1811,6 +1811,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     std::printf("wasd to walk, mouse drag to look, space and ctrl for up and down,\n");
     std::printf("shift to run, tab to orbit, p to print position, c to place the character,\n");
     std::printf("u to back up the trail if collision traps you, n for no collision,\n");
+    std::printf("numpad 8/2 to move and 4/6 to turn, numpad minus to walk, shift to invert it,\n");
     std::printf("f to swap between driving the character and flying the camera,\n");
     std::printf("escape to quit\n");
 
@@ -1939,6 +1940,12 @@ constexpr float kGravity = 26.0f;
                     timeFixed ? "fixed" : "running");
     }
 
+    // Run unless told otherwise, which is what the game does - there is no
+    // walking anywhere by accident. Numpad minus toggles it, the way the real
+    // client does, and holding shift inverts whichever way the toggle is set,
+    // so a moment of walking does not need a mode change and back.
+    bool walkByDefault = false;
+
     uint64_t previousTicks = SDL_GetTicksNS();
     bool running = true;
     while (running)
@@ -1959,6 +1966,11 @@ constexpr float kGravity = 26.0f;
                 else if (event.key.key == SDLK_TAB)
                 {
                     camera.orbiting = !camera.orbiting;
+                }
+                else if (event.key.key == SDLK_KP_MINUS)
+                {
+                    walkByDefault = !walkByDefault;
+                    std::printf("%s\n", walkByDefault ? "walking" : "running");
                 }
                 else if (event.key.key == SDLK_P)
                 {
@@ -2086,19 +2098,32 @@ constexpr float kGravity = 26.0f;
         }
         previousTicks = nowTicks;
         const bool* held = SDL_GetKeyboardState(nullptr);
-        // Units a second. FFXI moves a character about four, and this was at
-        // twelve - roughly seven body heights a second for a model 1.79 tall,
-        // which is why the legs read as walking while the character travels
-        // like it is sprinting. The animation was never the wrong one.
-        float speed = 4.2f * delta;
+        // Shift inverts the walk toggle rather than setting it, so holding
+        // it walks while running and runs while walking.
+        const bool shiftHeld = held[SDL_SCANCODE_LSHIFT] || held[SDL_SCANCODE_RSHIFT];
+        const bool walking = walkByDefault != shiftHeld;
+
+        // Units a second, for a model 1.79 tall. Twelve read as a sprint and
+        // seven still ran a little hot, so the animation and the ground speed
+        // agree at these.
+        float speed = (walking ? 3.2f : 6.2f) * delta;
         if (held[SDL_SCANCODE_LSHIFT] || held[SDL_SCANCODE_RSHIFT])
         {
-            // Shift is a testing convenience rather than anything FFXI has -
-            // crossing a city to look at something should not take a minute -
-            // but five times was fast enough to be hard to steer.
-            speed *= 3.0f;
+            // Nothing here: shift means walk now, not sprint.
         }
-        const float ahead = (held[SDL_SCANCODE_W] ? speed : 0.0f) - (held[SDL_SCANCODE_S] ? speed : 0.0f);
+        // Numpad 8 and 2 move, 4 and 6 turn - which is what they do in the
+        // real client, where they are the movement keys rather than a second
+        // set of strafes.
+        const bool forward = held[SDL_SCANCODE_W] || held[SDL_SCANCODE_KP_8];
+        const bool backward = held[SDL_SCANCODE_S] || held[SDL_SCANCODE_KP_2];
+
+        const float turn = (held[SDL_SCANCODE_KP_6] ? 1.0f : 0.0f) - (held[SDL_SCANCODE_KP_4] ? 1.0f : 0.0f);
+        if (turn != 0.0f)
+        {
+            camera.yaw += turn * 2.2f * delta;
+        }
+
+        const float ahead = (forward ? speed : 0.0f) - (backward ? speed : 0.0f);
         const float side = (held[SDL_SCANCODE_D] ? speed : 0.0f) - (held[SDL_SCANCODE_A] ? speed : 0.0f);
         const float lift = (held[SDL_SCANCODE_SPACE] ? speed : 0.0f) - (held[SDL_SCANCODE_LCTRL] ? speed : 0.0f);
 
@@ -2256,8 +2281,14 @@ constexpr float kGravity = 26.0f;
         // Idle, walk or run, chosen by what the character is actually doing.
         if (!pinnedClip)
         {
-            const bool running = held[SDL_SCANCODE_LSHIFT] || held[SDL_SCANCODE_RSHIFT];
-            const ffxi::Animation* wanted = moved > 1e-4f ? (running ? runClip : walkClip) : idleClip;
+            // The same walk/run decision the speed uses, so the legs and the
+            // ground always agree.
+            const ffxi::Animation* moving = walking ? walkClip : runClip;
+            if (!moving)
+            {
+                moving = walking ? runClip : walkClip;   // whichever the model has
+            }
+            const ffxi::Animation* wanted = moved > 1e-4f ? moving : idleClip;
             if (wanted && wanted != playing)
             {
                 playing = wanted;
