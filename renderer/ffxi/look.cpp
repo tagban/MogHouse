@@ -47,6 +47,20 @@ size_t skeletonFileId(Race race)
     return index < std::size(kRaceBase) ? kRaceBase[index] : 0;
 }
 
+std::vector<size_t> motionFileIds(Race race)
+{
+    const size_t base = skeletonFileId(race);
+    if (base == 0)
+    {
+        return {};
+    }
+
+    // The four files between the skeleton and the first slot window. The
+    // first holds the movement set; the others are stance variants that the
+    // weapon in hand selects, which is a later problem.
+    return {base + 1, base + 2, base + 3, base + 4};
+}
+
 size_t modelFileId(Race race, LookSlot slot, uint16_t modelId)
 {
     const size_t base = skeletonFileId(race);

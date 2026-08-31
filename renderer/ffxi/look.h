@@ -50,6 +50,16 @@ struct Look
 /// The file id holding this race's skeleton and animation set.
 size_t skeletonFileId(Race race);
 
+/// The file ids holding this race's motion sets, in block order.
+///
+/// The skeleton file carries only half of each movement: the clips ending 0,
+/// which drive the root, the hips and the legs. The upper body - spine, torso,
+/// arms, head, and a tail where the race has one - lives in these siblings as
+/// the clips ending 1. wlk1, run1 and idl1 are in the first of them and
+/// nowhere else, so a character loaded from the skeleton alone walks with its
+/// arms hanging still.
+std::vector<size_t> motionFileIds(Race race);
+
 /// The file id for one slot's model, or 0 if the race or slot is unknown.
 ///
 /// Only the first block is resolved - model ids 0 to 255, which is the gear

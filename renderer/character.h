@@ -73,6 +73,12 @@ std::vector<BonePose> bindPose(const ffxi::Skeleton& skeleton);
 /// by the animation's frame length without worrying about the length.
 std::vector<BonePose> animatedPose(const ffxi::Skeleton& skeleton, const ffxi::Animation& animation, float frame);
 
+/// As above, with a second clip layered over the bones the first leaves alone.
+/// FFXI keeps the legs and the upper body in separate clips - walking is only
+/// the legs - so an overlay is what puts the arms and torso into a stride.
+std::vector<BonePose> animatedPose(const ffxi::Skeleton& skeleton, const ffxi::Animation& animation, float frame,
+                                   const ffxi::Animation* overlay, float overlayFrame);
+
 /// Everything needed to draw one character.
 struct Character
 {

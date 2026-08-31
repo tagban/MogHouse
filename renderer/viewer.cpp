@@ -45,6 +45,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <optional>
@@ -1526,6 +1527,18 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                 {
                     paths.push_back(skeleton->string());
                 }
+
+                // Then the movement motions. Only the first of the four: the
+                // rest repeat the same clip names for other weapon stances,
+                // and loading them all would just overwrite these.
+                const std::vector<size_t> motions = ffxi::motionFileIds(look.race);
+                if (!motions.empty())
+                {
+                    if (auto motion = table.path(motions.front()))
+                    {
+                        paths.push_back(motion->string());
+                    }
+                }
                 std::printf("look: %s", ffxi::raceName(look.race));
                 for (size_t i = 0; i < static_cast<size_t>(ffxi::LookSlot::Count); ++i)
                 {
@@ -1799,11 +1812,19 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     }
     if (const char* lookEnv = options.cameraLook ? options.cameraLook->c_str() : nullptr)
     {
+        // yaw,pitch in degrees, and optionally how far back to orbit from.
+        // The default hundred units surveys a whole zone, which is far too far
+        // away to check anything about the character itself.
         float yawDegrees = 0.0f;
         float pitchDegrees = 0.0f;
-        std::sscanf(lookEnv, "%f,%f", &yawDegrees, &pitchDegrees);
+        float orbitDistance = 0.0f;
+        const int given = std::sscanf(lookEnv, "%f,%f,%f", &yawDegrees, &pitchDegrees, &orbitDistance);
         camera.yaw = yawDegrees * 3.14159265f / 180.0f;
         camera.pitch = pitchDegrees * 3.14159265f / 180.0f;
+        if (given >= 3 && orbitDistance > 0.0f)
+        {
+            camera.distance = orbitDistance;
+        }
     }
 
     bool dragging = false;
@@ -1838,6 +1859,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     const ffxi::Animation* idleClip = nullptr;
     const ffxi::Animation* walkClip = nullptr;
     const ffxi::Animation* runClip = nullptr;
+    std::function<const ffxi::Animation*(const ffxi::Animation*)> upperFor;
     // MOGHOUSE_ANIMATION pins one clip; without it, movement picks.
     const bool pinnedClip = options.animation ? options.animation->c_str() : nullptr != nullptr;
     float animationOffset = 0.0f;
@@ -1852,6 +1874,59 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         idleClip = find("idl0");
         walkClip = find("wlk0");
         runClip = find("run0");
+
+        // The clips ending 0 drive the root, hips and legs - sixteen bones of
+        // ninety-four. Everything above the waist, the spine and torso and
+        // arms and a Mithra or Galka tail, lives in the clips ending 1, and
+        // movement has no 1 of its own. std1 is the standing upper body, and
+        // layering it under a stride is what gets the arms swinging.
+        // A clip's upper body is its own name with the trailing 0 turned into
+        // a 1: wlk0 walks the legs and wlk1 swings the arms above them. They
+        // are stored apart because the upper half depends on what the
+        // character is holding, so the two are chosen separately and played
+        // together.
+        //
+        // MOGHOUSE_UPPER pins one for every clip, or "none" to go back to the
+        // legs alone.
+        const char* upperPin = std::getenv("MOGHOUSE_UPPER");
+        upperFor = [&character, upperPin](const ffxi::Animation* lower) -> const ffxi::Animation* {
+            if (upperPin && std::strcmp(upperPin, "none") == 0)
+            {
+                return nullptr;
+            }
+            std::string name = upperPin ? upperPin : (lower ? lower->name : std::string{});
+            if (!upperPin)
+            {
+                if (name.empty() || name.back() != '0')
+                {
+                    return nullptr;   // already an upper body, or unpaired
+                }
+                name.back() = '1';
+            }
+            auto found = character->animations.find(name);
+            return found == character->animations.end() ? nullptr : &found->second;
+        };
+
+        // How much of the skeleton each clip actually drives. A clip that only
+        // carries tracks for the legs leaves the arms in the bind pose, which
+        // reads as a character running with its arms held still.
+        if (std::getenv("MOGHOUSE_ANIMATION_TRACKS"))
+        {
+            for (const auto& [clipName, clip] : character->animations)
+            {
+                std::printf("  %-6s %3u frames, %zu of %zu bones driven", clipName.c_str(), clip.frames,
+                            clip.tracks.size(), character->skeleton.bones.size());
+                if (std::strcmp(std::getenv("MOGHOUSE_ANIMATION_TRACKS"), "bones") == 0)
+                {
+                    std::printf("   bones:");
+                    for (const ffxi::AnimationTrack& track : clip.tracks)
+                    {
+                        std::printf(" %u", track.bone);
+                    }
+                }
+                std::printf("\n");
+            }
+        }
 
         const char* wanted = options.animation ? options.animation->c_str() : nullptr;
         auto found = character->animations.find(wanted ? wanted : "idl0");
@@ -2467,7 +2542,14 @@ constexpr float kGravity = 26.0f;
                 if (playing)
                 {
                     const float frame = animationSeconds / playing->frameSeconds();
-                    mh::reskin(character->geometry, mh::animatedPose(character->skeleton, *playing, frame),
+                    // The arms belong to the same stride as the legs, so
+                    // the upper body is stepped on its own frame rate but off
+                    // the same clock.
+                    const ffxi::Animation* upperClip = upperFor ? upperFor(playing) : nullptr;
+                    const float upperFrame =
+                        upperClip ? animationSeconds / upperClip->frameSeconds() : 0.0f;
+                    mh::reskin(character->geometry,
+                               mh::animatedPose(character->skeleton, *playing, frame, upperClip, upperFrame),
                                character->meshes);
                     queue.WriteBuffer(characterVertexBuffer, 0, character->geometry.vertices.data(),
                                       character->geometry.vertices.size() * sizeof(mh::Vertex));
@@ -2642,7 +2724,7 @@ constexpr float kGravity = 26.0f;
                 if (vanaSeconds > 0)
                 {
                     label(kWeekdays[(vanaSeconds / 86400ull) % 8ull], radarCentreX,
-                          above + gap * 2.0f + line * 0.45f, 0.75f, kHudDim, 0.55f);
+                          above + gap * 2.0f + line * 0.45f, 0.19f, kHudDim, 0.55f);
                 }
 
                 // Compass letters around the ring.
@@ -2677,7 +2759,7 @@ constexpr float kGravity = 26.0f;
                             letter = ' ';
                         }
                     }
-                    label(zone, radarCentreX, southY + line * 1.15f, 0.8f, kHudBright, 0.55f);
+                    label(zone, radarCentreX, southY + line * 1.15f, 0.4f, kHudBright, 0.55f);
                 }
 
                 // And where we are. FFXI shows a lettered grid here; that
@@ -2688,7 +2770,7 @@ constexpr float kGravity = 26.0f;
                 {
                     char position[32] = {};
                     std::snprintf(position, sizeof(position), "%.0f  %.0f", characterAt.x, -characterAt.z);
-                    label(position, radarCentreX, southY - line * 1.15f, 0.8f, kHudDim, 0.55f);
+                    label(position, radarCentreX, southY - line * 1.15f, 0.2f, kHudDim, 0.55f);
                 }
 
                 // Chat, bottom left, oldest at the top. Same atlas as
@@ -2700,11 +2782,11 @@ constexpr float kGravity = 26.0f;
                     {
                         lines.push_back("Chat - waiting for the server");
                     }
-                    const float line = hud.counts[1] * 0.8f;
+                    const float line = hud.counts[1] * 0.4f;
                     for (size_t i = 0; i < lines.size(); ++i)
                     {
                         const float bottom = -0.97f + line * 1.15f * static_cast<float>(lines.size() - 1 - i);
-                        place(lines[i], -0.98f, bottom, 0.8f, kHudBright, 0.5f, false);
+                        place(lines[i], -0.98f, bottom, 0.4f, kHudBright, 0.5f, false);
                     }
                 }
 

@@ -253,6 +253,12 @@ std::vector<BonePose> bindPose(const ffxi::Skeleton& skeleton)
 
 std::vector<BonePose> animatedPose(const ffxi::Skeleton& skeleton, const ffxi::Animation& animation, float frame)
 {
+    return animatedPose(skeleton, animation, frame, nullptr, 0.0f);
+}
+
+std::vector<BonePose> animatedPose(const ffxi::Skeleton& skeleton, const ffxi::Animation& animation,
+                                   float frame, const ffxi::Animation* overlay, float overlayFrame)
+{
     const size_t boneCount = skeleton.bones.size();
 
     // Start from the rest pose. Bones the animation says nothing about keep
@@ -267,21 +273,41 @@ std::vector<BonePose> animatedPose(const ffxi::Skeleton& skeleton, const ffxi::A
         localTranslation[i] = {bone.translation[0], bone.translation[1], bone.translation[2]};
     }
 
-    if (animation.frames > 0)
-    {
+    // FFXI splits a character's motion into two clips. One drives the root,
+    // the hips and the legs - sixteen bones of ninety-four - and a second
+    // drives the spine, the torso, the arms, and the tail on the races that
+    // have one. Walking and running only exist as the first half, so playing
+    // one alone leaves the arms hanging dead still while the legs stride. The
+    // standing clip supplies everything above the waist.
+    //
+    // Whichever layer goes down first owns the bones it touches: the overlay
+    // is skipped there, so the legs keep walking instead of being dragged
+    // back towards standing.
+    std::vector<bool> claimed(boneCount, false);
+
+    const auto applyClip = [&](const ffxi::Animation& clip, float at) {
+        if (clip.frames == 0)
+        {
+            return;
+        }
+
         // Wrap into the animation and split into the two frames either side,
         // so playback is smooth rather than stepping at the source frame rate
         // - an idle runs at seven and a half frames a second.
-        const float wrapped = frame - std::floor(frame / animation.frames) * animation.frames;
+        const float wrapped = at - std::floor(at / clip.frames) * clip.frames;
         const auto first = static_cast<size_t>(wrapped);
-        const size_t second = (first + 1) % animation.frames;
+        const size_t second = (first + 1) % clip.frames;
         const float blend = wrapped - static_cast<float>(first);
 
-        for (const ffxi::AnimationTrack& track : animation.tracks)
+        for (const ffxi::AnimationTrack& track : clip.tracks)
         {
             if (track.bone >= boneCount || track.rotation.size() < (second + 1) * 4)
             {
                 continue;
+            }
+            if (claimed[track.bone])
+            {
+                continue;   // the layer underneath already owns this bone
             }
 
             float rotation[4];
@@ -307,6 +333,21 @@ std::vector<BonePose> animatedPose(const ffxi::Skeleton& skeleton, const ffxi::A
             localTranslation[track.bone] = localTranslation[track.bone] + translation;
             localScale[track.bone] = scale;
         }
+
+        // Marked after the pass, not during it, or a clip would block itself.
+        for (const ffxi::AnimationTrack& track : clip.tracks)
+        {
+            if (track.bone < boneCount)
+            {
+                claimed[track.bone] = true;
+            }
+        }
+    };
+
+    applyClip(animation, frame);
+    if (overlay != nullptr)
+    {
+        applyClip(*overlay, overlayFrame);
     }
 
     std::vector<BonePose> pose(boneCount);
