@@ -1202,6 +1202,22 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
                         leaving = true;
                         break;
 
+                    case FfxiClientCommandKind.Chat:
+                        await session.SayAsync(command.Rest, command.Channel);
+                        break;
+
+                    case FfxiClientCommandKind.Tell:
+                        await session.TellAsync(command.Recipient, command.Rest);
+                        // A tell is not echoed back to the sender, so
+                        // without this the only evidence it went anywhere is
+                        // the reply.
+                        radar?.Say($">> {command.Recipient}", command.Rest);
+                        break;
+
+                    case FfxiClientCommandKind.Incomplete:
+                        radar?.Say("", $"/{command.Name} {command.Rest}.");
+                        break;
+
                     case FfxiClientCommandKind.Unsupported:
                         radar?.Say("", $"/{command.Name} is not something this client does yet.");
                         break;
