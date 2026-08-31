@@ -265,18 +265,19 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
     // TODO saying its own water handling is wrong, so this is not settled
     // enough to be sure a strange looking zone is the geometry's fault. Being
     // able to take the water away answers that in one look.
-    // Water from the collision grid's per-cell height, on top of the named
-    // water meshes rather than instead of them. The two are different things:
-    // "water" and "water2" are the big bodies the zone is built around, and
-    // this is the shallow standing water that sits on a floor - the pools
-    // around the Bastok Markets fountain are 0.20 deep on floors at 11.1,
-    // 12.0, 12.9 and 13.6, each its own little surface.
+    // Off, behind MOGHOUSE_MZB_WATER, because whatever this field marks it is
+    // not water to draw.
     //
-    // This was off for a while, on the reasoning that a water height tracking
-    // each cell's own floor could not be right because water does not climb
-    // stairs. That was the wrong picture: it is not one body climbing, it is
-    // many separate pools, and turning it off took the fountain with it.
-    const bool skipWater = std::getenv("MOGHOUSE_NO_WATER") != nullptr;
+    // It went on and off twice. The heights track each cell's own floor at a
+    // constant offset, which does not describe a body of water; then the cells
+    // around the Bastok Markets fountain looked like they might be its pools,
+    // 0.20 deep on floors at 11.1, 12.0, 12.9 and 13.6; then it turned out
+    // that in the real client those same places hold large concrete barriers.
+    // Whatever the field means, drawing a surface at it is wrong.
+    //
+    // Collision::waterDepthAt still reads it. Knowing something about a cell
+    // and knowing what to draw there are different questions.
+    const bool skipWater = std::getenv("MOGHOUSE_MZB_WATER") == nullptr;
     for (const ffxi::CollisionInstance& instance : zone.instances)
     {
         if (skipWater || instance.waterHeight == 0.0f || instance.mesh >= zone.collision.size())
