@@ -57,8 +57,16 @@ def probe(zone_dat, points):
     heights = []
     for line in result.stdout.splitlines():
         parts = line.split()
-        if len(parts) == 3 and not line.startswith(" "):
-            heights.append(None if parts[2] == "none" else float(parts[2]))
+        if len(parts) < 3:
+            continue
+        # A probe line is "x z ground" - anything whose first two fields are
+        # not numbers is the tool's own header, not an answer.
+        try:
+            float(parts[0])
+            float(parts[1])
+        except ValueError:
+            continue
+        heights.append(None if parts[2] == "none" else float(parts[2]))
     return heights
 
 
@@ -80,12 +88,19 @@ def main():
     # All four horizontal sign choices. Two of them are rotations - a half
     # turn about X and a half turn about Z - and both have determinant +1, so
     # "is it a rotation" does not pick between them. The other two are mirrors.
-    candidates = {
-        "rot about X  ( x, -y, -z)": [(x, -z, -y) for x, y, z in npcs],
-        "rot about Z  (-x, -y,  z)": [(-x, z, -y) for x, y, z in npcs],
-        "mirror       ( x, -y,  z)": [(x, z, -y) for x, y, z in npcs],
-        "mirror       (-x, -y, -z)": [(-x, -z, -y) for x, y, z in npcs],
-    }
+    # Sign choices AND axis swaps. Four sign combinations times swapped or
+    # not is eight, of which four are rotations. Testing only the signs, as
+    # this did at first, cannot see a zone turned a quarter turn - the very
+    # thing you get by reading a horizontal pair in the wrong order.
+    candidates = {}
+    for swap in (False, True):
+        for sx in (1, -1):
+            for sz in (1, -1):
+                name = ("swap " if swap else "     ") + f"x*{sx:+d} z*{sz:+d}"
+                if swap:
+                    candidates[name] = [(sx * z, sz * x, -y) for x, y, z in npcs]
+                else:
+                    candidates[name] = [(sx * x, sz * z, -y) for x, y, z in npcs]
 
     for label, points in candidates.items():
         heights = probe(zone_dat, points)

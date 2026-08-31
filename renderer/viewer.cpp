@@ -901,14 +901,20 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         const mh::Vec3 middle = zone->centre();
 
         Uniforms mapUniforms{};
-        // Straight down, with +z up the screen.
+        // Straight down, with +z up the screen and +x to the right.
         //
-        // No axis is flipped here. This used to swap its own left and right,
-        // which was compensation for the world being built as a reflection;
-        // now that the world is a rotation of FFXI's frame rather than a
-        // mirror of it, a plain projection is already the right way round.
+        // The left and right of the projection are swapped on purpose, and it
+        // is not about the world's frame - it is about this camera. Looking
+        // down with up = +z makes cross(forward, up) = -x, so a plain
+        // projection puts +x on the *left* of the image. rasteriseWalkable
+        // numbers its columns from minimum x upward, and the radar's dots are
+        // placed the same way, so the bake has to match them rather than the
+        // other way round.
+        //
+        // Removing this swap costs 47 points on the alignment score: 52.6% of
+        // walkable area with terrain drawn on it against 99.8% with it.
         const mh::Mat4 mapView = mh::lookAt({middle.x, hi.y + 100.0f, middle.z}, middle, {0.0f, 0.0f, 1.0f});
-        const mh::Mat4 mapProjection = mh::orthographic(-half, half, -half, half, 1.0f, (hi.y - lo.y) + 400.0f);
+        const mh::Mat4 mapProjection = mh::orthographic(half, -half, -half, half, 1.0f, (hi.y - lo.y) + 400.0f);
         const mh::Mat4 mapViewProjection = mapProjection * mapView;
         std::memcpy(mapUniforms.viewProjection, mapViewProjection.m, sizeof(mapUniforms.viewProjection));
 

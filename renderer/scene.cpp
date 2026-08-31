@@ -1,5 +1,7 @@
 #include "scene.h"
 
+#include <cstdlib>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -185,9 +187,16 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
     // cell, and lotus notes in passing that the surface should be a flat plane
     // rather than a translated copy of the collision mesh - so that is what this
     // builds: one quad per cell, spanning where that cell's geometry reaches.
+    //
+    // Set MOGHOUSE_NO_WATER to leave it out. The water word is read exactly as
+    // lotus-engine reads it - same offset, same shifts - and lotus carries a
+    // TODO saying its own water handling is wrong, so this is not settled
+    // enough to be sure a strange looking zone is the geometry's fault. Being
+    // able to take the water away answers that in one look.
+    const bool skipWater = std::getenv("MOGHOUSE_NO_WATER") != nullptr;
     for (const ffxi::CollisionInstance& instance : zone.instances)
     {
-        if (instance.waterHeight == 0.0f || instance.mesh >= zone.collision.size())
+        if (skipWater || instance.waterHeight == 0.0f || instance.mesh >= zone.collision.size())
         {
             continue;
         }
