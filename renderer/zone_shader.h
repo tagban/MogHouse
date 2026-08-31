@@ -75,7 +75,9 @@ fn shade(in : VertexOut, cutout : bool) -> vec4<f32> {
     // Alpha is a cutout mask only on textures that are black where transparent.
     // On terrain it is a blend factor, and testing it punches holes in the
     // ground - see docs/dxt3-format.md.
-    if (cutout && sampled.a < 0.03) {
+    // Tested against the combined alpha rather than the texture's alone, so
+    // vertex alpha counts here the same way it does everywhere else.
+    if (cutout && alpha < 0.1) {
         discard;
     }
 

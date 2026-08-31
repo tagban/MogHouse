@@ -20,6 +20,10 @@ constexpr float kLayerSeparation = 0.004f;
 /// colour throughout. Cutouts measure 0.41 upward, everything else 0.00.
 constexpr float kCutoutSignal = 0.2f;
 
+/// Enough fully transparent texels to mean a texture is meant to be cut out
+/// rather than to have a stray edge texel or two.
+constexpr float kAnyTransparency = 0.005f;
+
 /// The bit in a mesh header's blending field that asks for alpha blending.
 constexpr uint16_t kBlendFlag = 0x8000;
 
@@ -193,7 +197,16 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
             }
 
             auto texture = textures.find(mesh.texture);
-            const bool cutout = texture != textures.end() && texture->second.blackWhereClear > kCutoutSignal;
+            // Alpha tested if the texture has fully transparent texels at all,
+            // not only if those texels also compressed to black.
+            //
+            // blackWhereClear measures one particular DXT tell, and it is a
+            // good one for foliage. A cloth awning whose clear area is not
+            // black scores below it, gets drawn opaque, and its transparent
+            // texels come out as black blobs on the cloth.
+            const bool cutout = texture != textures.end() &&
+                                (texture->second.blackWhereClear > kCutoutSignal ||
+                                 texture->second.alphaZero > kAnyTransparency);
             const float layerOffset = static_cast<float>(meshIndex) * kLayerSeparation;
 
             const uint32_t vertexBase = static_cast<uint32_t>(scene.vertices.size());
@@ -252,18 +265,18 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
     // TODO saying its own water handling is wrong, so this is not settled
     // enough to be sure a strange looking zone is the geometry's fault. Being
     // able to take the water away answers that in one look.
-    // MOGHOUSE_MZB_WATER puts back the quads this used to synthesise from the
-    // collision grid's per-cell water height. They are off by default because
-    // the zone already contains its water as named geometry, and the derived
-    // version disagreed with it: sampled across Bastok Markets the heights
-    // tracked each cell's own floor at a constant 0.70 above it, which is not
-    // what water does - it does not climb stairs.
+    // Water from the collision grid's per-cell height, on top of the named
+    // water meshes rather than instead of them. The two are different things:
+    // "water" and "water2" are the big bodies the zone is built around, and
+    // this is the shallow standing water that sits on a floor - the pools
+    // around the Bastok Markets fountain are 0.20 deep on floors at 11.1,
+    // 12.0, 12.9 and 13.6, each its own little surface.
     //
-    // The field is still read, and Collision::waterDepthAt still uses it to
-    // decide what may be waded into. Knowing how deep the water is and drawing
-    // its surface are different questions, and lotus-engine's own TODO says as
-    // much about the mesh it builds here.
-    const bool skipWater = std::getenv("MOGHOUSE_MZB_WATER") == nullptr;
+    // This was off for a while, on the reasoning that a water height tracking
+    // each cell's own floor could not be right because water does not climb
+    // stairs. That was the wrong picture: it is not one body climbing, it is
+    // many separate pools, and turning it off took the fountain with it.
+    const bool skipWater = std::getenv("MOGHOUSE_NO_WATER") != nullptr;
     for (const ffxi::CollisionInstance& instance : zone.instances)
     {
         if (skipWater || instance.waterHeight == 0.0f || instance.mesh >= zone.collision.size())

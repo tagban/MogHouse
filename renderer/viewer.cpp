@@ -1945,9 +1945,20 @@ constexpr float kGravity = 26.0f;
                 // anywhere below, which means the edge of the world rather
                 // than a drop. Falling out of a zone is not a behaviour worth
                 // having.
+                // Searched over the character's own width rather than under a
+                // single point.
+                //
+                // A staircase is not a continuous surface: between one tread
+                // and the next there is a sliver with no walkable triangle
+                // over it at all, half a unit wide on the steps outside the
+                // Bastok auction house. Asking about one point lands in that
+                // gap, reports the edge of the world, and refuses the step -
+                // so a perfectly ordinary staircase cannot be climbed or
+                // descended. Someone standing with a foot on solid ground is
+                // not falling out of the zone.
                 const bool intoTheVoid =
                     !ignoreCollision &&
-                    !collision.groundAt(stepped.x, stepped.z, characterAt.y, kFallReach).has_value();
+                    !collision.nearestGround(stepped.x, stepped.z, characterAt.y, 1.0f).has_value();
 
                 // What a step is not allowed to do, beyond hitting a wall.
                 //
