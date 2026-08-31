@@ -522,22 +522,55 @@ Vec3 Collision::move(const Vec3& from, const Vec3& to, float radius) const
             const float into = step.x * n.x + step.z * n.z;
             const Vec3 slid{from.x + step.x - n.x * into, to.y, from.z + step.z - n.z * into};
 
-            // If sliding still crosses something, stop where we were.
-            const Vec3 slidProbe{slid.x + (slid.x - from.x), slid.y, slid.z + (slid.z - from.z)};
-            for (uint32_t other : *candidates)
+            const auto blocked = [&](const Vec3& end) {
+                const Vec3 endProbe{end.x + (end.x - from.x), end.y, end.z + (end.z - from.z)};
+                for (uint32_t other : *candidates)
+                {
+                    const Triangle& t = triangles_[other];
+                    if (t.walkable)
+                    {
+                        continue;
+                    }
+                    const float low = std::min({t.a.y, t.b.y, t.c.y});
+                    const float high = std::max({t.a.y, t.b.y, t.c.y});
+                    if (high < from.y + kStepUp || low > from.y + kCharacterHeight)
+                    {
+                        continue;
+                    }
+                    if (crossesFlat(from, endProbe, t.a, t.b) || crossesFlat(from, endProbe, t.b, t.c) ||
+                        crossesFlat(from, endProbe, t.c, t.a))
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            };
+
+            if (!blocked(slid))
             {
-                const Triangle& t = triangles_[other];
-                if (t.walkable)
-                {
-                    continue;
-                }
-                if (crossesFlat(from, slidProbe, t.a, t.b) || crossesFlat(from, slidProbe, t.b, t.c) ||
-                    crossesFlat(from, slidProbe, t.c, t.a))
-                {
-                    return from;
-                }
+                return slid;
             }
-            return slid;
+
+            // The slide is blocked too, so try the step one axis at a time
+            // before giving up.
+            //
+            // Returning `from` on its own is not a stop, it is a trap. Against
+            // something thin - a sign post, a railing upright - the step, the
+            // slide and every direction out can all cross something, and a
+            // character that walks into one never gets out again. Moving along
+            // a single axis usually clears it, and if neither does they are no
+            // worse off than before.
+            const Vec3 alongX{from.x + step.x, to.y, from.z};
+            const Vec3 alongZ{from.x, to.y, from.z + step.z};
+            if (!blocked(alongX))
+            {
+                return alongX;
+            }
+            if (!blocked(alongZ))
+            {
+                return alongZ;
+            }
+            return from;
         }
     }
     return to;

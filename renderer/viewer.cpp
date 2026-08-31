@@ -21,6 +21,8 @@
 #include "character.h"
 #include "collision.h"
 #include "viewer.h"
+
+#include <deque>
 #include "coverage.h"
 #include "linalg.h"
 #include "chat_shader.h"
@@ -1543,6 +1545,23 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     /// How many entity bodies the instance buffer currently holds.
     int drawnBodies = 0;
 
+    /// Where the character has been, sampled about twice a second.
+    ///
+    /// Collision can still trap someone - a sign post is thin enough that the
+    /// step, the slide and both single-axis escapes can all be blocked at
+    /// once - and when it does there is nothing to be done from inside the
+    /// window. Backing up along a path already known to be walkable is the
+    /// cheap way out, and it needs no cleverness about which way is clear.
+    std::deque<mh::Vec3> breadcrumbs;
+    float breadcrumbTimer = 0.0f;
+
+    /// Collision off: walk through walls and floors, and do not fall.
+    ///
+    /// The same thing a private server's !wallhack does. Getting somewhere to
+    /// look at it should not depend on the collision being right, which is
+    /// awkward when the collision is what is being checked.
+    bool noclip = false;
+
     // Where the character is drawn. Everything that moves them has to call
     // this - the position and the heading only reach the GPU through here, so
     // anything that updates characterAt and forgets leaves the character
@@ -1638,6 +1657,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 
     std::printf("wasd to walk, mouse drag to look, space and ctrl for up and down,\n");
     std::printf("shift to run, tab to orbit, p to print position, c to place the character,\n");
+    std::printf("u to back up the trail if collision traps you, n for no collision,\n");
     std::printf("f to swap between driving the character and flying the camera,\n");
     std::printf("escape to quit\n");
 
@@ -1793,6 +1813,27 @@ constexpr float kGravity = 26.0f;
                     std::printf("at %.1f %.1f %.1f   zone y runs %.1f to %.1f\n", at.x, at.y, at.z,
                                 zone->boundsMin.y, zone->boundsMax.y);
                 }
+                else if (event.key.key == SDLK_N)
+                {
+                    noclip = !noclip;
+                    fallSpeed = 0.0f;
+                    std::printf("collision %s\n", noclip ? "off - walking through walls" : "on");
+                }
+                else if (event.key.key == SDLK_U && character)
+                {
+                    // Back up the trail. Three samples is a second and a half
+                    // of walking, which clears anything that catches a corner
+                    // without throwing away where you were going.
+                    for (int back = 0; back < 3 && breadcrumbs.size() > 1; ++back)
+                    {
+                        breadcrumbs.pop_back();
+                    }
+                    if (!breadcrumbs.empty())
+                    {
+                        placeCharacter(breadcrumbs.back(), 20.0f);
+                        std::printf("unstuck to %.1f %.1f %.1f\n", characterAt.x, characterAt.y, characterAt.z);
+                    }
+                }
                 else if (event.key.key == SDLK_F && character)
                 {
                     driving = !driving;
@@ -1842,6 +1883,30 @@ constexpr float kGravity = 26.0f;
 
         const uint64_t nowTicks = SDL_GetTicksNS();
         const float delta = static_cast<float>(nowTicks - previousTicks) / 1e9f;
+
+        // A trail to back up along, sampled on a timer. Only recorded when the
+        // character has actually moved, so standing still does not fill the
+        // buffer with the same spot and turn the escape key into a no-op.
+        if (character)
+        {
+            breadcrumbTimer += delta;
+            if (breadcrumbTimer >= 0.5f)
+            {
+                breadcrumbTimer = 0.0f;
+                const bool worthKeeping =
+                    breadcrumbs.empty() ||
+                    std::fabs(breadcrumbs.back().x - characterAt.x) + std::fabs(breadcrumbs.back().z - characterAt.z) >
+                        0.4f;
+                if (worthKeeping)
+                {
+                    breadcrumbs.push_back(characterAt);
+                    while (breadcrumbs.size() > 32)
+                    {
+                        breadcrumbs.pop_front();
+                    }
+                }
+            }
+        }
         previousTicks = nowTicks;
         const bool* held = SDL_GetKeyboardState(nullptr);
         float speed = 12.0f * delta;
@@ -1869,7 +1934,8 @@ constexpr float kGravity = 26.0f;
                                   characterAt.z + forward.z * ahead + right.z * side};
             if (wanted.x != characterAt.x || wanted.z != characterAt.z)
             {
-                const mh::Vec3 stepped = collision.empty() ? wanted : collision.move(characterAt, wanted, 0.5f);
+                const bool ignoreCollision = collision.empty() || noclip;
+                const mh::Vec3 stepped = ignoreCollision ? wanted : collision.move(characterAt, wanted, 0.5f);
 
                 // Horizontal only. Whether there is anything to stand on is
                 // settled below, by falling - a step off a ledge is a step, not
@@ -1880,7 +1946,7 @@ constexpr float kGravity = 26.0f;
                 // than a drop. Falling out of a zone is not a behaviour worth
                 // having.
                 const bool intoTheVoid =
-                    !collision.empty() &&
+                    !ignoreCollision &&
                     !collision.groundAt(stepped.x, stepped.z, characterAt.y, kFallReach).has_value();
 
                 // What a step is not allowed to do, beyond hitting a wall.
@@ -1901,7 +1967,7 @@ constexpr float kGravity = 26.0f;
                 // Refused per axis rather than outright, so walking into an
                 // edge at an angle slides along it instead of sticking.
                 mh::Vec3 allowed = stepped;
-                if (!collision.empty() && !intoTheVoid)
+                if (!ignoreCollision && !intoTheVoid)
                 {
                     const std::optional<float> here =
                         collision.groundAt(characterAt.x, characterAt.z, characterAt.y, kFallReach);
@@ -1950,12 +2016,13 @@ constexpr float kGravity = 26.0f;
                 characterFacing = camera.yaw;
             }
 
-            // Stand on the floor, or fall towards it.
+            // Stand on the floor, or fall towards it. Not while noclipping:
+            // the point of it is to go through floors as well as walls.
             //
             // groundAt allows a little above the feet - the step height - so
             // walking up a stair tread reads as standing on it rather than as
             // rising through it.
-            if (!collision.empty())
+            if (!collision.empty() && !noclip)
             {
                 const std::optional<float> ground =
                     collision.groundAt(characterAt.x, characterAt.z, characterAt.y, kFallReach);
@@ -2286,8 +2353,15 @@ constexpr float kGravity = 26.0f;
 
             if (chatPipeline && chatBindGroup)
             {
-                const std::vector<std::string> lines = link ? link->chat() : options.testChat;
-                if (!lines.empty())
+                std::vector<std::string> lines = link ? link->chat() : options.testChat;
+                if (lines.empty())
+                {
+                    // Something rather than nothing. An empty panel that is
+                    // present says "chat is wired up and quiet"; drawing
+                    // nothing at all is indistinguishable from a panel that
+                    // was never built, which is exactly how it read.
+                    lines.push_back("CHAT - WAITING FOR THE SERVER");
+                }
                 {
                     ChatUniforms chat{};
                     // Bottom left, sized so the glyphs stay square: the panel
