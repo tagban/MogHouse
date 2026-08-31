@@ -1863,6 +1863,29 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 
     std::map<uint64_t, std::optional<DrawableCharacter>> npcModels;
 
+    /// One entity's animation, and the vertices it is skinned into.
+    ///
+    /// The model cache is keyed by look, so a row of identical NPCs shares a
+    /// single set of vertices. That is fine while they all stand in the same
+    /// pose and useless the moment each needs its own, so every entity keeps
+    /// its own copy of the geometry and its own buffer to draw from. Without
+    /// it an NPC is a statue being slid around the zone: the server moves it,
+    /// nothing bends, and it arrives without ever having taken a step.
+    struct AnimatedEntity
+    {
+        mh::Character geometry;
+        wgpu::Buffer vertices;
+        const ffxi::Animation* clip = nullptr;
+        float clipStart = 0.0f;
+        float lastX = 0.0f;
+        float lastZ = 0.0f;
+        float speed = 0.0f;
+        bool placed = false;
+        bool drawn = false;
+    };
+
+    std::map<uint32_t, AnimatedEntity> entityPoses;
+
     const auto lookKey = [](const uint16_t look[7]) {
         // Race and five equipment slots, packed. Face is left out: it changes
         // the head texture rather than the geometry, and including it would
@@ -2805,6 +2828,105 @@ constexpr float kGravity = 26.0f;
                                                   .colorAttachments = &colour,
                                                   .depthStencilAttachment = &depth};
 
+        // Everyone else's legs.
+        //
+        // Done before the pass opens because it uploads: each entity is posed
+        // on the CPU into its own copy of the model's vertices, and the buffer
+        // it draws from is written here rather than mid-pass.
+        //
+        // Which clip is chosen from how far the entity moved since the last
+        // frame - the server sends positions, not gaits, so movement is the
+        // only evidence there is. The distance is smoothed because updates
+        // arrive a few times a second and a raw per-frame delta is zero on
+        // every frame between them, which reads as a stutter rather than a
+        // walk.
+        for (const mh::RadarEntity& entity : radarEntities)
+        {
+            if (!entity.hasLook())
+            {
+                continue;
+            }
+
+            const DrawableCharacter* model = modelFor(entity.look);
+            if (!model || model->loaded.animations.empty())
+            {
+                continue;
+            }
+
+            AnimatedEntity& state = entityPoses[entity.id];
+            if (!state.vertices)
+            {
+                state.geometry = model->loaded.geometry;
+                wgpu::BufferDescriptor descriptor{
+                    .usage = wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst,
+                    .size = state.geometry.vertices.size() * sizeof(mh::Vertex)};
+                state.vertices = device.CreateBuffer(&descriptor);
+            }
+
+            const float dx = entity.x - state.lastX;
+            const float dz = entity.z - state.lastZ;
+            const float stepped = state.placed ? std::sqrt(dx * dx + dz * dz) : 0.0f;
+            state.lastX = entity.x;
+            state.lastZ = entity.z;
+            state.placed = true;
+
+            // Decays over about a third of a second, so a gap between updates
+            // does not drop the character out of its stride.
+            state.speed = std::max(state.speed * 0.90f, stepped);
+
+            const auto clipNamed = [&model](const char* name) -> const ffxi::Animation* {
+                auto found = model->loaded.animations.find(name);
+                return found == model->loaded.animations.end() ? nullptr : &found->second;
+            };
+
+            const ffxi::Animation* idle = clipNamed("idl0");
+            const ffxi::Animation* walk = clipNamed("wlk0");
+            const ffxi::Animation* run = clipNamed("run0");
+
+            // The same threshold the player's own legs use, in the same units:
+            // distance covered between frames rather than a speed.
+            const ffxi::Animation* wanted = state.speed > 1e-4f ? (state.speed > 0.06f ? run : walk) : idle;
+            if (!wanted)
+            {
+                wanted = idle ? idle : walk;
+            }
+            if (!wanted)
+            {
+                continue;
+            }
+
+            if (wanted != state.clip)
+            {
+                state.clip = wanted;
+                state.clipStart = nowSeconds;
+            }
+
+            // The arms belong to the same stride as the legs. See the player's
+            // own pose for why the upper body is a second clip.
+            const ffxi::Animation* upper = nullptr;
+            if (state.clip->name.size() == 4 && state.clip->name.back() == '0')
+            {
+                std::string above = state.clip->name;
+                above.back() = '1';
+                upper = clipNamed(above.c_str());
+                if (!upper)
+                {
+                    upper = clipNamed("std1");
+                }
+            }
+
+            const float elapsed = nowSeconds - state.clipStart;
+            const float frame = elapsed / state.clip->frameSeconds();
+            const float upperFrame = upper ? elapsed / upper->frameSeconds() : 0.0f;
+
+            mh::reskin(state.geometry,
+                       mh::animatedPose(model->loaded.skeleton, *state.clip, frame, upper, upperFrame),
+                       model->loaded.meshes);
+            queue.WriteBuffer(state.vertices, 0, state.geometry.vertices.data(),
+                              state.geometry.vertices.size() * sizeof(mh::Vertex));
+            state.drawn = true;
+        }
+
         wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
         wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&passDescriptor);
 
@@ -2996,7 +3118,12 @@ constexpr float kGravity = 26.0f;
                         continue;
                     }
 
-                    pass.SetVertexBuffer(0, model->vertices);
+                    // The entity's own posed vertices when it has them, and
+                    // the shared model's when it does not - a look with no
+                    // animations at all is still worth drawing standing still.
+                    auto posed = entityPoses.find(radarEntities[index].id);
+                    const bool animated = posed != entityPoses.end() && posed->second.drawn;
+                    pass.SetVertexBuffer(0, animated ? posed->second.vertices : model->vertices);
                     pass.SetIndexBuffer(model->indices, wgpu::IndexFormat::Uint32);
                     for (size_t b = 0; b < model->loaded.geometry.batches.size() && b < model->bindGroups.size(); ++b)
                     {
