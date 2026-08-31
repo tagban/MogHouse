@@ -2145,7 +2145,8 @@ constexpr float kGravity = 26.0f;
                 for (size_t i = 0; i < zone->draws.size() && i < batchBindGroups.size(); ++i)
                 {
                     const mh::InstancedDraw& draw = zone->draws[i];
-                    if (draw.water != (layer == 1))
+                    const bool translucent = draw.water || draw.blend;
+                    if (translucent != (layer == 1))
                     {
                         continue;
                     }
@@ -2154,7 +2155,7 @@ constexpr float kGravity = 26.0f;
                     const bool cutout = cutoutMode == 0   ? false
                                         : cutoutMode == 1 ? true
                                                           : draw.cutout;
-                    pass.SetPipeline(draw.water ? translucentPipeline : (cutout ? cutoutPipeline : pipeline));
+                    pass.SetPipeline(translucent ? translucentPipeline : (cutout ? cutoutPipeline : pipeline));
                     pass.SetBindGroup(0, batchBindGroups[i]);
                     pass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
                 }

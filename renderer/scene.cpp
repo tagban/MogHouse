@@ -20,6 +20,13 @@ constexpr float kLayerSeparation = 0.004f;
 /// colour throughout. Cutouts measure 0.41 upward, everything else 0.00.
 constexpr float kCutoutSignal = 0.2f;
 
+/// The bit in a mesh header's blending field that asks for alpha blending.
+constexpr uint16_t kBlendFlag = 0x8000;
+
+/// Enough fully transparent texels to mean the texture is meant to be cut out
+/// rather than to be a stray edge texel or two.
+constexpr float kAnyTransparency = 0.005f;
+
 /// Builds a placement's transform, with the turn out of FFXI's frame folded
 /// in so everything downstream can assume Y is up.
 ///
@@ -190,7 +197,17 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
             }
 
             auto texture = textures.find(mesh.texture);
-            const bool cutout = texture != textures.end() && texture->second.blackWhereClear > kCutoutSignal;
+            // Alpha-tested if the texture has any fully transparent texels at
+            // all, not only if those texels are also black.
+            //
+            // blackWhereClear measures a particular DXT tell: a block that is
+            // transparent and black, which is what a cutout usually compresses
+            // to. But a cloth awning whose clear area is not black scores below
+            // the threshold, gets drawn opaque, and its transparent parts come
+            // out as black blobs on the cloth.
+            const bool cutout = texture != textures.end() &&
+                                (texture->second.blackWhereClear > kCutoutSignal ||
+                                 texture->second.alphaZero > kAnyTransparency);
             const float layerOffset = static_cast<float>(meshIndex) * kLayerSeparation;
 
             const uint32_t vertexBase = static_cast<uint32_t>(scene.vertices.size());
@@ -217,7 +234,8 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
                 }
             }
 
-            scene.draws.push_back(InstancedDraw{mesh.texture, cutout, water, indexStart,
+            scene.draws.push_back(InstancedDraw{mesh.texture, cutout, (mesh.blending & kBlendFlag) != 0, water,
+                                                indexStart,
                                                 static_cast<uint32_t>(scene.indices.size()) - indexStart,
                                                 instanceOffset, static_cast<uint32_t>(transforms.size())});
 
