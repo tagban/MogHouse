@@ -1879,6 +1879,8 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         float clipStart = 0.0f;
         float lastX = 0.0f;
         float lastZ = 0.0f;
+        float lastMoveTime = 0.0f;
+        float movingUntil = 0.0f;
         float speed = 0.0f;
         bool placed = false;
         bool drawn = false;
@@ -2870,9 +2872,21 @@ constexpr float kGravity = 26.0f;
             state.lastZ = entity.z;
             state.placed = true;
 
-            // Decays over about a third of a second, so a gap between updates
-            // does not drop the character out of its stride.
-            state.speed = std::max(state.speed * 0.90f, stepped);
+            // Speed over the gap between updates, not between frames.
+            //
+            // Positions arrive a few times a second, so most frames see no
+            // movement at all. A per-frame delta is therefore zero on nearly
+            // every frame, and anything derived from it crosses the walk and
+            // run thresholds several times a second - restarting the clip each
+            // time. Dividing the step by the time since the last one gives a
+            // speed that does not depend on how often the server speaks, and
+            // movingUntil holds the stride across the quiet frames between.
+            if (stepped > 1e-4f)
+            {
+                state.speed = stepped / std::max(nowSeconds - state.lastMoveTime, 1.0f / 60.0f);
+                state.lastMoveTime = nowSeconds;
+                state.movingUntil = nowSeconds + 0.4f;
+            }
 
             const auto clipNamed = [&model](const char* name) -> const ffxi::Animation* {
                 auto found = model->loaded.animations.find(name);
@@ -2883,9 +2897,10 @@ constexpr float kGravity = 26.0f;
             const ffxi::Animation* walk = clipNamed("wlk0");
             const ffxi::Animation* run = clipNamed("run0");
 
-            // The same threshold the player's own legs use, in the same units:
-            // distance covered between frames rather than a speed.
-            const ffxi::Animation* wanted = state.speed > 1e-4f ? (state.speed > 0.06f ? run : walk) : idle;
+            // Walking in FFXI is a little under three units a second and
+            // running a little over five, so the two part company around four.
+            const bool moving = nowSeconds < state.movingUntil;
+            const ffxi::Animation* wanted = moving ? (state.speed > 4.0f ? run : walk) : idle;
             if (!wanted)
             {
                 wanted = idle ? idle : walk;
@@ -2901,18 +2916,19 @@ constexpr float kGravity = 26.0f;
                 state.clipStart = nowSeconds;
             }
 
-            // The arms belong to the same stride as the legs. See the player's
-            // own pose for why the upper body is a second clip.
+            // The arms belong to the same stride as the legs: a clip's upper
+            // body is its own name with the trailing 0 turned into a 1.
+            //
+            // No upper half at all when the model has no paired clip, which is
+            // what the player does too. Substituting a standing torso for a
+            // missing one puts the character in two poses at once - std folds
+            // the body forward, so a walking NPC spends the whole stride bowing.
             const ffxi::Animation* upper = nullptr;
             if (state.clip->name.size() == 4 && state.clip->name.back() == '0')
             {
                 std::string above = state.clip->name;
                 above.back() = '1';
                 upper = clipNamed(above.c_str());
-                if (!upper)
-                {
-                    upper = clipNamed("std1");
-                }
             }
 
             const float elapsed = nowSeconds - state.clipStart;
