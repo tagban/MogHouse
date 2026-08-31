@@ -1,12 +1,16 @@
 #pragma once
 
-// Names over heads.
+// Names over heads, drawn from the Verdana atlas in renderer/assets.
 //
 // Projected in the fragment shader rather than drawn as billboarded quads: the
 // radar already loops over every entity per fragment for its dots, and this is
 // the same shape of problem with the same bounded list. It costs a loop over a
 // few dozen entities per pixel and saves a vertex buffer, a second pipeline and
 // a draw call per name.
+//
+// The loop is cheap because almost every fragment fails a name's bounding box
+// on the first test and moves on. Only the handful of fragments actually
+// inside a name pay for the glyph search.
 
 namespace mh
 {
@@ -15,7 +19,7 @@ namespace mh
 inline constexpr int kNameplateMax = 32;
 
 /// Characters per name. FFXI names are at most 15, and this leaves room for a
-/// short prefix if one is ever wanted.
+/// prefix or a short suffix.
 inline constexpr int kNameplateChars = 20;
 
 inline constexpr const char* kNameplateShader = R"(
@@ -23,27 +27,25 @@ struct NameplateUniforms {
     // The camera's view-projection, so a world position can be placed on
     // screen without the CPU doing it again.
     viewProjection : mat4x4<f32>,
-    // How many names are in use, then the glyph size in NDC y, then the aspect.
+    // Names in use, text height in NDC, aspect, and the atlas cell size in
+    // texels over the atlas width - enough to turn a cell index into UVs.
     counts : vec4<f32>,
-    // World position per name, w unused.
+    // Atlas shape: columns, cell size, atlas width, atlas height.
+    atlas : vec4<f32>,
+    // World position per name in xyz; w is the name's total width in cells.
     positions : array<vec4<f32>, 32>,
-    // Glyphs, kNameplateChars per name, laid out name-major. One character per
-    // vec4 because a uniform array strides by 16 bytes regardless.
+    // Colour per name. The outline stays black whatever this says.
+    colours : array<vec4<f32>, 32>,
+    // Per glyph: atlas cell index, x offset in cells, advance in cells.
+    // Laid out name-major, kNameplateChars apart.
     glyphs : array<vec4<f32>, 640>,
 };
 
-const kGlyphWidth = 4;
-const kGlyphHeight = 6;
 const kChars = 20;
-const kFont = array<u32, 40>(
-    0u, 16290430u, 6969727u, 8788062u, 8001663u, 8804735u, 283007u, 16144478u,
-    16531775u, 139233u, 8263696u, 8725311u, 8521791u, 16540095u, 16613823u, 8001630u,
-    1610367u, 12130398u, 10064511u, 6707554u, 270273u, 8259615u, 4131855u, 16614975u,
-    13419315u, 806659u, 9329265u, 8018526u, 8648832u, 10132578u, 6969697u, 16531719u,
-    6707559u, 6707550u, 842817u, 6969690u, 8034918u, 192u, 1065220u, 2048u
-);
 
 @group(0) @binding(0) var<uniform> plate : NameplateUniforms;
+@group(0) @binding(1) var fontTexture : texture_2d<f32>;
+@group(0) @binding(2) var fontSampler : sampler;
 
 struct VertexOut {
     @builtin(position) position : vec4<f32>,
@@ -63,24 +65,17 @@ fn vertexMain(@builtin(vertex_index) index : u32) -> VertexOut {
     return out;
 }
 
-/// How many characters of a name are not trailing spaces, so a short name is
-/// centred on the body rather than on a padded field.
-fn nameLength(slot : i32) -> i32 {
-    var length = 0;
-    for (var i = 0; i < kChars; i = i + 1) {
-        if (i32(plate.glyphs[slot * kChars + i].x) != 0) {
-            length = i + 1;
-        }
-    }
-    return length;
-}
-
 @fragment
 fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
     let count = i32(plate.counts.x);
-    let glyphHeight = plate.counts.y;
+    let textHeight = plate.counts.y;      // one cell, in NDC y
     let aspect = plate.counts.z;
-    let glyphWidth = glyphHeight / aspect;
+    let cellWide = textHeight / aspect;   // one cell, in NDC x
+
+    let columns = plate.atlas.x;
+    let cell = plate.atlas.y;
+    let atlasWidth = plate.atlas.z;
+    let atlasHeight = plate.atlas.w;
 
     var colour = vec3<f32>(0.0);
     var alpha = 0.0;
@@ -92,50 +87,57 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
         }
         let screen = clip.xy / clip.w;
 
-        let length = nameLength(slot);
-        if (length == 0) {
+        let widthCells = plate.positions[slot].w;
+        if (widthCells <= 0.0) {
             continue;
         }
 
-        let advance = glyphWidth * f32(kGlyphWidth + 1);
-        let width = advance * f32(length);
+        let width = widthCells * cellWide;
         let left = screen.x - width * 0.5;
-        let bottom = screen.y;
-
-        let textHeight = glyphHeight * f32(kGlyphHeight);
-
-        // A panel behind the whole name, with a little air around it, rather
-        // than a dark square behind each character. Names sit over stone that
-        // is nearly the same value as the glyphs, and per-cell shading leaves
-        // them legible only where a stroke happens to fall.
-        let padX = glyphWidth * 1.5;
-        let padY = glyphHeight * 1.5;
-        let local = vec2<f32>(in.ndc.x - left, in.ndc.y - bottom);
-        if (local.x < -padX || local.x >= width + padX || local.y < -padY ||
-            local.y >= textHeight + padY) {
-            continue;
-        }
-
-        colour = vec3<f32>(0.02, 0.02, 0.04);
-        alpha = max(alpha, 0.55);
+        let local = vec2<f32>(in.ndc.x - left, in.ndc.y - screen.y);
 
         if (local.x < 0.0 || local.x >= width || local.y < 0.0 || local.y >= textHeight) {
-            continue;
+            continue;   // the cheap test almost every fragment takes
         }
 
-        let column = i32(local.x / advance);
-        let inColumn = i32((local.x - f32(column) * advance) / glyphWidth);
-        // Row 0 is the top of the glyph and NDC y runs the other way.
-        let row = kGlyphHeight - 1 - i32(local.y / glyphHeight);
+        // Which glyph of this name the fragment is over. The offsets are
+        // already laid out, so this is a search rather than an accumulation.
+        let xCells = local.x / cellWide;
+        for (var i = 0; i < kChars; i = i + 1) {
+            let glyph = plate.glyphs[slot * kChars + i];
+            let advance = glyph.z;
+            if (advance <= 0.0) {
+                continue;
+            }
+            if (xCells < glyph.y || xCells >= glyph.y + advance) {
+                continue;
+            }
 
-        if (column >= length || inColumn >= kGlyphWidth || row < 0 || row >= kGlyphHeight) {
-            continue;
-        }
+            // Into the glyph's own cell, then into the atlas. The cell is
+            // square and the glyph sits at its top left, so a proportional
+            // glyph uses only part of its cell's width.
+            let insideX = (xCells - glyph.y) / 1.0;
+            let insideY = 1.0 - local.y / textHeight;
 
-        let glyph = kFont[i32(plate.glyphs[slot * kChars + column].x)];
-        if (((glyph >> u32(inColumn * kGlyphHeight + row)) & 1u) == 1u) {
-            colour = vec3<f32>(0.98, 0.98, 1.0);
-            alpha = 1.0;
+            let index = i32(glyph.x);
+            let col = f32(index % i32(columns));
+            let row = f32(index / i32(columns));
+
+            let uv = vec2<f32>((col * cell + insideX * cell) / atlasWidth,
+                               (row * cell + insideY * cell) / atlasHeight);
+            let sampled = textureSampleLevel(fontTexture, fontSampler, uv, 0.0);
+
+            // Red is the glyph, green is the outline around it. Drawing the
+            // outline first and the glyph over it keeps a light name readable
+            // on pale stone without a panel behind it.
+            let fill = sampled.r;
+            let outline = sampled.g;
+            let together = max(fill, outline);
+            if (together > 0.02) {
+                colour = mix(vec3<f32>(0.0, 0.0, 0.0), plate.colours[slot].rgb, fill);
+                alpha = max(alpha, together);
+            }
+            break;
         }
     }
 

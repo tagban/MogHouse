@@ -36,14 +36,21 @@ add_library(moghouse-render STATIC
     viewer.cpp
     zonemesh.cpp
     ${MH_SURFACE_SOURCE}
-)
+
+    textfont.cpp)
 target_include_directories(moghouse-render PUBLIC .)
 target_link_libraries(moghouse-render PUBLIC dawn::webgpu_dawn SDL3::SDL3 ffxi-dat)
+
 
 # And a thin executable over it, so the renderer can still be exercised
 # without the client.
 add_executable(moghouse-renderer main.cpp)
 target_link_libraries(moghouse-renderer PRIVATE moghouse-render)
+# The glyph atlas is copied beside the executable so the renderer can find
+# it without knowing where the source tree is.
+add_custom_command(TARGET moghouse-renderer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets $<TARGET_FILE_DIR:moghouse-renderer>/assets)
 
 if(APPLE)
     target_link_libraries(moghouse-render PUBLIC "-framework QuartzCore" "-framework Cocoa")

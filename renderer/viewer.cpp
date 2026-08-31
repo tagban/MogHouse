@@ -27,6 +27,7 @@
 #include "linalg.h"
 #include "chat_shader.h"
 #include "nameplate_shader.h"
+#include "textfont.h"
 #include "radar_shader.h"
 #include "scene.h"
 #include "surface.h"
@@ -86,12 +87,23 @@ inline int glyphIndex(char raw)
 /// a column of space beside it and two rows above and below.
 inline constexpr float kGlyphAspect = 5.0f / 8.0f;
 
+/// Name colours, by what the thing is.
+///
+/// The full list a player would expect - party, linkshell, friend, pet - needs
+/// membership this client does not read from any packet yet. Rather than guess
+/// at those, only the three that can actually be told apart are coloured.
+inline constexpr float kNameWhite[3] = {0.98f, 0.98f, 1.00f};
+inline constexpr float kNameNpc[3] = {0.98f, 0.98f, 1.00f};
+inline constexpr float kNameMonster[3] = {0.98f, 0.86f, 0.30f};
+
 /// Matches NameplateUniforms in nameplate_shader.h.
 struct NameplateUniforms
 {
     float viewProjection[16];
     float counts[4];
+    float atlas[4];
     float positions[mh::kNameplateMax][4];
+    float colours[mh::kNameplateMax][4];
     float glyphs[mh::kNameplateMax * mh::kNameplateChars][4];
 };
 
@@ -1139,9 +1151,35 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     wgpu::RenderPipeline radarPipeline;
     wgpu::BindGroup radarBindGroup;
 
+    // The glyph atlas, beside the executable. Text is worth doing without
+    // rather than failing to open a window over, so an absent atlas leaves
+    // the nameplates off and everything else running.
+    const mh::TextFont textFont = mh::loadTextFont((std::filesystem::current_path() / "assets").string());
+    wgpu::Texture fontTexture;
+    if (!textFont.empty())
+    {
+        wgpu::TextureDescriptor fontDescriptor{};
+        fontDescriptor.usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst;
+        fontDescriptor.dimension = wgpu::TextureDimension::e2D;
+        fontDescriptor.size = {textFont.width, textFont.height, 1};
+        fontDescriptor.format = wgpu::TextureFormat::RGBA8Unorm;
+        fontDescriptor.mipLevelCount = 1;
+        fontDescriptor.sampleCount = 1;
+        fontTexture = device.CreateTexture(&fontDescriptor);
+
+        wgpu::TexelCopyTextureInfo destination{};
+        destination.texture = fontTexture;
+        wgpu::TexelCopyBufferLayout layout{};
+        layout.bytesPerRow = textFont.width * 4;
+        layout.rowsPerImage = textFont.height;
+        const wgpu::Extent3D extent{textFont.width, textFont.height, 1};
+        queue.WriteTexture(&destination, textFont.pixels.data(), textFont.pixels.size(), &layout, &extent);
+    }
+
     wgpu::Buffer plateUniformBuffer;
     wgpu::RenderPipeline platePipeline;
     wgpu::BindGroup plateBindGroup;
+    if (fontTexture)
     {
         wgpu::BufferDescriptor plateBufferDescriptor{.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
                                                      .size = sizeof(NameplateUniforms)};
@@ -1152,12 +1190,19 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         wgpu::ShaderModuleDescriptor plateModuleDescriptor{.nextInChain = &plateWgsl};
         wgpu::ShaderModule plateModule = device.CreateShaderModule(&plateModuleDescriptor);
 
-        wgpu::BindGroupLayoutEntry plateLayoutEntry{};
-        plateLayoutEntry.binding = 0;
-        plateLayoutEntry.visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
-        plateLayoutEntry.buffer.type = wgpu::BufferBindingType::Uniform;
+        wgpu::BindGroupLayoutEntry plateLayoutEntries[3] = {};
+        plateLayoutEntries[0].binding = 0;
+        plateLayoutEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+        plateLayoutEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
+        plateLayoutEntries[1].binding = 1;
+        plateLayoutEntries[1].visibility = wgpu::ShaderStage::Fragment;
+        plateLayoutEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
+        plateLayoutEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+        plateLayoutEntries[2].binding = 2;
+        plateLayoutEntries[2].visibility = wgpu::ShaderStage::Fragment;
+        plateLayoutEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
 
-        wgpu::BindGroupLayoutDescriptor plateLayoutDescriptor{.entryCount = 1, .entries = &plateLayoutEntry};
+        wgpu::BindGroupLayoutDescriptor plateLayoutDescriptor{.entryCount = 3, .entries = plateLayoutEntries};
         wgpu::BindGroupLayout plateBindGroupLayout = device.CreateBindGroupLayout(&plateLayoutDescriptor);
         wgpu::PipelineLayoutDescriptor platePipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
                                                                      .bindGroupLayouts = &plateBindGroupLayout};
@@ -1188,12 +1233,23 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             .fragment = &plateFragment};
         platePipeline = device.CreateRenderPipeline(&platePipelineDescriptor);
 
-        wgpu::BindGroupEntry plateEntry{};
-        plateEntry.binding = 0;
-        plateEntry.buffer = plateUniformBuffer;
-        plateEntry.size = sizeof(NameplateUniforms);
+        wgpu::SamplerDescriptor fontSamplerDescriptor{};
+        fontSamplerDescriptor.magFilter = wgpu::FilterMode::Linear;
+        fontSamplerDescriptor.minFilter = wgpu::FilterMode::Linear;
+        fontSamplerDescriptor.addressModeU = wgpu::AddressMode::ClampToEdge;
+        fontSamplerDescriptor.addressModeV = wgpu::AddressMode::ClampToEdge;
+        wgpu::Sampler fontSampler = device.CreateSampler(&fontSamplerDescriptor);
+
+        wgpu::BindGroupEntry plateEntries[3] = {};
+        plateEntries[0].binding = 0;
+        plateEntries[0].buffer = plateUniformBuffer;
+        plateEntries[0].size = sizeof(NameplateUniforms);
+        plateEntries[1].binding = 1;
+        plateEntries[1].textureView = fontTexture.CreateView();
+        plateEntries[2].binding = 2;
+        plateEntries[2].sampler = fontSampler;
         wgpu::BindGroupDescriptor plateBindGroupDescriptor{
-            .layout = plateBindGroupLayout, .entryCount = 1, .entries = &plateEntry};
+            .layout = plateBindGroupLayout, .entryCount = 3, .entries = plateEntries};
         plateBindGroup = device.CreateBindGroup(&plateBindGroupDescriptor);
     }
 
@@ -2337,8 +2393,12 @@ constexpr float kGravity = 26.0f;
                 std::memcpy(plate.viewProjection, viewProjection.m, sizeof(plate.viewProjection));
 
                 const float windowAspect = static_cast<float>(width) / static_cast<float>(height);
-                plate.counts[1] = 0.0085f;     // glyph pixel height in NDC
+                plate.counts[1] = 0.034f;      // one atlas cell, in NDC y
                 plate.counts[2] = windowAspect;
+                plate.atlas[0] = static_cast<float>(textFont.columns);
+                plate.atlas[1] = static_cast<float>(textFont.cell);
+                plate.atlas[2] = static_cast<float>(textFont.width);
+                plate.atlas[3] = static_cast<float>(textFont.height);
 
                 int named = 0;
                 for (const mh::RadarEntity& entity : radarEntities)
@@ -2351,18 +2411,59 @@ constexpr float kGravity = 26.0f;
                     {
                         continue;
                     }
+
                     // Over the head rather than at the feet. The model is about
                     // 1.8 tall and the name wants a little air above that.
                     plate.positions[named][0] = entity.x;
                     plate.positions[named][1] = entity.y + 2.2f;
                     plate.positions[named][2] = entity.z;
-                    for (int column = 0; column < mh::kNameplateChars; ++column)
+
+                    // Colour by what the entity is. The rest of the palette -
+                    // party blue, linkshell green, friend orange, pet grey -
+                    // needs membership the client does not parse yet, so those
+                    // stay white rather than being guessed at.
+                    const float* tint = kNameWhite;
+                    if (entity.kind == 2)
                     {
-                        const int glyph = column < static_cast<int>(entity.name.size())
-                                              ? glyphIndex(entity.name[static_cast<size_t>(column)])
-                                              : 0;
-                        plate.glyphs[named * mh::kNameplateChars + column][0] = static_cast<float>(glyph);
+                        tint = kNameMonster;
                     }
+                    else if (entity.kind == 1)
+                    {
+                        tint = kNameNpc;
+                    }
+                    plate.colours[named][0] = tint[0];
+                    plate.colours[named][1] = tint[1];
+                    plate.colours[named][2] = tint[2];
+
+                    // Laid out here rather than in the shader: the font is
+                    // proportional, so where a glyph starts depends on every
+                    // glyph before it, and a fragment shader cannot accumulate
+                    // that per pixel without redoing the whole string.
+                    //
+                    // Measured in cells, so the shader scales one number to
+                    // whatever size the text is drawn at.
+                    const float cell = static_cast<float>(textFont.cell);
+                    float pen = 0.0f;
+                    int written = 0;
+                    for (char raw : entity.name)
+                    {
+                        if (written >= mh::kNameplateChars)
+                        {
+                            break;
+                        }
+                        const float advance = textFont.advanceOf(raw) / cell;
+                        float* glyph = plate.glyphs[named * mh::kNameplateChars + written];
+                        glyph[0] = static_cast<float>(textFont.indexOf(raw));
+                        glyph[1] = pen;
+                        glyph[2] = advance;
+                        pen += advance;
+                        ++written;
+                    }
+                    for (int spare = written; spare < mh::kNameplateChars; ++spare)
+                    {
+                        plate.glyphs[named * mh::kNameplateChars + spare][2] = 0.0f;
+                    }
+                    plate.positions[named][3] = pen;   // total width, in cells
                     ++named;
                 }
 
