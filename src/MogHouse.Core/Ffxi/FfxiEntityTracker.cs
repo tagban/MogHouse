@@ -66,6 +66,16 @@ public sealed class FfxiEntityTracker
     /// </summary>
     public uint SelfUniqueNo { get; set; }
 
+    /// <summary>
+    /// Our own targid, learned from the server describing us to ourselves.
+    ///
+    /// The handoff gives the character id but not this, and packets the server
+    /// validates against the sender - a jump, an emote - are refused without
+    /// it. It cannot be derived from the id, so it is taken from the update we
+    /// would otherwise only be skipping.
+    /// </summary>
+    public ushort SelfActIndex { get; private set; }
+
     public int Count => _entities.Count;
 
     /// <summary>Folds one update into what we know.</summary>
@@ -73,6 +83,11 @@ public sealed class FfxiEntityTracker
     {
         if (update.UniqueNo == 0 || update.UniqueNo == SelfUniqueNo)
         {
+            if (update.UniqueNo != 0 && update.ActIndex != 0)
+            {
+                SelfActIndex = update.ActIndex;
+            }
+
             return;
         }
 

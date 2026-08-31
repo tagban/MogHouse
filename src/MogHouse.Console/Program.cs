@@ -398,6 +398,13 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
             await zone.SendGameOkAsync(zoneEndpoint);
             Console.WriteLine("Sent GP_CLI_COMMAND_GAMEOK (0x00C) - zone-in handshake completed.");
 
+            // The login message has to be asked for. It is not pushed with
+            // everything else at zone-in, so a client that never sends this
+            // never sees it - which is indistinguishable from a server with
+            // nothing to say, and is why the chat panel opened empty.
+            await zone.SendServerMessageRequestAsync(zoneEndpoint);
+            Console.WriteLine("Requested the server message (GP_CLI_COMMAND_FRAGMENTS 0x04B).");
+
             // Events are answered by the hold loop as the server starts them,
             // including the one it starts at zone-in. Until an event is ended the
             // character is InEvent, and a character in an event is never spawned
@@ -410,6 +417,19 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
 
             if (flags.TryGetValue("zone-hold", out string? holdSeconds) && int.TryParse(holdSeconds, out int seconds))
             {
+                // Ctrl+C used to just kill the process, which skips the logout
+                // below and leaves the server holding the session row for about
+                // a minute - the character lingers, then vanishes, and the next
+                // login is refused with error 201. Cancelling a token instead
+                // walks out through the same exit as a hold that ran its course.
+                using var stopping = new CancellationTokenSource();
+                Console.CancelKeyPress += (_, e) =>
+                {
+                    e.Cancel = true;
+                    Console.WriteLine("stopping - logging out cleanly...");
+                    stopping.Cancel();
+                };
+
                 Console.WriteLine("Ctrl+C to stop early.");
 
                 if (zoneState is not null)
@@ -438,12 +458,37 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                                              zoneState.GameTime);
                     }
 
+                    // Closing the window is how a person ends the session, so it
+                    // has to reach the same exit Ctrl+C does - through the
+                    // cancellation, so the logout below still runs.
+                    if (liveRadar is not null)
+                    {
+                        _ = Task.Run(async () =>
+                        {
+                            while (!stopping.IsCancellationRequested)
+                            {
+                                if (liveRadar.Closed)
+                                {
+                                    Console.WriteLine("renderer window closed - logging out cleanly...");
+                                    await stopping.CancelAsync();
+                                    return;
+                                }
+
+                                await Task.Delay(200);
+                            }
+                        });
+                    }
+
                     // The first sighting of each entity, raw. Which byte says
                     // "this is a shopkeeper, not a crab" is not derivable from
                     // the struct - bitfield blocks and a misaligned uint8 sit
                     // between the fields - so it gets found by diffing packets
                     // whose answer is already known from the server data.
                     var rawFirstSeen = new Dictionary<uint, byte[]>();
+
+                    // Built up across fragments, then split into lines once the
+                    // last one lands.
+                    var serverMessage = new System.Text.StringBuilder();
                     var despawned = new List<(uint Id, ushort ActIndex, ushort PacketId)>();
                     var lastFlags = new Dictionary<uint, (uint Flags0, uint Flags1)>();
 
@@ -468,7 +513,10 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                         }
                     }
 
-                    int sent = await zone.HoldWithPositionAsync(
+                    int sent = 0;
+                    try
+                    {
+                    sent = await zone.HoldWithPositionAsync(
                         zoneEndpoint,
                         x: posX,
                         vertical: posY,
@@ -498,6 +546,12 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                             : () => liveRadar.Position() ?? (posX, posY, posZ, zoneState.Direction),
                         tellTo: flags.TryGetValue("zone-tell", out string? tellTarget) && tellTarget.Length > 0 ? tellTarget : null,
                         tellText: flags.GetValueOrDefault("zone-tell-text", "hello from MogHouse"),
+                        // The renderer knows a jump happened; only this side can
+                        // tell the server, which is what makes anyone else see it.
+                        jumpRequested: liveRadar is null ? null : liveRadar.TakeJump,
+                        selfUniqueNo: handoff.ServerId,
+                        selfActIndex: () => tracker.SelfActIndex,
+                        ct: stopping.Token,
                         onReply: reply =>
                         {
                             if (reply.Plaintext is null)
@@ -578,6 +632,43 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                                     Console.WriteLine($"    JOB main={jobInfo.MainJob} lvl={jobInfo.MainJobLevel} sub={jobInfo.SubJob} hp={jobInfo.MaxHp} mp={jobInfo.MaxMp} stats=[{string.Join(",", jobInfo.BaseStats)}]");
                                 }
 
+                                // The login message, a fragment at a time. Each
+                                // one says where it sits in the whole, and the
+                                // next has to be asked for - the server answers
+                                // exactly what it was asked for and nothing more.
+                                FfxiServerMessageFragment? fragment =
+                                    FfxiServerMessageFragment.TryParse(reply.Plaintext.AsSpan(offset, size));
+                                if (fragment is not null)
+                                {
+                                    serverMessage.Append(fragment.Text);
+                                    if (fragment.NextOffset is int next)
+                                    {
+                                        // Sent inline rather than awaited: onReply is a
+                                        // synchronous callback on the hold loop's own
+                                        // thread, and the packet counter it shares is not
+                                        // safe to advance from another one.
+                                        zone.SendServerMessageRequestAsync(zoneEndpoint, next)
+                                            .GetAwaiter().GetResult();
+                                    }
+                                    else
+                                    {
+                                        // Server messages are written with line
+                                        // breaks in them, and the panel is a list
+                                        // of lines rather than a block of text.
+                                        foreach (string messageLine in serverMessage.ToString()
+                                                     .Replace("\r\n", "\n").Split('\n'))
+                                        {
+                                            if (messageLine.Trim().Length > 0)
+                                            {
+                                                Console.WriteLine($"    SERVER MESSAGE: {messageLine}");
+                                                liveRadar?.Say("Server", messageLine.Trim());
+                                            }
+                                        }
+
+                                        serverMessage.Clear();
+                                    }
+                                }
+
                                 FfxiChatMessage? chat = FfxiChatMessage.TryParse(reply.Plaintext.AsSpan(offset, size));
                                 if (chat is not null)
                                 {
@@ -595,14 +686,27 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                             }
                         });
 
-                    Console.WriteLine($"Done - sent {sent} position updates. Blowfish key rotations detected: {zone.KeyRotations}.");
+                    }
+                    finally
+                    {
+                        // In a finally because the ways out of that loop are not
+                        // all the tidy one: Ctrl+C, the renderer window closing,
+                        // or a throw mid-session all used to skip the logout and
+                        // leave the session to be reaped on a timeout.
+                        Console.WriteLine($"Done - sent {sent} position updates. Blowfish key rotations detected: {zone.KeyRotations}.");
 
-                    // Leave cleanly so the session row is released now rather
-                    // than on the server's timeout, which would block the next
-                    // login for this character for about a minute.
-                    await zone.SendLogoutAsync(zoneEndpoint);
-                    Console.WriteLine("Sent GP_CLI_COMMAND_REQLOGOUT (0x0E7) - clean logout requested.");
-                    await Task.Delay(TimeSpan.FromSeconds(2));
+                        // Leave cleanly so the session row is released now rather
+                        // than on the server's timeout, which would block the next
+                        // login for this character for about a minute.
+                        await zone.SendLogoutAsync(zoneEndpoint);
+                        Console.WriteLine("Sent GP_CLI_COMMAND_REQLOGOUT (0x0E7) - clean logout requested.");
+
+                        // The server answers by applying Leavegame for five
+                        // seconds and logging the character out when it expires,
+                        // so leaving after two meant walking away before it had
+                        // acted.
+                        await Task.Delay(TimeSpan.FromSeconds(6));
+                    }
                     Console.WriteLine("Sub-packets received during the session (id x count):");
                     foreach ((ushort id, int count) in seen.OrderByDescending(kv => kv.Value))
                     {
@@ -814,6 +918,16 @@ sealed class LiveRadar : IDisposable
     }
 
     /// <summary>
+    /// Whether the window has gone. Run() owns the event loop and returns when
+    /// it closes, so the thread ending is the window closing.
+    ///
+    /// Someone shutting the window is them ending the session, and nothing was
+    /// watching for it: the window went and the session held on for the rest of
+    /// its time, skipping the logout it would have done on the way out.
+    /// </summary>
+    public bool Closed => !_thread.IsAlive;
+
+    /// <summary>
     /// Opens the zone the character is actually standing in, at the position
     /// the server reported. Returns null, with a reason, if anything needed is
     /// missing - a radar is not worth failing a login over.
@@ -881,6 +995,12 @@ sealed class LiveRadar : IDisposable
 
         return new LiveRadar(new NativeViewer(options));
     }
+
+    /// <summary>
+    /// Whether the player has asked to jump since this was last called.
+    /// Consumed, so each jump reaches the server once.
+    /// </summary>
+    public bool TakeJump() => !_closed && _viewer.TakeJump();
 
     /// <summary>
     /// Where the renderer has walked the character, in the protocol's own

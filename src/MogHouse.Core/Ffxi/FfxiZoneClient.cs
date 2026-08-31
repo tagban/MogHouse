@@ -452,6 +452,33 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
     public async Task SendZoneLineAsync(IPEndPoint zoneServer, uint rectId, float x, float vertical, float depth, ushort actIndex, CancellationToken ct = default) =>
         await SendEncryptedAsync(zoneServer, FfxiZoneLinePacket.Build(rectId, x, vertical, depth, actIndex, (ushort)(_ownCounter + 1)), ct);
 
+    /// <summary>
+    /// Performs an emote (GP_CLI_COMMAND_MOTION). The only channel the protocol
+    /// has for an animation other people will see - see FfxiMotionPacket.
+    /// </summary>
+    public async Task SendEmoteAsync(IPEndPoint zoneServer, uint uniqueNo, ushort actIndex, byte number,
+                                     FfxiEmoteMode mode = FfxiEmoteMode.Motion, CancellationToken ct = default) =>
+        await SendEncryptedAsync(
+            zoneServer, FfxiMotionPacket.Build(uniqueNo, actIndex, number, (ushort)(_ownCounter + 1), mode), ct);
+
+    /// <summary>
+    /// Asks for the server's login message (GP_CLI_COMMAND_FRAGMENTS). The
+    /// server does not volunteer it - a client that never asks never sees it.
+    /// Call again with the next offset until the fragment says it is complete.
+    /// </summary>
+    public async Task SendServerMessageRequestAsync(IPEndPoint zoneServer, int offset = 0,
+                                                    CancellationToken ct = default) =>
+        await SendEncryptedAsync(
+            zoneServer, FfxiFragmentsPacket.BuildServerMessageRequest((ushort)(_ownCounter + 1), offset), ct);
+
+    /// <summary>
+    /// Jumps (GP_CLI_COMMAND_JUMP). The server rebroadcasts it to everyone in
+    /// range, which is what makes the animation visible to anyone but us.
+    /// </summary>
+    public async Task SendJumpAsync(IPEndPoint zoneServer, uint uniqueNo, ushort actIndex,
+                                    CancellationToken ct = default) =>
+        await SendEncryptedAsync(zoneServer, FfxiJumpPacket.Build(uniqueNo, actIndex, (ushort)(_ownCounter + 1)), ct);
+
     public async Task SendGameOkAsync(IPEndPoint zoneServer, CancellationToken ct = default) =>
         await SendEncryptedAsync(zoneServer, FfxiGameOkPacket.Build((ushort)(_ownCounter + 1)), ct);
 
@@ -492,6 +519,9 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
         Func<(float X, float Vertical, float Depth, sbyte Direction)>? positionProvider = null,
         string? tellTo = null,
         string? tellText = null,
+        Func<bool>? jumpRequested = null,
+        uint selfUniqueNo = 0,
+        Func<ushort>? selfActIndex = null,
         CancellationToken ct = default)
     {
         TimeSpan gap = interval ?? TimeSpan.FromSeconds(1);
@@ -587,6 +617,21 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
             {
                 byte[] command = FfxiChatPacket.Build(FfxiChatKind.Say, gmCommand.StartsWith('!') ? gmCommand : $"!{gmCommand}", (ushort)(_ownCounter + 1));
                 await SendEncryptedAsync(zoneServer, command, ct);
+            }
+
+            // A jump the player asked for in the renderer. FFXI has a packet
+            // of its own for this rather than an emote, and the server
+            // rebroadcasts it - which is the only way anyone else sees it. Both
+            // ids are checked against the sender, so it is skipped until the
+            // server has told us our own targid.
+            if (jumpRequested is not null && selfUniqueNo != 0 && jumpRequested())
+            {
+                ushort targid = selfActIndex?.Invoke() ?? 0;
+                if (targid != 0)
+                {
+                    await SendEncryptedAsync(
+                        zoneServer, FfxiJumpPacket.Build(selfUniqueNo, targid, (ushort)(_ownCounter + 1)), ct);
+                }
             }
 
             if (sayEvery is not null && sent % sayIntervalUpdates == 0)

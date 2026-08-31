@@ -249,6 +249,12 @@ public sealed partial class NativeViewer : IDisposable
         return mh_viewer_get_character(_handle, out x, out y, out z, out heading) != 0;
     }
 
+    /// <summary>
+    /// Whether the player asked to jump since this was last called. Consumes
+    /// it, so each jump is reported once.
+    /// </summary>
+    public bool TakeJump() => !_disposed && _handle != IntPtr.Zero && mh_viewer_take_jump(_handle) != 0;
+
     /// <summary>Asks the viewer to close. Run returns shortly afterwards.</summary>
     public void Stop()
     {
@@ -306,6 +312,9 @@ public sealed partial class NativeViewer : IDisposable
     [LibraryImport(LibraryName)]
     private static partial int mh_viewer_get_character(IntPtr viewer, out float x, out float y, out float z,
                                                        out float heading);
+
+    [LibraryImport(LibraryName)]
+    private static partial int mh_viewer_take_jump(IntPtr viewer);
 
     [LibraryImport(LibraryName)]
     private static partial void mh_viewer_stop(IntPtr viewer);
