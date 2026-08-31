@@ -2044,8 +2044,13 @@ constexpr float kGravity = 26.0f;
         }
         else if (options.serverClock)
         {
+            // The server sends Earth seconds since the Vana'diel epoch, not
+            // Vana'diel seconds - earth_time.h says so in as many words - so
+            // the seed is multiplied up rather than used as it stands. Without
+            // the 25 the clock both starts in the wrong place and then runs at
+            // a twenty-fifth of the right speed.
             const uint64_t elapsed = SDL_GetTicksNS() / 1000000000ull;
-            vanaSeconds = static_cast<uint64_t>(*options.serverClock) + elapsed * 25ull;
+            vanaSeconds = (static_cast<uint64_t>(*options.serverClock) + elapsed) * 25ull;
             clockMinutes = static_cast<int>((vanaSeconds / 60ull) % 1440ull);
         }
         else
