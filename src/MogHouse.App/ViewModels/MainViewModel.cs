@@ -60,7 +60,10 @@ public partial class MainViewModel : ViewModelBase
         Session = new FfxiGameSession(
             Tables is null ? null : new FfxiHuffman(Tables),
             NavMeshDirectory,
-            ZoneDataDirectory);
+            ZoneDataDirectory,
+            // The install the user pointed us at is also where NPC
+            // dialogue lives; the server only sends line ids.
+            InstallPath is null ? null : new FfxiFileTable(InstallPath));
 
         Session.Status += message => Dispatcher.UIThread.Post(() => Status = message);
 

@@ -50,6 +50,9 @@ switch (args[0])
     case "view":
         return await ViewAsync(ParseFlags(args));
 
+    case "text":
+        return Text(ParseFlags(args));
+
     default:
         PrintUsage();
         return 1;
@@ -1028,7 +1031,8 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
 
     using var session = new FfxiGameSession(new FfxiHuffman(tables),
                                             Environment.GetEnvironmentVariable("MOGHOUSE_FFXI_NAVMESHES"),
-                                            Environment.GetEnvironmentVariable("MOGHOUSE_FFXI_ZONEDATA"));
+                                            Environment.GetEnvironmentVariable("MOGHOUSE_FFXI_ZONEDATA"),
+                                            OpenFileTable());
     session.Status += message => Console.WriteLine($"  {message}");
 
     (FfxiLoginResponse login, IReadOnlyList<FfxiCharacter> characters) = await session.LoginAsync(profile);
@@ -1046,7 +1050,27 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
         return 1;
     }
 
-    await session.ConnectToZoneAsync(selected, login.SessionHash, profile.Host);
+    // A session row outlives the character that left it.
+    //
+    // Logging out cleanly takes the character out of the zone straight
+    // away, but the row the login server checks is only swept by
+    // cleanupSessions, which ran thirty seconds later in testing. Anyone
+    // who quits and comes straight back hits 201 through no fault of their
+    // own, so wait it out rather than failing in their face.
+    for (int attempt = 0; ; attempt++)
+    {
+        try
+        {
+            await session.ConnectToZoneAsync(selected, login.SessionHash, profile.Host);
+            break;
+        }
+        catch (FfxiLoginErrorException e) when (e.Code == 201 && attempt < 6)
+        {
+            Console.WriteLine($"  {selected.Name} is still logged in on the server; waiting for it to clear...");
+            await Task.Delay(TimeSpan.FromSeconds(10));
+        }
+    }
+
     if (session.ZoneState is null)
     {
         Console.WriteLine("The zone server did not answer.");
@@ -1058,6 +1082,8 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
     // The tracker is ours rather than the session's: it holds everything worked
     // out about what an entity looks like and whether it should be drawn, and
     // the session only reports the updates.
+    bool countedNames = false;
+
     var tracker = new FfxiEntityTracker { SelfUniqueNo = session.ZoneState.UniqueNo };
     session.EntitiesChanged += updates =>
     {
@@ -1065,6 +1091,18 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
         foreach (FfxiEntityUpdate update in updates)
         {
             tracker.Observe(update, now);
+        }
+
+        // Why a nameplate is missing: no name at all, or a name we were
+        // told to hide. Printed once, when the zone has finished arriving.
+        if (!countedNames && tracker.Visible(now).Count >= 8)
+        {
+            countedNames = true;
+            var seen = tracker.Visible(now);
+            int named = seen.Count(e => !string.IsNullOrEmpty(e.Name));
+            int hidden = seen.Count(e => e.NameHidden);
+            Console.WriteLine($"  entities {seen.Count}: {named} named by the server, " +
+                              $"{hidden} name-hidden, {seen.Count - named} needing the zone table");
         }
     };
 
@@ -1193,6 +1231,76 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
             await session.LogoutAsync();
         }
         radar?.Dispose();
+    }
+
+    return 0;
+}
+
+/// <summary>
+/// The installed game's files, or null if we cannot find them.
+///
+/// Only NPC dialogue needs these: the server sends line ids and the client
+/// looks the words up. Without them the session still runs, and says so.
+/// </summary>
+static FfxiFileTable? OpenFileTable()
+{
+    try
+    {
+        return new FfxiFileTable(FfxiFileTable.DefaultInstallRoot());
+    }
+    catch (Exception e)
+    {
+        Console.WriteLine($"  No FFXI install found, so NPC dialogue will show as line numbers: {e.Message}");
+        return null;
+    }
+}
+
+/// <summary>
+/// Print lines from a zone's dialogue file.
+///
+/// The server sends NPC dialogue as line ids, so being able to look one up
+/// is how you tell a wrong id from a wrong table.
+/// </summary>
+/// <summary>One line on one console line: 0x07 is a break within an entry.</summary>
+static string Flat(string? line) => (line ?? "").Replace(((char)10).ToString(), " / ");
+static int Text(Dictionary<string, string> flags)
+{
+    if (!flags.TryGetValue("zone", out string? zoneText) || !int.TryParse(zoneText, out int zone))
+    {
+        Console.WriteLine("text --zone <id> [--line <id>] [--count <n>] [--find <substring>]");
+        return 2;
+    }
+
+    FfxiFileTable? files = OpenFileTable();
+    if (files is null)
+    {
+        return 1;
+    }
+
+    FfxiDialogueTable lines = FfxiDialogueTable.Load(files, zone);
+    Console.WriteLine($"zone {zone}: {lines.Count} lines");
+
+    if (flags.TryGetValue("find", out string? needle) && needle.Length > 0)
+    {
+        int shown = 0;
+        for (int i = 0; i < lines.Count && shown < 20; i++)
+        {
+            string? line = lines.Line(i);
+            if (line is not null && line.Contains(needle, StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine($"  [{i}] {Flat(line)}");
+                shown++;
+            }
+        }
+
+        return 0;
+    }
+
+    int first = flags.TryGetValue("line", out string? at) && int.TryParse(at, out int one) ? one : 0;
+    int count = flags.TryGetValue("count", out string? many) && int.TryParse(many, out int n) ? n : 5;
+    for (int i = first; i < first + count && i < lines.Count; i++)
+    {
+        Console.WriteLine($"  [{i}] {Flat(lines.Line(i))}");
     }
 
     return 0;

@@ -40,12 +40,20 @@ public sealed class FfxiGameSession : IDisposable
     /// Optional: without it the character can walk over a zone line and nothing
     /// happens, because only the client ever initiates a zone change.
     /// </param>
-    public FfxiGameSession(FfxiHuffman? codec = null, string? navMeshDirectory = null, string? zoneDataDirectory = null)
+    public FfxiGameSession(FfxiHuffman? codec = null, string? navMeshDirectory = null,
+                           string? zoneDataDirectory = null, FfxiFileTable? files = null)
     {
         _codec = codec;
         _navMeshDirectory = navMeshDirectory;
         _zoneDataDirectory = zoneDataDirectory;
+        _files = files;
     }
+
+    // What NPCs say. The server sends line ids, so without the install we
+    // can see that an NPC spoke but not what it said.
+    private readonly FfxiFileTable? _files;
+    private FfxiDialogueTable _dialogue = FfxiDialogueTable.Empty;
+    private uint _dialogueZone = uint.MaxValue;
 
     /// <summary>Raised for every chat message received.</summary>
     public event Action<FfxiChatLine>? ChatReceived;
@@ -773,6 +781,18 @@ public sealed class FfxiGameSession : IDisposable
                 ChatReceived?.Invoke(new FfxiChatLine(DateTimeOffset.Now, chat.Kind, chat.Sender, chat.Text));
             }
 
+            // What an NPC said, which arrives as a line id to look up.
+            FfxiNpcMessage? spoken = FfxiNpcMessage.TryParse(reply.Plaintext.AsSpan(offset, size));
+            if (spoken is not null)
+            {
+                string? said = Dialogue().Line(spoken.MessageId);
+                ChatReceived?.Invoke(new FfxiChatLine(
+                    DateTimeOffset.Now,
+                    FfxiChatMessageType.System1,
+                    Speaker(spoken.UniqueNo),
+                    said ?? $"(line {spoken.MessageId})"));
+            }
+
             FfxiZoneTransition? transition = FfxiZoneTransition.TryParse(reply.Plaintext.AsSpan(offset, size));
             if (transition is not null)
             {
@@ -839,6 +859,18 @@ public sealed class FfxiGameSession : IDisposable
             {
                 await _zone.SendLogoutAsync(_zoneEndpoint, kind);
                 Status?.Invoke("Logout requested.");
+
+                // Give the server time to act on it before the socket
+                // stops answering.
+                //
+                // REQLOGOUT is a request, not a goodbye: LandSandBoat runs
+                // a five second Leavegame effect and only then clears the
+                // session. Cancelling the hold loop immediately means
+                // nothing is left to answer the server, the logout never
+                // completes, and the session sits there until it is reaped
+                // about a minute later - so the next login fails on 201
+                // and blames itself for a logout that was never finished.
+                await Task.Delay(TimeSpan.FromSeconds(6));
             }
             catch (Exception ex)
             {
@@ -855,5 +887,36 @@ public sealed class FfxiGameSession : IDisposable
         _holdCts?.Dispose();
         _zone?.Dispose();
         _roster?.Dispose();
+    }
+    /// <summary>
+    /// The current zone's lines, loaded once per zone.
+    ///
+    /// Each zone has its own dialogue file and its own numbering, so line
+    /// 4133 is a shopkeeper here and something unrelated one zone over.
+    /// </summary>
+    private FfxiDialogueTable Dialogue()
+    {
+        uint zone = ZoneState?.ZoneNo ?? uint.MaxValue;
+        if (_files is not null && zone != _dialogueZone)
+        {
+            _dialogue = FfxiDialogueTable.Load(_files, (int)zone);
+            _dialogueZone = zone;
+        }
+
+        return _dialogue;
+    }
+
+    /// <summary>Who said it, if we have seen them; otherwise nobody.</summary>
+    private string Speaker(uint uniqueNo)
+    {
+        foreach (FfxiEntityUpdate entity in _zone.KnownEntities())
+        {
+            if (entity.UniqueNo == uniqueNo && !string.IsNullOrEmpty(entity.Name))
+            {
+                return entity.Name;
+            }
+        }
+
+        return "";
     }
 }
