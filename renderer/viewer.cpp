@@ -811,7 +811,10 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         sampler = device.CreateSampler(&samplerDescriptor);
 
         whiteTexture = mh::createWhiteTexture(device);
-        waterFallbackTexture = mh::createSolidTexture(device, 60, 105, 125, 165);
+        // Dark. Bastok's water is nearly black at night and a deep slate by
+        // day, and a cheerful mid-blue placeholder reads as a mistake in a
+        // city built out of grey stone.
+        waterFallbackTexture = mh::createSolidTexture(device, 26, 46, 54, 190);
         const wgpu::TextureView whiteView = whiteTexture.CreateView();
         const wgpu::TextureView waterFallbackView = waterFallbackTexture.CreateView();
 
