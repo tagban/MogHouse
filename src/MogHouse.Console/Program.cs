@@ -471,7 +471,7 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                                              // has to wait. Race alone is the difference
                                              // between a Tarutaru and a Hume, which is
                                              // the part you notice.
-                                             $"{selected.Race},{selected.Face},0,0,0,0,0");
+                                             FfxiAppearance.LookString(selected.Race, selected.Face));
                     }
 
                     // Closing the window is how a person ends the session, so it
@@ -1068,7 +1068,7 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
         }
     };
 
-    string look = $"{selected.Race},{selected.Face},0,0,0,0,0";
+    string look = FfxiAppearance.LookString(selected.Race, selected.Face);
     LiveRadar? radar = LiveRadar.Open((int)session.ZoneState.ZoneNo, session.PosX, session.PosVertical, session.PosDepth,
                                       session.ZoneState.GameTime, selected.Name, look);
     if (radar is null)

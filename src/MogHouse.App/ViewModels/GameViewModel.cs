@@ -96,7 +96,9 @@ public partial class GameViewModel : ViewModelBase
         _tracker.SelfUniqueNo = session.ZoneState.UniqueNo;
 
         FfxiCharacter? self = _shell.SelectedCharacter;
-        string look = self is null ? "1,0,0,0,0,0,0" : $"{self.Race},{self.Face},0,0,0,0,0";
+        string look = self is null
+            ? FfxiAppearance.LookString(1, 0)
+            : FfxiAppearance.LookString(self.Race, self.Face);
 
         _world = LiveRadar.Open((int)session.ZoneState.ZoneNo, session.PosX, session.PosVertical, session.PosDepth,
                                 session.ZoneState.GameTime, CharacterName, look);

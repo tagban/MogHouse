@@ -50,7 +50,7 @@ public sealed record FfxiNewCharacter(
     FfxiNation Nation)
 {
     /// <summary>The look string the renderer takes, for showing them before they exist.</summary>
-    public string ToLookString() => $"{(byte)Race},{Face},0,0,0,0,0";
+    public string ToLookString() => FfxiAppearance.LookString((byte)Race, Face);
 }
 
 /// <summary>Races, as the lobby server numbers them. 1 to 8 or it refuses.</summary>

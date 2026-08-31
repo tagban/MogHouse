@@ -130,7 +130,7 @@ public partial class CreateCharacterViewModel : ViewModelBase, IDisposable
 
         byte face = (byte)Math.Clamp(Face, 0, 15);
         _preview = LiveRadar.Open(PreviewZone, 0, 0, 0, 0, Name.Length > 0 ? Name : "?",
-                                  $"{SelectedRace.Value},{face},0,0,0,0,0");
+                                  FfxiAppearance.LookString(SelectedRace.Value, face));
 
         if (_preview is null)
         {
