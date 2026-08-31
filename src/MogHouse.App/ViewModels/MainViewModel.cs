@@ -21,6 +21,13 @@ public partial class MainViewModel : ViewModelBase
     public FfxiGameSession Session { get; }
 
     /// <summary>
+    /// Who was chosen at character select. The roster knows a character's race
+    /// and face; the server never sends us the entity update it sends for
+    /// everyone else, so this is where our own appearance comes from.
+    /// </summary>
+    public FfxiCharacter? SelectedCharacter { get; set; }
+
+    /// <summary>
     /// Null when the FFXI compression tables aren't installed. The transport
     /// still works without them but nothing can be decoded, so the UI says so
     /// up front rather than appearing to connect and then showing nothing.

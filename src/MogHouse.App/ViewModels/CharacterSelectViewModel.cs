@@ -54,6 +54,7 @@ public partial class CharacterSelectViewModel : ViewModelBase
 
         try
         {
+            _shell.SelectedCharacter = SelectedCharacter;
             await _shell.Session.ConnectToZoneAsync(SelectedCharacter, _sessionHash, _host);
             await _shell.Session.StartHeartbeatAsync();
             _shell.Navigate(new GameViewModel(_shell));

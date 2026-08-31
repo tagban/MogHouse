@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -65,6 +66,65 @@ public partial class GameViewModel : ViewModelBase
 
         shell.Session.ChatReceived += OnChat;
         shell.Session.EntitiesChanged += OnEntities;
+
+        OpenWorld();
+    }
+
+    private LiveRadar? _world;
+    private readonly FfxiEntityTracker _tracker = new();
+    private CancellationTokenSource? _feeding;
+
+    /// <summary>
+    /// Opens the actual client - the zone, the character, everyone else in it -
+    /// beside this window.
+    ///
+    /// The dots panel here was a stand-in from before there was a renderer to
+    /// open. It stays because it is a useful thing to glance at while the
+    /// window has focus, but it is not the game.
+    /// </summary>
+    private void OpenWorld()
+    {
+        FfxiGameSession session = _shell.Session;
+        if (session.ZoneState is null)
+        {
+            return;
+        }
+
+        _tracker.SelfUniqueNo = session.ZoneState.UniqueNo;
+
+        FfxiCharacter? self = _shell.SelectedCharacter;
+        string look = self is null ? "1,0,0,0,0,0,0" : $"{self.Race},{self.Face},0,0,0,0,0";
+
+        _world = LiveRadar.Open((int)session.ZoneState.ZoneNo, session.PosX, session.PosVertical, session.PosDepth,
+                                session.ZoneState.GameTime, CharacterName, look);
+        if (_world is null)
+        {
+            _shell.Status = "Could not open the world window - check MOGHOUSE_FFXI_KEYTABLE.";
+            return;
+        }
+
+        // The renderer owns movement and reports where it ended up; the session
+        // owns everything the server has to be told about it.
+        _feeding = new CancellationTokenSource();
+        CancellationToken token = _feeding.Token;
+        _ = Task.Run(async () =>
+        {
+            while (!token.IsCancellationRequested && _world is { Closed: false })
+            {
+                if (_world.Position() is (float x, float vertical, float depth, sbyte direction))
+                {
+                    session.PlaceAt(x, vertical, depth, direction);
+                }
+
+                while (_world?.TakeChat() is { Length: > 0 } typed)
+                {
+                    await session.SayAsync(typed);
+                }
+
+                _world?.Publish(_tracker);
+                await Task.Delay(50, token).ConfigureAwait(false);
+            }
+        }, token);
     }
 
     private void OnChat(FfxiChatLine line) => Dispatcher.UIThread.Post(() =>
@@ -80,6 +140,15 @@ public partial class GameViewModel : ViewModelBase
 
     private void OnEntities(IReadOnlyList<FfxiEntityUpdate> entities) => Dispatcher.UIThread.Post(() =>
     {
+        // The tracker is what the renderer draws from: it holds what an entity
+        // looks like, whether the server means it to be seen, and which fields
+        // a partial update may change.
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        foreach (FfxiEntityUpdate update in entities)
+        {
+            _tracker.Observe(update, now);
+        }
+
         RefreshRadar();
         return;
 #pragma warning disable CS0162
