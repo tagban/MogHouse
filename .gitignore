@@ -40,3 +40,5 @@ build-dawn
 
 # Key tables lifted from the retail client - regenerate with tools/keytables.py
 /keys/
+
+__pycache__/
