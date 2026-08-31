@@ -31,10 +31,6 @@ mh::TextFont mh::loadTextFont(const std::string& directory)
     std::ifstream metrics{base / "font.txt"};
     if (!metrics)
     {
-        // Worth saying out loud: without the atlas every label, the compass
-        // and the chat panel silently vanish, and the window looks like the
-        // HUD was never written.
-        std::printf("no font atlas at %s - the HUD will not draw. Set MOGHOUSE_FONT.\n", base.string().c_str());
         return font;
     }
 

@@ -124,6 +124,10 @@ public sealed partial class NativeViewer : IDisposable
 
             if (File.Exists(candidate) && NativeLibrary.TryLoad(candidate, out IntPtr loaded))
             {
+                // The renderer looks for its glyph atlas beside whatever loaded
+                // it, and in-process that is a .NET host somewhere else. Only
+                // this code knows where the shim actually came from, so it says.
+                Environment.SetEnvironmentVariable("MOGHOUSE_NATIVE_DIR", directory);
                 return loaded;
             }
         }

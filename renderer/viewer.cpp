@@ -1166,10 +1166,49 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     wgpu::RenderPipeline radarPipeline;
     wgpu::BindGroup radarBindGroup;
 
-    // The glyph atlas, beside the executable. Text is worth doing without
-    // rather than failing to open a window over, so an absent atlas leaves
-    // the nameplates off and everything else running.
-    const mh::TextFont textFont = mh::loadTextFont((std::filesystem::current_path() / "assets").string());
+    // The glyph atlas. Text is worth doing without rather than failing to
+    // open a window over, so an absent atlas leaves the nameplates off and
+    // everything else running.
+    //
+    // The atlas is copied beside the renderer executable, but the renderer
+    // also runs in-process from the console, where "the executable" is a .NET
+    // host somewhere else entirely, and run.ps1 starts from the repo root
+    // where there is no assets folder at all. So try the places it can be,
+    // and say which were tried if it is in none of them - an absent atlas
+    // takes the clock, the compass, the coordinates and the whole chat panel
+    // with it, and did so in silence.
+    std::vector<std::filesystem::path> fontCandidates;
+    if (const char* installedAt = SDL_GetBasePath())
+    {
+        fontCandidates.emplace_back(std::filesystem::path{installedAt} / "assets");
+    }
+    if (const char* nativeDir = std::getenv("MOGHOUSE_NATIVE_DIR"))
+    {
+        fontCandidates.emplace_back(std::filesystem::path{nativeDir} / "assets");
+    }
+    const std::filesystem::path here = std::filesystem::current_path();
+    fontCandidates.push_back(here / "assets");
+    fontCandidates.push_back(here / "build-renderer" / "assets");
+    fontCandidates.push_back(here / "renderer" / "assets");
+
+    mh::TextFont textFont;
+    for (const std::filesystem::path& candidate : fontCandidates)
+    {
+        textFont = mh::loadTextFont(candidate.string());
+        if (!textFont.empty())
+        {
+            break;
+        }
+    }
+    if (textFont.empty())
+    {
+        std::printf("no font atlas found - the HUD will not draw. Set MOGHOUSE_FONT. Looked in:\n");
+        for (const std::filesystem::path& candidate : fontCandidates)
+        {
+            std::printf("  %s\n", candidate.string().c_str());
+        }
+    }
+
     wgpu::Texture fontTexture;
     if (!textFont.empty())
     {

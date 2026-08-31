@@ -14,6 +14,13 @@ target_include_directories(moghouse_interop PUBLIC include)
 # than talking to a second executable.
 target_link_libraries(moghouse_interop PRIVATE moghouse-render)
 
+# The glyph atlas too, for the same reason: a .NET host loading this shim has
+# its own base directory somewhere else entirely, and without the atlas beside
+# the shim the whole HUD silently fails to draw.
+add_custom_command(TARGET moghouse_interop POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../renderer/assets $<TARGET_FILE_DIR:moghouse_interop>/assets)
+
 if(MSVC)
     # Dawn and SDL arrive as DLLs; put them beside the shim so a .NET host that
     # loads it finds them without the working directory having to be right.
