@@ -85,18 +85,67 @@ def events(table, zone):
     return blocks
 
 
+def event_entities(blocks):
+    """Which events each entity in the zone has.
+
+    A block past the first is one entity's events:
+
+        u32        the entity id, 0x1000000 | zone << 12 | targid
+        u32        how many events it has
+        u16[count] their ids
+        u16        0xFFFF, ending the list
+        ...        the scripts themselves, still undecoded
+
+    Checked against every block of Bastok Markets: all 210 have 0xFFFF exactly
+    where the count says it should be, which is what makes this a layout rather
+    than a guess that fitted one block.
+
+    Block 0 is not an entity. It opens 0x7FFFFFF0 and is far larger than any
+    other - the zone's own script rather than anybody's.
+    """
+    found = {}
+    for block in blocks[1:]:
+        if len(block) < 12:
+            continue
+
+        entity, count = struct.unpack_from("<II", block, 0)
+        if count == 0 or 8 + count * 2 + 2 > len(block):
+            continue
+        if struct.unpack_from("<H", block, 8 + count * 2)[0] != 0xFFFF:
+            continue
+
+        found[entity] = list(struct.unpack_from("<%dH" % count, block, 8))
+    return found
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("zone", type=int)
     parser.add_argument("--install", default=INSTALL)
     parser.add_argument("--lines", type=int, default=10, help="how many dialogue lines to show")
     parser.add_argument("--event", type=int, help="dump one event script as hex")
+    parser.add_argument("--entities", action="store_true", help="which events each entity has")
     args = parser.parse_args()
 
     table = FileTable(args.install)
 
     scripts = events(table, args.zone)
     print("zone %d: %d event scripts" % (args.zone, len(scripts)))
+
+    if args.entities:
+        names = {}
+        npc = table.path(NPC_BASE + args.zone)
+        if npc and Path(npc).exists():
+            raw = Path(npc).read_bytes()
+            for off in range(0, len(raw) - 31, 32):
+                ident = struct.unpack_from("<I", raw, off + 28)[0]
+                name = raw[off:off + 28].split(b"\0")[0].decode("ascii", "replace")
+                if ident:
+                    names[ident] = name
+
+        for entity, ids in sorted(event_entities(scripts).items()):
+            print("  0x%03X %-22s %s" % (entity & 0xFFF, names.get(entity, "")[:22], ids))
+        return
 
     if args.event is not None:
         if not 0 <= args.event < len(scripts):
