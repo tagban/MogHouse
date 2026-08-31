@@ -1916,10 +1916,17 @@ constexpr float kGravity = 26.0f;
         }
         previousTicks = nowTicks;
         const bool* held = SDL_GetKeyboardState(nullptr);
-        float speed = 12.0f * delta;
+        // Units a second. FFXI moves a character about four, and this was at
+        // twelve - roughly seven body heights a second for a model 1.79 tall,
+        // which is why the legs read as walking while the character travels
+        // like it is sprinting. The animation was never the wrong one.
+        float speed = 4.2f * delta;
         if (held[SDL_SCANCODE_LSHIFT] || held[SDL_SCANCODE_RSHIFT])
         {
-            speed *= 5.0f;
+            // Shift is a testing convenience rather than anything FFXI has -
+            // crossing a city to look at something should not take a minute -
+            // but five times was fast enough to be hard to steer.
+            speed *= 3.0f;
         }
         const float ahead = (held[SDL_SCANCODE_W] ? speed : 0.0f) - (held[SDL_SCANCODE_S] ? speed : 0.0f);
         const float side = (held[SDL_SCANCODE_D] ? speed : 0.0f) - (held[SDL_SCANCODE_A] ? speed : 0.0f);
