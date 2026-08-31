@@ -14,10 +14,10 @@
 namespace mh
 {
 /// How many labels can be on screen at once.
-inline constexpr int kHudStrings = 12;
+inline constexpr int kHudStrings = 24;
 
 /// Characters per label. Long enough for a zone name and a timestamp.
-inline constexpr int kHudChars = 32;
+inline constexpr int kHudChars = 48;
 
 inline constexpr const char* kHudShader = R"(
 struct HudUniforms {
@@ -26,14 +26,14 @@ struct HudUniforms {
     // Atlas shape: columns, cell size, width, height.
     atlas : vec4<f32>,
     // Per label: left and bottom in NDC, width in cells, background alpha.
-    boxes : array<vec4<f32>, 12>,
+    boxes : array<vec4<f32>, 24>,
     // Per label: text colour, then a size multiplier on the shared cell size.
-    colours : array<vec4<f32>, 12>,
+    colours : array<vec4<f32>, 24>,
     // Per glyph: atlas cell index, x offset in cells, advance in cells.
-    glyphs : array<vec4<f32>, 384>,
+    glyphs : array<vec4<f32>, 1152>,
 };
 
-const kChars = 32;
+const kChars = 48;
 
 @group(0) @binding(0) var<uniform> hud : HudUniforms;
 @group(0) @binding(1) var fontTexture : texture_2d<f32>;

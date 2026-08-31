@@ -2584,8 +2584,10 @@ constexpr float kGravity = 26.0f;
                 const float above = radarCentreY + radarRadius;
                 const float below = radarCentreY - radarRadius;
 
-                const auto label = [&](const std::string& text, float centreX, float bottomY, float scale,
-                                       const float* tint, float background) {
+                // centred = the x given is the middle, otherwise it is the
+                // left edge. Chat reads down a column and has to line up.
+                const auto place = [&](const std::string& text, float x, float bottomY, float scale,
+                                       const float* tint, float background, bool centred) {
                     if (labels >= mh::kHudStrings || text.empty() || textFont.empty())
                     {
                         return;
@@ -2611,7 +2613,7 @@ constexpr float kGravity = 26.0f;
                     // Centred on the radar's column, which is what makes the
                     // clock and the zone name read as one instrument.
                     const float cellWide = (hud.counts[1] * scale) / windowAspect;
-                    hud.boxes[labels][0] = centreX - pen * cellWide * 0.5f;
+                    hud.boxes[labels][0] = centred ? x - pen * cellWide * 0.5f : x;
                     hud.boxes[labels][1] = bottomY;
                     hud.boxes[labels][2] = pen;
                     hud.boxes[labels][3] = background;
@@ -2622,6 +2624,12 @@ constexpr float kGravity = 26.0f;
                     ++labels;
                 };
 
+                // Wrapped so the existing calls keep reading as they did.
+                const auto label = [&](const std::string& text, float centreX, float bottomY, float scale,
+                                       const float* tint, float background) {
+                    place(text, centreX, bottomY, scale, tint, background, true);
+                };
+
                 // The clock, above the radar. Vana'diel's week is eight days
                 // and its hour is 2.4 real seconds; both come from the
                 // server's own clock when it gave us one.
@@ -2629,12 +2637,12 @@ constexpr float kGravity = 26.0f;
                                                    "Iceday",     "Lightningday", "Lightsday", "Darksday"};
                 char clock[32] = {};
                 std::snprintf(clock, sizeof(clock), "%02d:%02d", clockMinutes / 60, clockMinutes % 60);
-                label(clock, radarCentreX, above + gap * 2.0f + line * 1.6f, 1.0f, kHudBright, 0.55f);
+                label(clock, radarCentreX, above + gap * 2.0f + line * 1.5f, 0.85f, kHudBright, 0.55f);
 
                 if (vanaSeconds > 0)
                 {
                     label(kWeekdays[(vanaSeconds / 86400ull) % 8ull], radarCentreX,
-                          above + gap * 2.0f + line * 0.5f, 1.0f, kHudDim, 0.55f);
+                          above + gap * 2.0f + line * 0.45f, 0.75f, kHudDim, 0.55f);
                 }
 
                 // Compass letters around the ring.
@@ -2644,12 +2652,14 @@ constexpr float kGravity = 26.0f;
                 // these belong at fixed points. The part that moves is the
                 // heading notch the radar already draws; a ring that turned as
                 // well would disagree with the map under it.
+                float southY = 0.0f;
                 {
                     const float ringX = radarRadius * 1.16f / windowAspect;
                     const float ringY = radarRadius * 1.16f;
                     const float half = hud.counts[1] * 0.5f;
                     label("N", radarCentreX, radarCentreY + ringY - half, 1.0f, kHudBright, 0.0f);
-                    label("S", radarCentreX, radarCentreY - ringY - half, 1.0f, kHudDim, 0.0f);
+                    southY = radarCentreY - ringY - half;
+                    label("S", radarCentreX, southY, 1.0f, kHudDim, 0.0f);
                     label("E", radarCentreX + ringX, radarCentreY - half, 1.0f, kHudDim, 0.0f);
                     label("W", radarCentreX - ringX, radarCentreY - half, 1.0f, kHudDim, 0.0f);
                 }
@@ -2657,7 +2667,17 @@ constexpr float kGravity = 26.0f;
                 // The zone name, as a ribbon under the radar.
                 if (options.zoneName)
                 {
-                    label(*options.zoneName, radarCentreX, below - gap * 2.0f - line, 1.0f, kHudBright, 0.55f);
+                    // Underscores are how the zone tables spell a space, and
+                    // nobody wants to read Bastok_Markets.
+                    std::string zone = *options.zoneName;
+                    for (char& letter : zone)
+                    {
+                        if (letter == '_')
+                        {
+                            letter = ' ';
+                        }
+                    }
+                    label(zone, radarCentreX, southY + line * 1.15f, 0.8f, kHudBright, 0.55f);
                 }
 
                 // And where we are. FFXI shows a lettered grid here; that
@@ -2668,7 +2688,24 @@ constexpr float kGravity = 26.0f;
                 {
                     char position[32] = {};
                     std::snprintf(position, sizeof(position), "%.0f  %.0f", characterAt.x, -characterAt.z);
-                    label(position, radarCentreX, below - gap * 3.0f - line * 2.0f, 1.0f, kHudDim, 0.55f);
+                    label(position, radarCentreX, southY - line * 1.15f, 0.8f, kHudDim, 0.55f);
+                }
+
+                // Chat, bottom left, oldest at the top. Same atlas as
+                // everything else: this was the last thing still drawing from
+                // the 4x6 bitmap font, which had no lower case at all.
+                {
+                    std::vector<std::string> lines = link ? link->chat() : options.testChat;
+                    if (lines.empty())
+                    {
+                        lines.push_back("Chat - waiting for the server");
+                    }
+                    const float line = hud.counts[1] * 0.8f;
+                    for (size_t i = 0; i < lines.size(); ++i)
+                    {
+                        const float bottom = -0.97f + line * 1.15f * static_cast<float>(lines.size() - 1 - i);
+                        place(lines[i], -0.98f, bottom, 0.8f, kHudBright, 0.5f, false);
+                    }
                 }
 
                 if (labels > 0)
@@ -2773,56 +2810,6 @@ constexpr float kGravity = 26.0f;
                     queue.WriteBuffer(plateUniformBuffer, 0, &plate, sizeof(plate));
                     pass.SetPipeline(platePipeline);
                     pass.SetBindGroup(0, plateBindGroup);
-                    pass.Draw(3);
-                }
-            }
-
-            if (chatPipeline && chatBindGroup)
-            {
-                std::vector<std::string> lines = link ? link->chat() : options.testChat;
-                if (lines.empty())
-                {
-                    // Something rather than nothing. An empty panel that is
-                    // present says "chat is wired up and quiet"; drawing
-                    // nothing at all is indistinguishable from a panel that
-                    // was never built, which is exactly how it read.
-                    lines.push_back("CHAT - WAITING FOR THE SERVER");
-                }
-                {
-                    ChatUniforms chat{};
-                    // Bottom left, sized so the glyphs stay square: the panel
-                    // is a fixed fraction of the height, and its width follows
-                    // from the column count and the window's aspect.
-                    // NDC spans -1..1 over the whole window, so a cell that
-                    // is square in pixels is taller than it is wide in NDC by
-                    // the aspect. Named panelWidth rather than width because
-                    // width here is the swapchain's, and shadowing it makes
-                    // the panel stretch with the window instead of the glyphs.
-                    const float windowAspect = static_cast<float>(width) / static_cast<float>(height);
-                    const float panelHeight = 0.030f * static_cast<float>(mh::kChatLines);
-                    const float cellHeight = panelHeight / static_cast<float>(mh::kChatLines);
-                    const float panelWidth = static_cast<float>(mh::kChatColumns) * cellHeight * kGlyphAspect /
-                                             std::max(windowAspect, 0.0001f);
-                    chat.placement[0] = -0.98f;
-                    chat.placement[1] = -0.97f;
-                    chat.placement[2] = std::min(panelWidth, 1.90f);
-                    chat.placement[3] = panelHeight;
-                    chat.counts[0] = static_cast<float>(lines.size());
-                    chat.counts[1] = 0.72f;
-
-                    for (size_t row = 0; row < lines.size() && row < static_cast<size_t>(mh::kChatLines); ++row)
-                    {
-                        const std::string& line = lines[row];
-                        for (size_t column = 0; column < static_cast<size_t>(mh::kChatColumns); ++column)
-                        {
-                            const int glyph = column < line.size() ? glyphIndex(line[column]) : 0;
-                            chat.glyphs[row * mh::kChatColumns + column][0] = static_cast<float>(glyph);
-                        }
-                    }
-                    queue.WriteBuffer(chatUniformBuffer, 0, &chat, sizeof(chat));
-
-                    pass.SetPipeline(chatPipeline);
-                    pass.SetBindGroup(0, chatBindGroup);
                     pass.Draw(3);
                 }
             }
