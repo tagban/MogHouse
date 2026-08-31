@@ -17,8 +17,8 @@ constexpr float kLayerSeparation = 0.004f;
 /// colour throughout. Cutouts measure 0.41 upward, everything else 0.00.
 constexpr float kCutoutSignal = 0.2f;
 
-/// Builds a placement's transform, with FFXI's downward Y folded in so
-/// everything downstream can assume Y is up.
+/// Builds a placement's transform, with the turn out of FFXI's frame folded
+/// in so everything downstream can assume Y is up.
 Mat4 placementTransform(const ffxi::Placement& placement)
 {
     const float sx = std::sin(placement.rotate[0]), cx = std::cos(placement.rotate[0]);
@@ -42,11 +42,21 @@ Mat4 placementTransform(const ffxi::Placement& placement)
     m.m[13] = placement.translate[1];
     m.m[14] = placement.translate[2];
 
-    // Negating the second row flips Y after the rest of the transform, which is
-    // what the per-vertex path used to do by hand.
+    // Negating the second and third rows applies the half turn about X after
+    // the rest of the transform - the same conversion toWorld does per vertex,
+    // see renderer/zonemesh.cpp.
+    //
+    // This is the transform for everything the zone actually draws, and it is
+    // the one place the turn was easy to miss: the vertices go through
+    // untouched and the flip lives here, in a matrix, rather than next to the
+    // coordinates it applies to. With only the Y row negated the drawn world
+    // is a mirror of the world the character walks around in - so a position
+    // from the server is placed correctly against collision that is right,
+    // inside scenery that is backwards.
     for (int column = 0; column < 4; ++column)
     {
         m.m[column * 4 + 1] = -m.m[column * 4 + 1];
+        m.m[column * 4 + 2] = -m.m[column * 4 + 2];
     }
     return m;
 }
