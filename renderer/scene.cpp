@@ -20,6 +20,9 @@ constexpr float kLayerSeparation = 0.004f;
 /// colour throughout. Cutouts measure 0.41 upward, everything else 0.00.
 constexpr float kCutoutSignal = 0.2f;
 
+/// The bit in a mesh header's blending field that asks for alpha blending.
+constexpr uint16_t kBlendFlag = 0x8000;
+
 /// Builds a placement's transform, with the turn out of FFXI's frame folded
 /// in so everything downstream can assume Y is up.
 ///
@@ -204,6 +207,7 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
                     vertex.position[axis] = source.position[axis] + source.normal[axis] * layerOffset;
                     vertex.normal[axis] = source.normal[axis];
                 }
+                vertex.colour = source.colour;
                 vertex.uv[0] = source.uv[0];
                 vertex.uv[1] = source.uv[1];
                 scene.vertices.push_back(vertex);
@@ -217,7 +221,8 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
                 }
             }
 
-            scene.draws.push_back(InstancedDraw{mesh.texture, cutout, water, indexStart,
+            scene.draws.push_back(InstancedDraw{mesh.texture, cutout, (mesh.blending & kBlendFlag) != 0, water,
+                                                indexStart,
                                                 static_cast<uint32_t>(scene.indices.size()) - indexStart,
                                                 instanceOffset, static_cast<uint32_t>(transforms.size())});
 

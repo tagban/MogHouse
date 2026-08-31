@@ -31,12 +31,14 @@ struct VertexOut {
     @location(0) normal : vec3<f32>,
     @location(1) uv : vec2<f32>,
     @location(2) worldPosition : vec3<f32>,
+    @location(3) colour : vec4<f32>,
 };
 
 @vertex
 fn vertexMain(@location(0) position : vec3<f32>,
               @location(1) normal : vec3<f32>,
               @location(2) uv : vec2<f32>,
+              @location(7) colour : vec4<f32>,
               // The placement matrix, one column per attribute.
               @location(3) m0 : vec4<f32>,
               @location(4) m1 : vec4<f32>,
@@ -52,6 +54,7 @@ fn vertexMain(@location(0) position : vec3<f32>,
     out.normal = (model * vec4<f32>(normal, 0.0)).xyz;
     out.uv = uv;
     out.worldPosition = world.xyz;
+    out.colour = colour;
     return out;
 }
 
@@ -62,6 +65,12 @@ fn shade(in : VertexOut, cutout : bool) -> vec4<f32> {
     let lambert = abs(dot(n, normalize(uniforms.lightDirection.xyz)));
 
     let sampled = textureSample(zoneTexture, zoneSampler, in.uv);
+
+    // Vertex alpha is stored at quarter scale, so it is multiplied back up
+    // before being combined with the texture's. A surface carrying 0.25 here
+    // is meant to be fully opaque, and treating it as a quarter is what makes
+    // a floor fade away when it is blended.
+    let alpha = clamp(4.0 * in.colour.a * sampled.a, 0.0, 1.0);
 
     // Alpha is a cutout mask only on textures that are black where transparent.
     // On terrain it is a blend factor, and testing it punches holes in the
@@ -85,7 +94,7 @@ fn shade(in : VertexOut, cutout : bool) -> vec4<f32> {
     let fog = clamp((distance - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
     colour = mix(colour, uniforms.fogColour.rgb, fog);
 
-    return vec4<f32>(colour, 1.0);
+    return vec4<f32>(colour, alpha);
 }
 
 @fragment

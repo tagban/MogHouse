@@ -19,6 +19,14 @@ struct Vertex
     float position[3];
     float normal[3];
     float uv[2];
+
+    /// Per-vertex colour, as the DAT stores it. The alpha is the interesting
+    /// part: FFXI keeps it at quarter scale, so the shader multiplies it back
+    /// up by four. A surface with 0.25 here is meant to be fully opaque.
+    ///
+    /// Defaults to opaque white so anything building vertices without one -
+    /// characters, the collision view - is unaffected.
+    uint32_t colour{0xFFFFFFFFu};
 };
 
 /// A run of indices sharing one texture. Geometry is grouped by material so

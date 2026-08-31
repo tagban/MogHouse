@@ -26,6 +26,15 @@ struct InstancedDraw
     std::string texture;
     bool cutout{};
 
+    /// The mesh header asked to be blended - cloth, banners, glass.
+    ///
+    /// Read from the blending field rather than guessed at from the texture.
+    /// Across Bastok Markets that field holds 0x8000 on 150 meshes, 0x2000 on
+    /// 18 (mostly the _-prefixed foliage), and zero on the other thousand.
+    /// Drawn opaque, a translucent awning shows its transparent texels as
+    /// black blobs on the cloth.
+    bool blend{};
+
     /// One of FFXI's water surfaces, drawn translucent and last.
     ///
     /// Water is ordinary placed geometry with a recognisable model name, not

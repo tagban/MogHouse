@@ -707,10 +707,13 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         wgpu::ShaderModuleDescriptor moduleDescriptor{.nextInChain = &wgsl};
         wgpu::ShaderModule module = device.CreateShaderModule(&moduleDescriptor);
 
-        wgpu::VertexAttribute attributes[3] = {
+        // Location 7, not 3: the instance matrix already holds 3 through 6, and
+        // the two buffers share one location space.
+        wgpu::VertexAttribute attributes[4] = {
             {.format = wgpu::VertexFormat::Float32x3, .offset = 0, .shaderLocation = 0},
             {.format = wgpu::VertexFormat::Float32x3, .offset = 3 * sizeof(float), .shaderLocation = 1},
-            {.format = wgpu::VertexFormat::Float32x2, .offset = 6 * sizeof(float), .shaderLocation = 2}};
+            {.format = wgpu::VertexFormat::Float32x2, .offset = 6 * sizeof(float), .shaderLocation = 2},
+            {.format = wgpu::VertexFormat::Unorm8x4, .offset = 8 * sizeof(float), .shaderLocation = 7}};
         wgpu::VertexAttribute instanceAttributes[4] = {
             {.format = wgpu::VertexFormat::Float32x4, .offset = 0, .shaderLocation = 3},
             {.format = wgpu::VertexFormat::Float32x4, .offset = 4 * sizeof(float), .shaderLocation = 4},
@@ -719,7 +722,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 
         wgpu::VertexBufferLayout vertexLayout{.stepMode = wgpu::VertexStepMode::Vertex,
                                               .arrayStride = sizeof(mh::Vertex),
-                                              .attributeCount = 3,
+                                              .attributeCount = 4,
                                               .attributes = attributes};
         // Stepping per instance rather than per vertex is the whole trick: one
         // copy of the geometry, one matrix per placement.
@@ -2145,7 +2148,8 @@ constexpr float kGravity = 26.0f;
                 for (size_t i = 0; i < zone->draws.size() && i < batchBindGroups.size(); ++i)
                 {
                     const mh::InstancedDraw& draw = zone->draws[i];
-                    if (draw.water != (layer == 1))
+                    const bool translucent = draw.water || draw.blend;
+                    if (translucent != (layer == 1))
                     {
                         continue;
                     }
@@ -2154,7 +2158,7 @@ constexpr float kGravity = 26.0f;
                     const bool cutout = cutoutMode == 0   ? false
                                         : cutoutMode == 1 ? true
                                                           : draw.cutout;
-                    pass.SetPipeline(draw.water ? translucentPipeline : (cutout ? cutoutPipeline : pipeline));
+                    pass.SetPipeline(translucent ? translucentPipeline : (cutout ? cutoutPipeline : pipeline));
                     pass.SetBindGroup(0, batchBindGroups[i]);
                     pass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
                 }
