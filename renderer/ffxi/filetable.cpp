@@ -109,24 +109,83 @@ std::filesystem::path installFromRegistry()
 } // namespace
 #endif
 
+bool looksLikeInstall(const std::filesystem::path& root)
+{
+    // The two index files and the data they index. Checking for the directory
+    // alone accepts an empty folder someone made by hand, and then every later
+    // failure is about a missing DAT rather than about the wrong folder.
+    std::error_code ignored;
+    return std::filesystem::exists(root / "FTABLE.DAT", ignored) &&
+           std::filesystem::exists(root / "VTABLE.DAT", ignored) &&
+           std::filesystem::is_directory(root / "ROM", ignored);
+}
+
 std::filesystem::path defaultInstallRoot()
 {
+    // Told outright. The app sets this when someone picks a folder, so it has
+    // to win over anything found by looking.
     if (const char* fromEnv = std::getenv("MOGHOUSE_FFXI_INSTALL"))
     {
         return std::filesystem::path{fromEnv};
     }
 
 #ifdef _WIN32
-    // Ask PlayOnline where it put the game rather than guessing. The guess
-    // below is only right for a default install on the C drive, which is no
-    // use to anyone running this on a machine that is not the one it was
-    // written on.
+    // Ask PlayOnline where it put the game rather than guessing.
     if (std::filesystem::path recorded = installFromRegistry(); !recorded.empty())
     {
         return recorded;
     }
 #endif
 
+    // And otherwise look. There is no registry off Windows, and plenty of
+    // people have the files as a folder they copied rather than an install -
+    // including everyone running this under Wine, where the game sits inside a
+    // prefix at a path Windows would recognise but the host does not.
+    std::vector<std::filesystem::path> candidates;
+
+    const auto addHome = [&candidates](const char* variable, std::initializer_list<const char*> tails) {
+        const char* home = std::getenv(variable);
+        if (!home)
+        {
+            return;
+        }
+        for (const char* tail : tails)
+        {
+            candidates.push_back(std::filesystem::path{home} / tail);
+        }
+    };
+
+    candidates.emplace_back("C:/Program Files (x86)/PlayOnline/SquareEnix/FINAL FANTASY XI");
+    candidates.emplace_back("C:/Program Files/PlayOnline/SquareEnix/FINAL FANTASY XI");
+
+    addHome("HOME", {
+                        "FINAL FANTASY XI",
+                        "Games/FINAL FANTASY XI",
+                        "Library/Application Support/FINAL FANTASY XI",
+                        ".wine/drive_c/Program Files (x86)/PlayOnline/SquareEnix/FINAL FANTASY XI",
+                        ".wine/drive_c/Program Files/PlayOnline/SquareEnix/FINAL FANTASY XI",
+                        "Library/Application Support/CrossOver/Bottles/FFXI/drive_c/Program Files (x86)/PlayOnline/SquareEnix/FINAL FANTASY XI",
+                    });
+    addHome("USERPROFILE", {"FINAL FANTASY XI", "Games/FINAL FANTASY XI"});
+
+    // Beside the client itself, which is how a folder of files travels.
+    std::error_code ignored;
+    if (std::filesystem::path here = std::filesystem::current_path(ignored); !ignored)
+    {
+        candidates.push_back(here / "FINAL FANTASY XI");
+        candidates.push_back(here / "ffxi");
+    }
+
+    for (const std::filesystem::path& candidate : candidates)
+    {
+        if (looksLikeInstall(candidate))
+        {
+            return candidate;
+        }
+    }
+
+    // Nothing found. Returning the old constant keeps the failure where it was
+    // - a missing file, named - rather than turning it into an empty path.
     return std::filesystem::path{"C:/Program Files (x86)/PlayOnline/SquareEnix/FINAL FANTASY XI"};
 }
 } // namespace ffxi

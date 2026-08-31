@@ -34,5 +34,18 @@ private:
 
 /// Where the retail client is installed, from MOGHOUSE_FFXI_INSTALL, falling
 /// back to the usual Windows location.
+/// Whether this folder is really an FFXI install: both index files and the
+/// data they index. A directory that merely exists is not enough - accept one
+/// and every later failure reads as a missing DAT rather than as the wrong
+/// folder, which is a much worse thing to hand someone.
+bool looksLikeInstall(const std::filesystem::path& root);
+
+/// Where the game is.
+///
+/// MOGHOUSE_FFXI_INSTALL first, so an app that asked someone to pick a folder
+/// wins. Then the registry on Windows, where PlayOnline records it. Then a list
+/// of the places a copied folder tends to sit, including Wine and CrossOver
+/// prefixes - there is no registry off Windows, and plenty of people have the
+/// files without having run an installer at all.
 std::filesystem::path defaultInstallRoot();
 } // namespace ffxi
