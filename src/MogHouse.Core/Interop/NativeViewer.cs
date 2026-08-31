@@ -39,6 +39,32 @@ public struct NativeRadarEntity
     /// </summary>
     public int NameHidden;
 
+    /// <summary>
+    /// Race, face, head, body, hands, legs, feet - slot tags already stripped.
+    /// All zero when the server describes this one as a fixed model instead.
+    /// </summary>
+    public unsafe fixed ushort Look[7];
+
+    /// <summary>Writes a look in, or leaves it zeroed.</summary>
+    public unsafe void SetLook(Ffxi.FfxiEntityLook? look)
+    {
+        if (look is null || !look.IsEquipment)
+        {
+            return;
+        }
+
+        fixed (ushort* target = Look)
+        {
+            target[0] = look.Race;
+            target[1] = look.Face;
+            target[2] = Ffxi.FfxiEntityLook.ModelOf(look.Head);
+            target[3] = Ffxi.FfxiEntityLook.ModelOf(look.Body);
+            target[4] = Ffxi.FfxiEntityLook.ModelOf(look.Hands);
+            target[5] = Ffxi.FfxiEntityLook.ModelOf(look.Legs);
+            target[6] = Ffxi.FfxiEntityLook.ModelOf(look.Feet);
+        }
+    }
+
     /// <summary>Writes a name in, truncated and NUL terminated.</summary>
     public unsafe void SetName(string? value)
     {

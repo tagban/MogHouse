@@ -1164,6 +1164,7 @@ sealed class LiveRadar : IDisposable
                 NameHidden = visible[i].NameHidden ? 1 : 0,
             };
             entity.SetName(visible[i].Name);
+            entity.SetLook(visible[i].Look);
             entities[i] = entity;
         }
         _viewer.SetEntities(entities);

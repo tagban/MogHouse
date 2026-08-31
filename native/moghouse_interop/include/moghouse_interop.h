@@ -58,6 +58,13 @@ typedef struct MhRadarEntity
     /// Non-zero when the server wants the name kept off screen until this is
     /// targeted. Doors and zone lines are named but not labelled.
     int32_t nameHidden;
+
+    /// What the entity looks like, when the server describes it the way it
+    /// describes a player: race, face, then the head, body, hands, legs and
+    /// feet model ids with their slot tags already stripped. All zero means
+    /// the server did not describe it this way - a fixed model, a door - and
+    /// the shared body stands in.
+    uint16_t look[7];
 } MhRadarEntity;
 
 /// What to open. Every string is borrowed for the duration of the create call

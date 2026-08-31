@@ -1784,6 +1784,137 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // this - the position and the heading only reach the GPU through here, so
     // anything that updates characterAt and forgets leaves the character
     // standing still while the camera follows the place they should be.
+    // One built model per distinct look. NPCs repeat heavily - a row of
+    // shopkeepers in the same uniform is one model and five instances - so
+    // this is keyed by the look rather than by the entity.
+    struct DrawableCharacter
+    {
+        LoadedCharacter loaded;
+        wgpu::Buffer vertices;
+        wgpu::Buffer indices;
+        std::vector<wgpu::Texture> textures;
+        std::vector<wgpu::BindGroup> bindGroups;
+    };
+
+    std::map<uint64_t, std::optional<DrawableCharacter>> npcModels;
+
+    const auto lookKey = [](const uint16_t look[7]) {
+        // Race and five equipment slots, packed. Face is left out: it changes
+        // the head texture rather than the geometry, and including it would
+        // build a separate model for every face in a crowd.
+        uint64_t key = look[0];
+        for (int slot = 2; slot < 7; ++slot)
+        {
+            key = key * 4096u + (look[slot] & 0x0FFFu);
+        }
+        return key;
+    };
+
+    // Builds the GPU side of a character. The player's own was built inline
+    // above before there was ever more than one; this is the same steps.
+    const auto buildDrawable = [&](LoadedCharacter&& loaded) -> std::optional<DrawableCharacter> {
+        if (loaded.geometry.indices.empty() || !pipeline)
+        {
+            return std::nullopt;
+        }
+
+        DrawableCharacter drawable;
+        drawable.loaded = std::move(loaded);
+
+        // Entities stand in the rest pose. They are not animated individually
+        // yet, so there is no per-frame skinning to pay for.
+        mh::reskin(drawable.loaded.geometry, mh::bindPose(drawable.loaded.skeleton), drawable.loaded.meshes);
+
+        drawable.vertices = createBuffer(device, drawable.loaded.geometry.vertices.data(),
+                                         drawable.loaded.geometry.vertices.size() * sizeof(mh::Vertex),
+                                         wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst);
+        drawable.indices = createBuffer(device, drawable.loaded.geometry.indices.data(),
+                                        drawable.loaded.geometry.indices.size() * sizeof(uint32_t),
+                                        wgpu::BufferUsage::Index);
+
+        for (const mh::Batch& batch : drawable.loaded.geometry.batches)
+        {
+            wgpu::TextureView view = whiteTexture.CreateView();
+            auto found = textures.find(batch.texture);
+            if (found != textures.end())
+            {
+                if (wgpu::Texture gpu = mh::uploadTexture(device, found->second))
+                {
+                    drawable.textures.push_back(gpu);
+                    view = drawable.textures.back().CreateView();
+                }
+            }
+
+            wgpu::BindGroupEntry entries[3] = {};
+            entries[0].binding = 0;
+            entries[0].buffer = uniformBuffer;
+            entries[0].size = sizeof(Uniforms);
+            entries[1].binding = 1;
+            entries[1].textureView = view;
+            entries[2].binding = 2;
+            entries[2].sampler = sampler;
+
+            wgpu::BindGroupDescriptor bindGroupDescriptor{
+                .layout = zoneBindGroupLayout, .entryCount = 3, .entries = entries};
+            drawable.bindGroups.push_back(device.CreateBindGroup(&bindGroupDescriptor));
+        }
+
+        return drawable;
+    };
+
+    // The model for one look, building it the first time it is asked for.
+    // Returns null while it has none - a look that resolves to nothing is
+    // remembered as nothing rather than retried every frame.
+    const auto modelFor = [&](const uint16_t look[7]) -> const DrawableCharacter* {
+        const uint64_t key = lookKey(look);
+        auto found = npcModels.find(key);
+        if (found != npcModels.end())
+        {
+            return found->second ? &*found->second : nullptr;
+        }
+
+        ffxi::Look wanted;
+        wanted.race = static_cast<ffxi::Race>(look[0]);
+        wanted.model[static_cast<size_t>(ffxi::LookSlot::Face)] = look[1];
+        wanted.model[static_cast<size_t>(ffxi::LookSlot::Head)] = look[2] & 0x0FFF;
+        wanted.model[static_cast<size_t>(ffxi::LookSlot::Body)] = look[3] & 0x0FFF;
+        wanted.model[static_cast<size_t>(ffxi::LookSlot::Hands)] = look[4] & 0x0FFF;
+        wanted.model[static_cast<size_t>(ffxi::LookSlot::Legs)] = look[5] & 0x0FFF;
+        wanted.model[static_cast<size_t>(ffxi::LookSlot::Feet)] = look[6] & 0x0FFF;
+
+        std::optional<DrawableCharacter> built;
+        try
+        {
+            const ffxi::FileTable table{ffxi::defaultInstallRoot()};
+            std::vector<std::string> paths;
+            if (auto skeletonPath = table.path(ffxi::skeletonFileId(wanted.race)))
+            {
+                paths.push_back(skeletonPath->string());
+            }
+            for (const std::filesystem::path& piece : ffxi::lookFiles(table, wanted))
+            {
+                paths.push_back(piece.string());
+            }
+
+            if (!paths.empty())
+            {
+                if (auto loaded = loadCharacter(paths, textures))
+                {
+                    built = buildDrawable(std::move(*loaded));
+                }
+            }
+        }
+        catch (const std::exception& e)
+        {
+            std::printf("could not build NPC model: %s\n", e.what());
+        }
+
+        std::printf("NPC model %s: race %u %u/%u/%u/%u/%u\n", built ? "built" : "failed", look[0], look[2],
+                    look[3], look[4], look[5], look[6]);
+        auto inserted = npcModels.emplace(key, std::move(built)).first;
+        return inserted->second ? &*inserted->second : nullptr;
+    };
+
     auto writeCharacterInstance = [&]() {
         if (!characterInstanceBuffer)
         {
@@ -2663,13 +2794,61 @@ constexpr float kGravity = 26.0f;
                     pass.SetVertexBuffer(0, characterVertexBuffer);
                     pass.DrawIndexed(batch.indexCount, 1, batch.indexOffset, 0, 0);
 
-                    if (drawnBodies > 0 && entityVertexBuffer)
+                    // Everyone without a model of their own, from the shared
+                    // body. Drawn one at a time rather than as a run because
+                    // the entities that do have models are interleaved with
+                    // them, and instance slots are assigned by position in the
+                    // list rather than by which model is used.
+                    for (int body = 0; body < drawnBodies && entityVertexBuffer; ++body)
                     {
+                        const size_t index = static_cast<size_t>(body);
+                        // Only skipped if the look actually built into
+                        // something. A Chocobo's look names a race the player
+                        // race table has no entry for, and dropping it would
+                        // leave nothing standing there at all.
+                        if (index < radarEntities.size() && radarEntities[index].hasLook() &&
+                            modelFor(radarEntities[index].look))
+                        {
+                            continue;   // has its own model, drawn below
+                        }
+
                         pass.SetVertexBuffer(0, entityVertexBuffer);
-                        pass.DrawIndexed(batch.indexCount, static_cast<uint32_t>(drawnBodies), batch.indexOffset, 0,
-                                         1);
+                        pass.DrawIndexed(batch.indexCount, 1, batch.indexOffset, 0,
+                                         static_cast<uint32_t>(body + 1));
                     }
                 }
+
+                // And everyone the server described well enough to build: their
+                // own race, their own clothes. One model per distinct look,
+                // shared by everybody wearing it.
+                for (int body = 0; body < drawnBodies; ++body)
+                {
+                    const size_t index = static_cast<size_t>(body);
+                    if (index >= radarEntities.size() || !radarEntities[index].hasLook())
+                    {
+                        continue;
+                    }
+
+                    const DrawableCharacter* model = modelFor(radarEntities[index].look);
+                    if (!model)
+                    {
+                        continue;
+                    }
+
+                    pass.SetVertexBuffer(0, model->vertices);
+                    pass.SetIndexBuffer(model->indices, wgpu::IndexFormat::Uint32);
+                    for (size_t b = 0; b < model->loaded.geometry.batches.size() && b < model->bindGroups.size(); ++b)
+                    {
+                        const mh::Batch& batch = model->loaded.geometry.batches[b];
+                        pass.SetPipeline(batch.cutout ? cutoutPipeline : pipeline);
+                        pass.SetBindGroup(0, model->bindGroups[b]);
+                        pass.DrawIndexed(batch.indexCount, 1, batch.indexOffset, 0,
+                                         static_cast<uint32_t>(body + 1));
+                    }
+                }
+
+                // The player's index buffer again, for whatever draws next.
+                pass.SetIndexBuffer(characterIndexBuffer, wgpu::IndexFormat::Uint32);
             }
 
             if (radarPipeline && radarBindGroup)

@@ -23,6 +23,12 @@ public sealed record FfxiTrackedEntity(
     /// unprompted labels half a city with things nobody asked about.
     /// </summary>
     bool NameHidden,
+
+    /// <summary>
+    /// What the server says this one looks like, kept so the renderer can
+    /// build it. Sticky: position-only updates carry no look.
+    /// </summary>
+    FfxiEntityLook? Look,
     byte? HealthPercent,
     DateTimeOffset LastSeen);
 
@@ -140,6 +146,7 @@ public sealed class FfxiEntityTracker
             NameHidden: update.NameVis is null && update.Look is null
                 ? known?.NameHidden ?? false
                 : update.IsNameHidden || (update.Look?.IsScenery ?? false) || (known?.NameHidden ?? false),
+            Look: update.Look ?? known?.Look,
             HealthPercent: update.HealthPercent ?? known?.HealthPercent,
             LastSeen: now);
     }

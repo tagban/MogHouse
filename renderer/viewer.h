@@ -53,6 +53,14 @@ struct RadarEntity
     /// The server wants the name shown only when this is targeted. Doors and
     /// zone lines are named in the table but not labelled on screen.
     bool nameHidden{};
+
+    /// Race, face, head, body, hands, legs, feet - what to build this one out
+    /// of, when the server describes it the way it describes a player. All
+    /// zero means it does not, and the shared body stands in.
+    uint16_t look[7]{};
+
+    /// Whether there is a look here worth building. Race zero is not a race.
+    bool hasLook() const { return look[0] != 0; }
 };
 
 /// How many tracked entities get drawn as bodies. Beyond this they stay dots -
