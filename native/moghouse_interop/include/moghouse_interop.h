@@ -32,12 +32,17 @@ enum
     MH_ENTITY_ENEMY = 2
 };
 
-/// One thing on the radar, in world coordinates. Height is not carried: the
-/// radar is a plan view, and a dot above you is still a dot.
+/// One tracked thing, in world coordinates. The radar uses x and z; the rest
+/// is what it takes to stand a body there and point it somewhere.
+///
+/// Y is up, as everywhere past the DAT readers, and heading is radians with 0
+/// along +z. The client converts out of FFXI's own frame on the way in.
 typedef struct MhRadarEntity
 {
     float x;
     float z;
+    float y;
+    float heading;
     int32_t kind;
 } MhRadarEntity;
 

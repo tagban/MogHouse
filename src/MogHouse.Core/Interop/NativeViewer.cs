@@ -14,6 +14,12 @@ public struct NativeRadarEntity
     public float X;
     public float Z;
 
+    /// <summary>World height, Y up. The radar ignores it; the body does not.</summary>
+    public float Y;
+
+    /// <summary>Compass heading in radians, 0 along +z.</summary>
+    public float Heading;
+
     /// <summary>Cast from <see cref="Ffxi.FfxiEntityKind"/>; the values match.</summary>
     public int Kind;
 }

@@ -1220,9 +1220,15 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         characterIndexBuffer = createBuffer(device, character->geometry.indices.data(),
                                             character->geometry.indices.size() * sizeof(uint32_t), wgpu::BufferUsage::Index);
 
+        // Slot 0 is the player. The rest are the tracked entities, which
+        // share this one skinned mesh: every NPC and every other player is
+        // drawn from the same geometry in the same pose, so they cost an
+        // instance each and nothing more. Giving them their own models and
+        // animations is the next step; standing them in the right places is
+        // this one.
         float instance[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
         wgpu::BufferDescriptor instanceDescriptor{.usage = wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst,
-                                                  .size = sizeof(instance)};
+                                                  .size = sizeof(instance) * (mh::kMaxDrawnBodies + 1)};
         characterInstanceBuffer = device.CreateBuffer(&instanceDescriptor);
         queue.WriteBuffer(characterInstanceBuffer, 0, instance, sizeof(instance));
 
@@ -1294,6 +1300,16 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // wants none at all. Sharing one value is what let a step off a ledge
     // teleport into the water sixty units away, which is not falling and is
     // not blocking either.
+    // Declared up here because writeCharacterInstance below captures them.
+    // The bodies are written in the same place as the player's own instance,
+    // which is the rule that file already had: nothing else is allowed to
+    // produce instance data.
+    std::vector<mh::RadarEntity> radarEntities = options.testEntities;
+    float radarRange = 120.0f;
+
+    /// How many entity bodies the instance buffer currently holds.
+    int drawnBodies = 0;
+
     // Where the character is drawn. Everything that moves them has to call
     // this - the position and the heading only reach the GPU through here, so
     // anything that updates characterAt and forgets leaves the character
@@ -1321,6 +1337,27 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         const float instance[16] = {c,  0, -sn, 0, 0, 1, 0, 0, sn, 0, c, 0,
                                     characterAt.x, characterAt.y, characterAt.z, 1};
         queue.WriteBuffer(characterInstanceBuffer, 0, instance, sizeof(instance));
+
+        // And one for each tracked entity, in the same buffer behind the
+        // player. Written here rather than in the frame loop because this is
+        // the only place the instance data is allowed to be produced - the
+        // comment above says so, and the last time something updated a
+        // position without coming through here the character stopped moving.
+        drawnBodies = 0;
+        for (const mh::RadarEntity& entity : radarEntities)
+        {
+            if (drawnBodies >= mh::kMaxDrawnBodies)
+            {
+                break;
+            }
+            const float bodyTurn = entity.heading - 1.57079633f;
+            const float bc = std::cos(bodyTurn);
+            const float bs = std::sin(bodyTurn);
+            const float body[16] = {bc, 0, -bs, 0, 0, 1, 0, 0, bs, 0, bc, 0,
+                                    entity.x, entity.y, entity.z, 1};
+            queue.WriteBuffer(characterInstanceBuffer, sizeof(body) * (drawnBodies + 1), body, sizeof(body));
+            ++drawnBodies;
+        }
     };
 
     auto placeCharacter = [&](const mh::Vec3& where, float search) {
@@ -1433,8 +1470,6 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // What the radar shows. Fed from options until something is connected,
       // and replaced wholesale rather than merged - the list is already the
       // answer to "what can be seen right now".
-    std::vector<mh::RadarEntity> radarEntities = options.testEntities;
-    float radarRange = 120.0f;
 
     // The zone name as glyph indices, resolved once. Anything outside the font
     // becomes a space rather than a wrong letter, and underscores read as
@@ -1898,7 +1933,8 @@ constexpr float kGravity = 26.0f;
                     const mh::Batch& batch = character->geometry.batches[i];
                     pass.SetPipeline(batch.cutout ? cutoutPipeline : pipeline);
                     pass.SetBindGroup(0, characterBindGroups[i]);
-                    pass.DrawIndexed(batch.indexCount, 1, batch.indexOffset, 0, 0);
+                    pass.DrawIndexed(batch.indexCount, static_cast<uint32_t>(drawnBodies + 1),
+                                     batch.indexOffset, 0, 0);
                 }
             }
 

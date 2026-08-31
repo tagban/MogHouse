@@ -106,7 +106,8 @@ void mh_viewer_set_entities(MhViewerHandle viewer, const MhRadarEntity* entities
         copied.reserve(static_cast<size_t>(count));
         for (int32_t i = 0; i < count; ++i)
         {
-            copied.push_back(mh::RadarEntity{entities[i].x, entities[i].z, entities[i].kind});
+            copied.push_back(mh::RadarEntity{entities[i].x, entities[i].z, entities[i].y,
+                                             entities[i].heading, entities[i].kind});
         }
     }
     viewer->link.setEntities(std::move(copied));

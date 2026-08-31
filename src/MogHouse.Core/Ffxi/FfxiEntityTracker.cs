@@ -14,6 +14,7 @@ public sealed record FfxiTrackedEntity(
     float X,
     float Vertical,
     float Depth,
+    sbyte Direction,
     byte? HealthPercent,
     DateTimeOffset LastSeen);
 
@@ -97,6 +98,7 @@ public sealed class FfxiEntityTracker
             X: update.X,
             Vertical: update.Vertical,
             Depth: update.Depth,
+            Direction: update.Direction,
             HealthPercent: update.HealthPercent ?? known?.HealthPercent,
             LastSeen: now);
     }

@@ -906,6 +906,11 @@ sealed class LiveRadar : IDisposable
                 // character's own position - anything else puts the dots on
                 // the wrong side of the map they are drawn over.
                 Z = -visible[i].Depth,
+                Y = -visible[i].Vertical,
+                // Direction is a byte over the full circle. The half turn
+                // about X reverses which way a yaw goes, so this carries the
+                // same pi - h correction the player's own heading does.
+                Heading = (float)(Math.PI - (visible[i].Direction & 0xFF) * (Math.PI * 2) / 256),
                 Kind = (int)visible[i].Kind,
             };
         }

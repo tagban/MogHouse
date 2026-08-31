@@ -20,16 +20,29 @@
 
 namespace mh
 {
-/// One thing on the radar. Positions are world x and z; height is not shown,
-/// because a radar is a plan view and a dot above you is still a dot.
+/// One tracked thing. The radar only needs x and z - it is a plan view, and a
+/// dot above you is still a dot - but the same list now also puts a body in
+/// the world, which needs somewhere to stand and a way to face.
 struct RadarEntity
 {
     float x{};
     float z{};
 
+    /// World height, Y up. The radar ignores it.
+    float y{};
+
+    /// Compass heading in radians, 0 along +z, the same convention the player
+    /// character and the radar notch use.
+    float heading{};
+
     /// 0 player, 1 npc, 2 enemy - matching MogHouse.Core's FfxiEntityKind.
     int kind{};
 };
+
+/// How many tracked entities get drawn as bodies. Beyond this they stay dots -
+/// they all share one skinned mesh, so the cost is per instance and small, but
+/// a crowded city zone should not be able to grow the buffer without limit.
+inline constexpr int kMaxDrawnBodies = 48;
 
 /// Everything the viewer needs to start. Fields that were environment
 /// variables keep their meaning; an unset optional means the variable was
