@@ -150,6 +150,26 @@ int32_t mh_viewer_take_jump(MhViewerHandle viewer)
     return viewer && viewer->link.takeJump() ? 1 : 0;
 }
 
+int32_t mh_viewer_take_chat(MhViewerHandle viewer, char* buffer, int32_t capacity)
+{
+    if (!viewer || !buffer || capacity <= 0)
+    {
+        return 0;
+    }
+
+    std::optional<std::string> line = viewer->link.takeChat();
+    if (!line)
+    {
+        return 0;
+    }
+
+    const size_t room = static_cast<size_t>(capacity) - 1;
+    const size_t length = line->size() < room ? line->size() : room;
+    std::memcpy(buffer, line->data(), length);
+    buffer[length] = '\0';
+    return 1;
+}
+
 void mh_viewer_stop(MhViewerHandle viewer)
 {
     if (viewer)

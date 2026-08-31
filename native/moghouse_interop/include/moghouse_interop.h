@@ -141,6 +141,10 @@ MH_API int32_t mh_viewer_get_character(MhViewerHandle viewer, float* x, float* y
 /// it.
 MH_API int32_t mh_viewer_take_jump(MhViewerHandle viewer);
 
+/// The next line the player typed, copied into `buffer`. Returns 0 when there
+/// is nothing waiting, so a caller polls this the way it polls the jump.
+MH_API int32_t mh_viewer_take_chat(MhViewerHandle viewer, char* buffer, int32_t capacity);
+
 /// Asks a running viewer to close. mh_viewer_run returns shortly after.
 MH_API void mh_viewer_stop(MhViewerHandle viewer);
 

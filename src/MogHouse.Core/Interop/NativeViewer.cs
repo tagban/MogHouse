@@ -300,6 +300,28 @@ public sealed partial class NativeViewer : IDisposable
     /// </summary>
     public bool TakeJump() => !_disposed && _handle != IntPtr.Zero && mh_viewer_take_jump(_handle) != 0;
 
+    /// <summary>
+    /// The next line the player typed, or null if they have not pressed return
+    /// since this was last called.
+    /// </summary>
+    public unsafe string? TakeChat()
+    {
+        if (_disposed || _handle == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        // Chat is capped well under this on the wire; the buffer only has to
+        // outlast one line.
+        byte* buffer = stackalloc byte[256];
+        if (mh_viewer_take_chat(_handle, buffer, 256) == 0)
+        {
+            return null;
+        }
+
+        return Marshal.PtrToStringUTF8((IntPtr)buffer);
+    }
+
     /// <summary>Asks the viewer to close. Run returns shortly afterwards.</summary>
     public void Stop()
     {
@@ -361,6 +383,9 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static partial int mh_viewer_take_jump(IntPtr viewer);
+
+    [LibraryImport(LibraryName)]
+    private static unsafe partial int mh_viewer_take_chat(IntPtr viewer, byte* buffer, int capacity);
 
     [LibraryImport(LibraryName)]
     private static partial void mh_viewer_stop(IntPtr viewer);

@@ -520,6 +520,7 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
         string? tellTo = null,
         string? tellText = null,
         Func<bool>? jumpRequested = null,
+        Func<string?>? chatToSend = null,
         uint selfUniqueNo = 0,
         Func<ushort>? selfActIndex = null,
         CancellationToken ct = default)
@@ -631,6 +632,18 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
                 {
                     await SendEncryptedAsync(
                         zoneServer, FfxiJumpPacket.Build(selfUniqueNo, targid, (ushort)(_ownCounter + 1)), ct);
+                }
+            }
+
+            // Whatever the player typed. A line starting with '!' is a GM
+            // command and rides the ordinary chat packet - the server routes it
+            // - which is how a character moves between zones for now.
+            if (chatToSend is not null)
+            {
+                while (chatToSend() is { Length: > 0 } line)
+                {
+                    await SendEncryptedAsync(
+                        zoneServer, FfxiChatPacket.Build(FfxiChatKind.Say, line, (ushort)(_ownCounter + 1)), ct);
                 }
             }
 

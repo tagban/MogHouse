@@ -576,6 +576,7 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                         // The renderer knows a jump happened; only this side can
                         // tell the server, which is what makes anyone else see it.
                         jumpRequested: liveRadar is null ? null : liveRadar.TakeJump,
+                        chatToSend: liveRadar is null ? null : liveRadar.TakeChat,
                         selfUniqueNo: selfId,
                         // From the zone login reply, which is where the server
                         // tells us our own targid. It never sends us the entity
@@ -1151,6 +1152,9 @@ sealed class LiveRadar : IDisposable
     /// Consumed, so each jump reaches the server once.
     /// </summary>
     public bool TakeJump() => !_closed && _viewer.TakeJump();
+
+    /// <summary>The next line the player typed, or null if they have not.</summary>
+    public string? TakeChat() => _closed ? null : _viewer.TakeChat();
 
     /// <summary>
     /// Where the renderer has walked the character, in the protocol's own

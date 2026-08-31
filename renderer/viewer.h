@@ -205,6 +205,14 @@ public:
     void requestJump();
     bool takeJump();
 
+    /// A line the player typed and pressed return on, taken once.
+    ///
+    /// The renderer has no socket; the client does. Anything typed here has to
+    /// cross over to be said, including the GM commands starting with '!' that
+    /// are how a character moves between zones for now.
+    void submitChat(const std::string& line);
+    std::optional<std::string> takeChat();
+
 private:
     mutable std::mutex mutex_;
     std::vector<RadarEntity> entities_;
@@ -212,6 +220,7 @@ private:
     float character_[4]{};
     bool haveCharacter_{false};
     std::atomic<bool> jump_{false};
+    std::deque<std::string> outgoing_;
     std::deque<std::string> chat_;
 };
 

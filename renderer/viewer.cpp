@@ -499,6 +499,25 @@ bool mh::ViewerLink::character(float& x, float& y, float& z, float& heading) con
     return true;
 }
 
+void mh::ViewerLink::submitChat(const std::string& line)
+{
+    std::lock_guard<std::mutex> lock{mutex_};
+    outgoing_.push_back(line);
+}
+
+std::optional<std::string> mh::ViewerLink::takeChat()
+{
+    std::lock_guard<std::mutex> lock{mutex_};
+    if (outgoing_.empty())
+    {
+        return std::nullopt;
+    }
+
+    std::string line = std::move(outgoing_.front());
+    outgoing_.pop_front();
+    return line;
+}
+
 void mh::ViewerLink::requestJump() { jump_ = true; }
 
 /// Exchange rather than a read and a clear, so a jump is delivered exactly
@@ -1795,6 +1814,11 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     /// awkward when the collision is what is being checked.
     bool noclip = false;
 
+    // Typing a line. While this is open the movement keys are letters again,
+    // which is the whole reason it is a mode rather than always-on capture.
+    bool typing = false;
+    std::string typed;
+
     // Where the character is drawn. Everything that moves them has to call
     // this - the position and the heading only reach the GPU through here, so
     // anything that updates characterAt and forgets leaves the character
@@ -2236,9 +2260,51 @@ constexpr float kGravity = 26.0f;
             {
                 running = false;
             }
+            else if (event.type == SDL_EVENT_TEXT_INPUT && typing)
+            {
+                typed += event.text.text;
+            }
+            else if (event.type == SDL_EVENT_KEY_DOWN && typing)
+            {
+                // While typing, the keyboard belongs to the line and nothing
+                // else - or w a s d walk the character out from under you
+                // mid-sentence.
+                if (event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER)
+                {
+                    if (!typed.empty() && link)
+                    {
+                        link->submitChat(typed);
+                        link->pushChat("> " + typed);
+                    }
+                    typed.clear();
+                    typing = false;
+                    SDL_StopTextInput(window);
+                }
+                else if (event.key.key == SDLK_ESCAPE)
+                {
+                    typed.clear();
+                    typing = false;
+                    SDL_StopTextInput(window);
+                }
+                else if (event.key.key == SDLK_BACKSPACE && !typed.empty())
+                {
+                    typed.pop_back();
+                }
+            }
             else if (event.type == SDL_EVENT_KEY_DOWN)
             {
-                if (event.key.key == SDLK_ESCAPE)
+                if (event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER)
+                {
+                    // Return opens the line, the way the game does. Only when
+                    // there is a client to say it to.
+                    if (link)
+                    {
+                        typing = true;
+                        typed.clear();
+                        SDL_StartTextInput(window);
+                    }
+                }
+                else if (event.key.key == SDLK_ESCAPE)
                 {
                     running = false;
                 }
@@ -2411,7 +2477,12 @@ constexpr float kGravity = 26.0f;
             }
         }
         previousTicks = nowTicks;
-        const bool* held = SDL_GetKeyboardState(nullptr);
+        // With a line open the keyboard belongs to it. Held keys are read in
+        // several places below, so this is cut off at the source rather than
+        // guarded at each one - miss a guard and the character walks out from
+        // under you mid-sentence.
+        static const bool kNoKeysHeld[SDL_SCANCODE_COUNT] = {};
+        const bool* held = typing ? kNoKeysHeld : SDL_GetKeyboardState(nullptr);
         // Shift inverts the walk toggle rather than setting it, so holding
         // it walks while running and runs while walking.
         const bool shiftHeld = held[SDL_SCANCODE_LSHIFT] || held[SDL_SCANCODE_RSHIFT];
@@ -3111,10 +3182,20 @@ constexpr float kGravity = 26.0f;
                         lines.push_back("Chat - waiting for the server");
                     }
                     const float line = hud.counts[1] * 0.4f;
+
+                    // The panel stacks upwards from the bottom, so the line
+                    // being typed takes the bottom row and the history moves up
+                    // to make room rather than being written over.
+                    const float base = typing ? -0.97f + line * 1.15f : -0.97f;
                     for (size_t i = 0; i < lines.size(); ++i)
                     {
-                        const float bottom = -0.97f + line * 1.15f * static_cast<float>(lines.size() - 1 - i);
+                        const float bottom = base + line * 1.15f * static_cast<float>(lines.size() - 1 - i);
                         place(lines[i], -0.98f, bottom, 0.4f, kHudBright, 0.5f, false);
+                    }
+
+                    if (typing)
+                    {
+                        place("> " + typed + "_", -0.98f, -0.97f, 0.4f, kHudBright, 0.65f, false);
                     }
                 }
 
