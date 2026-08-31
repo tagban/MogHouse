@@ -533,6 +533,8 @@ public sealed class FfxiGameSession : IDisposable
             NavMesh = null;
             TryLoadNavMesh();
             TryLoadZoneLines();
+            // Event ids only mean anything within a zone.
+            _endedEvents.Clear();
             ZoneChanged?.Invoke(ZoneState.ZoneNo);
             Status?.Invoke($"Now in zone {ZoneState.ZoneNo}.");
         }
@@ -540,6 +542,12 @@ public sealed class FfxiGameSession : IDisposable
 
     /// <summary>Which zone line we have already asked about, so one step does not fire a dozen requests.</summary>
     /// <summary>Built up across fragments, then split into lines once the last lands.</summary>
+    /// <summary>
+    /// Events already answered. A zone change clears it: ids are only unique
+    /// within a zone, and the same one means something else on the other side.
+    /// </summary>
+    private readonly HashSet<(uint Entity, ushort Event)> _endedEvents = [];
+
     private readonly System.Text.StringBuilder _serverMessage = new();
 
     private uint? _zoneLineRequested;
@@ -689,8 +697,16 @@ public sealed class FfxiGameSession : IDisposable
             FfxiEventStart? started = FfxiEventStart.TryParse(reply.Plaintext.AsSpan(offset, size));
             if (started is not null && _zoneEndpoint is not null && _zone is not null)
             {
-                _zone.SendEventEndAsync(_zoneEndpoint, started.UniqueNo, started.ActIndex, started.ZoneNo,
-                                        started.EventId).GetAwaiter().GetResult();
+                // Once each. The server repeats the start until it is answered
+                // and several arrive together, so answering every copy sends a
+                // handful of EVENTENDs in the same millisecond - the first ends
+                // the event and the server logs "Not in an event" for the rest.
+                var which = (started.UniqueNo, started.EventId);
+                if (_endedEvents.Add(which))
+                {
+                    _zone.SendEventEndAsync(_zoneEndpoint, started.UniqueNo, started.ActIndex, started.ZoneNo,
+                                            started.EventId).GetAwaiter().GetResult();
+                }
             }
 
             // The login message, a fragment at a time. Each says where it sits
