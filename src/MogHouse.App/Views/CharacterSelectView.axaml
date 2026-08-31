@@ -40,11 +40,18 @@
       </ListBox.ItemTemplate>
     </ListBox>
 
-    <Button Content="Enter world"
-            Command="{Binding EnterWorldCommand}"
-            IsEnabled="{Binding !IsBusy}"
-            HorizontalAlignment="Stretch"
-            HorizontalContentAlignment="Center"/>
+    <Grid ColumnDefinitions="*,Auto">
+      <Button Grid.Column="0"
+              Content="Enter world"
+              Command="{Binding EnterWorldCommand}"
+              IsEnabled="{Binding !IsBusy}"
+              HorizontalAlignment="Stretch"
+              HorizontalContentAlignment="Center"/>
+      <Button Grid.Column="1"
+              Content="Sign out"
+              Command="{Binding SignOutCommand}"
+              Margin="6,0,0,0"/>
+    </Grid>
 
     <TextBlock Text="{Binding Error}"
                Foreground="#EF5350"

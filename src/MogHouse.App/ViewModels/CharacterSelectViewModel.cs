@@ -41,6 +41,20 @@ public partial class CharacterSelectViewModel : ViewModelBase
         SelectedCharacter = Characters.FirstOrDefault();
     }
 
+    /// <summary>
+    /// Back to the login page, for the account someone did not mean to use.
+    ///
+    /// Nothing to tell the server: the zone session has not been opened yet at
+    /// this point, and the lobby connection is not ours to keep alive.
+    /// </summary>
+    [RelayCommand]
+    private void SignOut()
+    {
+        _shell.SelectedCharacter = null;
+        _shell.Status = "Signed out.";
+        _shell.Navigate(new LoginViewModel(_shell));
+    }
+
     [RelayCommand]
     private async Task EnterWorldAsync()
     {
