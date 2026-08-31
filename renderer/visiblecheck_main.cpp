@@ -170,6 +170,26 @@ int main(int argc, char** argv)
 
     const std::unordered_map<std::string, ffxi::Texture> noTextures;
 
+    // --points reads "x y z name" a line on stdin, in FFXI's own coordinates,
+    // and reports how far the nearest drawn triangle is from each. The server's
+    // door and NPC placements are the outside reference this needs: they say
+    // where a thing belongs, authored against the real geometry, by someone
+    // other than us.
+    const bool pointMode = argc >= 3 && std::string{argv[2]} == "--points";
+    std::vector<std::pair<mh::Vec3, std::string>> wanted;
+    if (pointMode)
+    {
+        float px = 0.0f;
+        float py = 0.0f;
+        float pz = 0.0f;
+        char name[128];
+        while (std::scanf("%f %f %f %127[^\n]", &px, &py, &pz, name) == 4)
+        {
+            // The same half turn about X the world is built with.
+            wanted.push_back({mh::Vec3{px, -py, -pz}, std::string{name}});
+        }
+    }
+
     for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkMzb))
     {
         ffxi::Zone zone = ffxi::parseMzb(chunk, *keys);
@@ -206,6 +226,30 @@ int main(int argc, char** argv)
 
         const mh::Vec3 lo = collision.boundsMin();
         const mh::Vec3 hi = collision.boundsMax();
+
+        if (pointMode)
+        {
+            std::printf("%zu points against %zu drawn triangles\n", wanted.size(), tris.size());
+            for (const auto& [at, name] : wanted)
+            {
+                float best = std::numeric_limits<float>::max();
+                for (const Tri& t2 : tris)
+                {
+                    // Nearest vertex is close enough to say whether anything is
+                    // there at all, and far cheaper than a true point-triangle
+                    // distance over a hundred thousand of them.
+                    for (const mh::Vec3& v : {t2.a, t2.b, t2.c})
+                    {
+                        const float dx = v.x - at.x;
+                        const float dy = v.y - at.y;
+                        const float dz = v.z - at.z;
+                        best = std::min(best, dx * dx + dy * dy + dz * dz);
+                    }
+                }
+                std::printf("  %7.2f  %8.1f %7.1f %8.1f  %s\n", std::sqrt(best), at.x, at.y, at.z, name.c_str());
+            }
+            continue;
+        }
         std::printf("zone %s: %zu placements, %zu drawn triangles\n", zone.id.c_str(), resolved, tris.size());
         std::printf("  collision bounds x %.1f..%.1f  y %.1f..%.1f  z %.1f..%.1f\n", lo.x, hi.x, lo.y, hi.y, lo.z,
                     hi.z);

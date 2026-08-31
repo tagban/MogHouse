@@ -55,10 +55,18 @@ Mat4 placementTransform(const ffxi::Placement& placement)
     // is a mirror of the world the character walks around in - so a position
     // from the server is placed correctly against collision that is right,
     // inside scenery that is backwards.
+    // MOGHOUSE_PLACEMENT_LEGACY negates only the Y row, the way this did
+    // before the world became a rotation rather than a reflection. Kept so the
+    // two can be scored against collision - which agrees with the server - and
+    // the argument settled with a number instead of another opinion.
+    static const bool legacy = std::getenv("MOGHOUSE_PLACEMENT_LEGACY") != nullptr;
     for (int column = 0; column < 4; ++column)
     {
         m.m[column * 4 + 1] = -m.m[column * 4 + 1];
-        m.m[column * 4 + 2] = -m.m[column * 4 + 2];
+        if (!legacy)
+        {
+            m.m[column * 4 + 2] = -m.m[column * 4 + 2];
+        }
     }
     return m;
 }
