@@ -23,6 +23,7 @@
 #include "viewer.h"
 #include "coverage.h"
 #include "linalg.h"
+#include "chat_shader.h"
 #include "radar_shader.h"
 #include "scene.h"
 #include "surface.h"
@@ -64,6 +65,32 @@ struct Uniforms
 };
 
 /// Matches RadarUniforms in radar_shader.h.
+/// Index into the 4x6 font's character set, or 0 - a space - for anything it
+/// does not have. Lower case folds to upper, because the font has no lower.
+///
+/// A missing glyph becomes a space rather than a wrong letter: a gap reads as
+/// "this font cannot show that", where a substitution reads as a bug in
+/// whatever produced the text.
+inline int glyphIndex(char raw)
+{
+    static const std::string kOrder = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'-.";
+    const char upper = raw >= 'a' && raw <= 'z' ? static_cast<char>(raw - 'a' + 'A') : raw;
+    const size_t found = kOrder.find(upper == '_' ? ' ' : upper);
+    return found == std::string::npos ? 0 : static_cast<int>(found);
+}
+
+/// A character cell in the chat panel, wide over tall. The glyph is 4x6 with
+/// a column of space beside it and two rows above and below.
+inline constexpr float kGlyphAspect = 5.0f / 8.0f;
+
+/// Matches ChatUniforms in chat_shader.h.
+struct ChatUniforms
+{
+    float placement[4];
+    float counts[4];
+    float glyphs[mh::kChatLines * mh::kChatColumns][4];
+};
+
 struct RadarUniforms
 {
     float placement[4];
@@ -380,6 +407,22 @@ std::vector<mh::RadarEntity> mh::ViewerLink::entities() const
 {
     const std::lock_guard<std::mutex> guard{mutex_};
     return entities_;
+}
+
+void mh::ViewerLink::pushChat(const std::string& line)
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+    chat_.push_back(line);
+    while (chat_.size() > static_cast<size_t>(mh::kChatLines))
+    {
+        chat_.pop_front();
+    }
+}
+
+std::vector<std::string> mh::ViewerLink::chat() const
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+    return {chat_.begin(), chat_.end()};
 }
 
 void mh::ViewerLink::setCharacter(float x, float y, float z, float heading)
@@ -1025,6 +1068,62 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     wgpu::Buffer radarUniformBuffer;
     wgpu::RenderPipeline radarPipeline;
     wgpu::BindGroup radarBindGroup;
+
+    wgpu::Buffer chatUniformBuffer;
+    wgpu::RenderPipeline chatPipeline;
+    wgpu::BindGroup chatBindGroup;
+    {
+        wgpu::BufferDescriptor chatBufferDescriptor{.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
+                                                    .size = sizeof(ChatUniforms)};
+        chatUniformBuffer = device.CreateBuffer(&chatBufferDescriptor);
+
+        wgpu::ShaderSourceWGSL chatWgsl;
+        chatWgsl.code = mh::kChatShader;
+        wgpu::ShaderModuleDescriptor chatModuleDescriptor{.nextInChain = &chatWgsl};
+        wgpu::ShaderModule chatModule = device.CreateShaderModule(&chatModuleDescriptor);
+
+        wgpu::BindGroupLayoutEntry chatLayoutEntry{};
+        chatLayoutEntry.binding = 0;
+        chatLayoutEntry.visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+        chatLayoutEntry.buffer.type = wgpu::BufferBindingType::Uniform;
+
+        wgpu::BindGroupLayoutDescriptor chatLayoutDescriptor{.entryCount = 1, .entries = &chatLayoutEntry};
+        wgpu::BindGroupLayout chatBindGroupLayout = device.CreateBindGroupLayout(&chatLayoutDescriptor);
+        wgpu::PipelineLayoutDescriptor chatPipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
+                                                                    .bindGroupLayouts = &chatBindGroupLayout};
+        wgpu::PipelineLayout chatPipelineLayout = device.CreatePipelineLayout(&chatPipelineLayoutDescriptor);
+
+        wgpu::BlendState chatBlend{
+            .color = {.operation = wgpu::BlendOperation::Add,
+                      .srcFactor = wgpu::BlendFactor::SrcAlpha,
+                      .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
+            .alpha = {.operation = wgpu::BlendOperation::Add,
+                      .srcFactor = wgpu::BlendFactor::One,
+                      .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha}};
+        wgpu::ColorTargetState chatTarget{.format = surfaceFormat, .blend = &chatBlend};
+        wgpu::FragmentState chatFragment{
+            .module = chatModule, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &chatTarget};
+
+        wgpu::DepthStencilState chatDepth{.format = kDepthFormat,
+                                          .depthWriteEnabled = false,
+                                          .depthCompare = wgpu::CompareFunction::Always};
+
+        wgpu::RenderPipelineDescriptor chatPipelineDescriptor{
+            .layout = chatPipelineLayout,
+            .vertex = {.module = chatModule, .entryPoint = "vertexMain"},
+            .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
+            .depthStencil = &chatDepth,
+            .fragment = &chatFragment};
+        chatPipeline = device.CreateRenderPipeline(&chatPipelineDescriptor);
+
+        wgpu::BindGroupEntry chatEntry{};
+        chatEntry.binding = 0;
+        chatEntry.buffer = chatUniformBuffer;
+        chatEntry.size = sizeof(ChatUniforms);
+        wgpu::BindGroupDescriptor chatBindGroupDescriptor{
+            .layout = chatBindGroupLayout, .entryCount = 1, .entries = &chatEntry};
+        chatBindGroup = device.CreateBindGroup(&chatBindGroupDescriptor);
+    }
     float mapCentreX = 0.0f;
     float mapCentreZ = 0.0f;
     float mapHalf = 1.0f;
@@ -1977,6 +2076,49 @@ constexpr float kGravity = 26.0f;
                 pass.SetPipeline(radarPipeline);
                 pass.SetBindGroup(0, radarBindGroup);
                 pass.Draw(3);
+            }
+
+            if (chatPipeline && chatBindGroup)
+            {
+                const std::vector<std::string> lines = link ? link->chat() : options.testChat;
+                if (!lines.empty())
+                {
+                    ChatUniforms chat{};
+                    // Bottom left, sized so the glyphs stay square: the panel
+                    // is a fixed fraction of the height, and its width follows
+                    // from the column count and the window's aspect.
+                    // NDC spans -1..1 over the whole window, so a cell that
+                    // is square in pixels is taller than it is wide in NDC by
+                    // the aspect. Named panelWidth rather than width because
+                    // width here is the swapchain's, and shadowing it makes
+                    // the panel stretch with the window instead of the glyphs.
+                    const float windowAspect = static_cast<float>(width) / static_cast<float>(height);
+                    const float panelHeight = 0.030f * static_cast<float>(mh::kChatLines);
+                    const float cellHeight = panelHeight / static_cast<float>(mh::kChatLines);
+                    const float panelWidth = static_cast<float>(mh::kChatColumns) * cellHeight * kGlyphAspect /
+                                             std::max(windowAspect, 0.0001f);
+                    chat.placement[0] = -0.98f;
+                    chat.placement[1] = -0.97f;
+                    chat.placement[2] = std::min(panelWidth, 1.90f);
+                    chat.placement[3] = panelHeight;
+                    chat.counts[0] = static_cast<float>(lines.size());
+                    chat.counts[1] = 0.72f;
+
+                    for (size_t row = 0; row < lines.size() && row < static_cast<size_t>(mh::kChatLines); ++row)
+                    {
+                        const std::string& line = lines[row];
+                        for (size_t column = 0; column < static_cast<size_t>(mh::kChatColumns); ++column)
+                        {
+                            const int glyph = column < line.size() ? glyphIndex(line[column]) : 0;
+                            chat.glyphs[row * mh::kChatColumns + column][0] = static_cast<float>(glyph);
+                        }
+                    }
+                    queue.WriteBuffer(chatUniformBuffer, 0, &chat, sizeof(chat));
+
+                    pass.SetPipeline(chatPipeline);
+                    pass.SetBindGroup(0, chatBindGroup);
+                    pass.Draw(3);
+                }
             }
 
             if (waterIndexCount && waterPipeline)

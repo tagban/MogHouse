@@ -571,6 +571,10 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                                 if (chat is not null)
                                 {
                                     Console.WriteLine($"    CHAT [{chat.Kind}] <{chat.Sender}> {chat.Text}");
+                                    // And onto the panel in the window, which
+                                    // is the point: seeing that something
+                                    // arrived without watching a console.
+                                    liveRadar?.Say(chat.Sender, chat.Text);
                                 }
 
                                 if (trace)
@@ -885,6 +889,24 @@ sealed class LiveRadar : IDisposable
         double turns = (Math.PI - heading) / (Math.PI * 2);
         turns -= Math.Floor(turns);
         return (x, -y, -z, (sbyte)(byte)Math.Round(turns * 256));
+    }
+
+    /// <summary>
+    /// Shows one chat line in the renderer's panel.
+    /// </summary>
+    /// <remarks>
+    /// The panel's font has capitals, digits and a little punctuation and
+    /// nothing else, so this does not try to preserve the text exactly - it is
+    /// a monitor for whether data is flowing, not a chat client.
+    /// </remarks>
+    public void Say(string? sender, string? text)
+    {
+        if (_closed)
+        {
+            return;
+        }
+        string line = string.IsNullOrEmpty(sender) ? (text ?? "") : $"{sender}: {text}";
+        _viewer.PushChat(line);
     }
 
     /// <summary>Pushes what the tracker currently believes is nearby.</summary>

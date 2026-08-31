@@ -187,6 +187,18 @@ public sealed partial class NativeViewer : IDisposable
     }
 
     /// <summary>
+    /// Shows one line in the renderer's chat panel.
+    /// </summary>
+    public void PushChat(string line)
+    {
+        if (_disposed || string.IsNullOrEmpty(line))
+        {
+            return;
+        }
+        mh_viewer_push_chat(_handle, line);
+    }
+
+    /// <summary>
     /// Where the character has walked to, or false before the first frame.
     /// Y is up; FFXI's own vertical is the negation.
     /// </summary>
@@ -249,6 +261,9 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static partial void mh_viewer_set_entities(IntPtr viewer, ReadOnlySpan<NativeRadarEntity> entities, int count);
+
+    [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial void mh_viewer_push_chat(IntPtr viewer, string line);
 
     [LibraryImport(LibraryName)]
     private static partial int mh_viewer_get_character(IntPtr viewer, out float x, out float y, out float z,

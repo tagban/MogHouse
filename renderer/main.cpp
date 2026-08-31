@@ -51,6 +51,23 @@ ViewerOptions optionsFromEnvironment(int argc, char** argv)
     options.cameraLook = fromEnvironment("MOGHOUSE_CAMERA_LOOK");
     options.animation = fromEnvironment("MOGHOUSE_ANIMATION");
     options.zoneName = fromEnvironment("MOGHOUSE_ZONE_NAME");
+
+    // Semicolon separated, oldest first - enough to frame the chat panel
+    // without standing up a server session.
+    if (const std::optional<std::string> chat = fromEnvironment("MOGHOUSE_CHAT"))
+    {
+        size_t at = 0;
+        while (at <= chat->size())
+        {
+            const size_t end = chat->find(';', at);
+            options.testChat.push_back(chat->substr(at, end == std::string::npos ? std::string::npos : end - at));
+            if (end == std::string::npos)
+            {
+                break;
+            }
+            at = end + 1;
+        }
+    }
     options.screenshotPath = fromEnvironment("MOGHOUSE_SCREENSHOT");
     options.mapPath = fromEnvironment("MOGHOUSE_MAP");
 

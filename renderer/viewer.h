@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <deque>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -93,6 +94,10 @@ struct ViewerOptions
     /// something on it, and this is how it gets checked without a server.
     std::vector<RadarEntity> testEntities;
 
+    /// Chat lines for a run with no client attached, so the panel can be
+    /// framed and checked without a server session.
+    std::vector<std::string> testChat;
+
     /// How many frames to let pass before taking a screenshot. The default
     /// is just enough to let the first frames settle; a caller feeding the
     /// viewer from outside wants longer, because a shot taken before anything
@@ -133,6 +138,14 @@ public:
     void stop();
     bool stopping() const;
 
+    /// Adds a line to the chat panel, dropping the oldest.
+    ///
+    /// The renderer never asks what a line means - colour, sender and channel
+    /// are the client's business. This is a window onto whether anything is
+    /// arriving at all.
+    void pushChat(const std::string& line);
+    std::vector<std::string> chat() const;
+
     /// Where the character has walked to, posted every frame.
     ///
     /// The client needs this because it, not the renderer, talks to the
@@ -150,6 +163,7 @@ private:
     std::atomic<bool> stop_{false};
     float character_[4]{};
     bool haveCharacter_{false};
+    std::deque<std::string> chat_;
 };
 
 /// Reads the options the standalone viewer has always taken: the zone from

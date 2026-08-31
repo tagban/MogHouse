@@ -92,6 +92,11 @@ MH_API int32_t mh_viewer_run(MhViewerHandle viewer);
 /// mh_viewer_run is going, which is the point of the whole file.
 MH_API void mh_viewer_set_entities(MhViewerHandle viewer, const MhRadarEntity* entities, int32_t count);
 
+/// Adds one line to the chat panel. UTF-8 in, though the panel's font only
+/// covers letters, digits and a little punctuation - anything else becomes a
+/// space rather than a wrong glyph.
+MH_API void mh_viewer_push_chat(MhViewerHandle viewer, const char* line);
+
 /// Where the character has walked to. Returns 0 before the first frame.
 ///
 /// The client owns the connection, so movement only reaches the server if it
