@@ -1109,7 +1109,12 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
 
     Console.WriteLine($"Playing as {selected.Name} in zone {currentZone}. Close the window to stop.");
 
-    while (radar is not null && session.IsConnected)
+    // /logout and /shutdown both end this loop; the server needs a few seconds
+    // to act on either, and closing the socket first is what leaves a session
+    // to be reaped on a timeout.
+    bool leaving = false;
+
+    while (radar is not null && session.IsConnected && !leaving)
     {
         // Where the renderer walked to, which is what the zone-line check runs
         // against.
@@ -1120,7 +1125,30 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
 
         while (radar?.TakeChat() is { Length: > 0 } typed)
         {
-            await session.SayAsync(typed);
+            // The client's own commands never reach the server as chat.
+            FfxiClientCommand command = FfxiClientCommands.Parse(typed);
+            switch (command.Kind)
+            {
+                case FfxiClientCommandKind.Logout:
+                    radar?.Say("", "Logging out...");
+                    await session.LogoutAsync(FfxiLogoutKind.Logout);
+                    leaving = true;
+                    break;
+
+                case FfxiClientCommandKind.Shutdown:
+                    radar?.Say("", "Shutting down...");
+                    await session.LogoutAsync(FfxiLogoutKind.Shutdown);
+                    leaving = true;
+                    break;
+
+                case FfxiClientCommandKind.Unsupported:
+                    radar?.Say("", $"/{command.Name} is not something this client does yet.");
+                    break;
+
+                default:
+                    await session.SayAsync(typed);
+                    break;
+            }
         }
 
         radar?.Publish(tracker);
@@ -1134,7 +1162,16 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
     }
 
     Console.WriteLine("Leaving.");
-    await session.LogoutAsync();
+    if (leaving)
+    {
+        // Already asked; give the server its Leavegame window rather than
+        // asking twice and closing underneath it.
+        await Task.Delay(TimeSpan.FromSeconds(6));   // the server's Leavegame effect runs five
+    }
+    else
+    {
+        await session.LogoutAsync();
+    }
     radar?.Dispose();
     return 0;
 }

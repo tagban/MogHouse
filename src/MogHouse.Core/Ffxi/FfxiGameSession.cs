@@ -794,13 +794,21 @@ public sealed class FfxiGameSession : IDisposable
     }
 
     /// <summary>Asks the server to log out, then stops the heartbeat.</summary>
-    public async Task LogoutAsync()
+    /// <summary>
+    /// Leaves the world. Logout goes back to the character list; Shutdown ends
+    /// the session outright, which is what /shutdown does in the real client.
+    ///
+    /// Either way the server applies a Leavegame effect for a few seconds and
+    /// acts when it expires - neither is instant, and a client that closes its
+    /// socket straight afterwards is back to being reaped on a timeout.
+    /// </summary>
+    public async Task LogoutAsync(FfxiLogoutKind kind = FfxiLogoutKind.Logout)
     {
         if (_zone is not null && _zoneEndpoint is not null)
         {
             try
             {
-                await _zone.SendLogoutAsync(_zoneEndpoint);
+                await _zone.SendLogoutAsync(_zoneEndpoint, kind);
                 Status?.Invoke("Logout requested.");
             }
             catch (Exception ex)

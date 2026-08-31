@@ -417,8 +417,10 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
     /// crafting or otherwise action-blocked - so this can fail, and the caller
     /// should not assume the session has ended.
     /// </summary>
-    public async Task SendLogoutAsync(IPEndPoint zoneServer, CancellationToken ct = default) =>
-        await SendEncryptedAsync(zoneServer, FfxiLogoutPacket.Build((ushort)(_ownCounter + 1)), ct);
+    public async Task SendLogoutAsync(IPEndPoint zoneServer, FfxiLogoutKind kind = FfxiLogoutKind.Logout,
+                                      CancellationToken ct = default) =>
+        await SendEncryptedAsync(
+            zoneServer, FfxiLogoutPacket.Build((ushort)(_ownCounter + 1), FfxiLogoutMode.LogoutOn, kind), ct);
 
     /// <summary>
     /// Sends GP_CLI_COMMAND_GAMEOK - the "finished loading, send me everything"
