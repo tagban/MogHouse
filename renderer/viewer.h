@@ -213,6 +213,16 @@ public:
     void submitChat(const std::string& line);
     std::optional<std::string> takeChat();
 
+    /// Put the character somewhere, on the server's say-so.
+    ///
+    /// Movement is otherwise the renderer's own: it walks the character and
+    /// tells the client where it went. But the server moves people too - a GM
+    /// command, a zone line, a failed zone check putting you back where you
+    /// started - and a client that only ever reports its own position has no
+    /// way to accept that. Taken once, like the other crossings here.
+    void placeCharacter(float x, float y, float z, float heading);
+    bool takePlacement(float& x, float& y, float& z, float& heading);
+
 private:
     mutable std::mutex mutex_;
     std::vector<RadarEntity> entities_;
@@ -221,6 +231,8 @@ private:
     bool haveCharacter_{false};
     std::atomic<bool> jump_{false};
     std::deque<std::string> outgoing_;
+    float placement_[4]{};
+    bool havePlacement_{false};
     std::deque<std::string> chat_;
 };
 

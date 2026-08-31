@@ -776,6 +776,20 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                                     Console.WriteLine($"    MUSIC {music.Slot} -> track {music.Track} ({music.FileName})");
                                 }
 
+                                // The server moving us: a GM command, a zone
+                                // line, a failed check putting us back. Without
+                                // this the renderer keeps reporting where it
+                                // thinks it is and undoes the move next frame.
+                                FfxiServerPosition? placed =
+                                    FfxiServerPosition.TryParse(reply.Plaintext.AsSpan(offset, size));
+                                if (placed is not null && placed.UniqueNo == selfId)
+                                {
+                                    Console.WriteLine(
+                                        $"    PLACED by server at {placed.X:F1} {placed.Vertical:F1} {placed.Depth:F1} " +
+                                        $"dir={placed.Direction} mode={placed.Mode}");
+                                    liveRadar?.PlaceCharacter(placed.X, placed.Vertical, placed.Depth, placed.Direction);
+                                }
+
                                 FfxiChatMessage? chat = FfxiChatMessage.TryParse(reply.Plaintext.AsSpan(offset, size));
                                 if (chat is not null)
                                 {
@@ -1155,6 +1169,23 @@ sealed class LiveRadar : IDisposable
 
     /// <summary>The next line the player typed, or null if they have not.</summary>
     public string? TakeChat() => _closed ? null : _viewer.TakeChat();
+
+    /// <summary>
+    /// Puts the character where the server says it is, converting out of the
+    /// protocol's frame the same way <see cref="Position"/> converts into it.
+    /// </summary>
+    public void PlaceCharacter(float x, float vertical, float depth, sbyte direction)
+    {
+        if (_closed)
+        {
+            return;
+        }
+
+        // The half turn about X, and the heading convention the rest of this
+        // agrees on: rotation zero faces +x, and the angle runs backwards.
+        float heading = (float)(Math.PI / 2 - (direction & 0xFF) * (Math.PI * 2) / 256);
+        _viewer.PlaceCharacter(x, -vertical, -depth, heading);
+    }
 
     /// <summary>
     /// Where the renderer has walked the character, in the protocol's own

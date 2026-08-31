@@ -145,6 +145,10 @@ MH_API int32_t mh_viewer_take_jump(MhViewerHandle viewer);
 /// is nothing waiting, so a caller polls this the way it polls the jump.
 MH_API int32_t mh_viewer_take_chat(MhViewerHandle viewer, char* buffer, int32_t capacity);
 
+/// Puts the character somewhere, because the server said so. Y is up here, as
+/// everywhere past the DAT readers; the caller converts.
+MH_API void mh_viewer_place_character(MhViewerHandle viewer, float x, float y, float z, float heading);
+
 /// Asks a running viewer to close. mh_viewer_run returns shortly after.
 MH_API void mh_viewer_stop(MhViewerHandle viewer);
 

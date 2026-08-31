@@ -322,6 +322,18 @@ public sealed partial class NativeViewer : IDisposable
         return Marshal.PtrToStringUTF8((IntPtr)buffer);
     }
 
+    /// <summary>
+    /// Puts the character somewhere, because the server said so. Y is up here;
+    /// the caller converts from the protocol's frame.
+    /// </summary>
+    public void PlaceCharacter(float x, float y, float z, float heading)
+    {
+        if (!_disposed && _handle != IntPtr.Zero)
+        {
+            mh_viewer_place_character(_handle, x, y, z, heading);
+        }
+    }
+
     /// <summary>Asks the viewer to close. Run returns shortly afterwards.</summary>
     public void Stop()
     {
@@ -386,6 +398,9 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static unsafe partial int mh_viewer_take_chat(IntPtr viewer, byte* buffer, int capacity);
+
+    [LibraryImport(LibraryName)]
+    private static partial void mh_viewer_place_character(IntPtr viewer, float x, float y, float z, float heading);
 
     [LibraryImport(LibraryName)]
     private static partial void mh_viewer_stop(IntPtr viewer);

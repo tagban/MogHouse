@@ -518,6 +518,32 @@ std::optional<std::string> mh::ViewerLink::takeChat()
     return line;
 }
 
+void mh::ViewerLink::placeCharacter(float x, float y, float z, float heading)
+{
+    std::lock_guard<std::mutex> lock{mutex_};
+    placement_[0] = x;
+    placement_[1] = y;
+    placement_[2] = z;
+    placement_[3] = heading;
+    havePlacement_ = true;
+}
+
+bool mh::ViewerLink::takePlacement(float& x, float& y, float& z, float& heading)
+{
+    std::lock_guard<std::mutex> lock{mutex_};
+    if (!havePlacement_)
+    {
+        return false;
+    }
+
+    x = placement_[0];
+    y = placement_[1];
+    z = placement_[2];
+    heading = placement_[3];
+    havePlacement_ = false;
+    return true;
+}
+
 void mh::ViewerLink::requestJump() { jump_ = true; }
 
 /// Exchange rather than a read and a clear, so a jump is delivered exactly
@@ -2721,6 +2747,29 @@ constexpr float kGravity = 26.0f;
         if (link)
         {
             radarEntities = link->entities();
+
+            // The server moving us, before we report where we think we are -
+            // otherwise the position we just posted would win and the move
+            // would be undone on the same frame.
+            float placedX = 0.0f;
+            float placedY = 0.0f;
+            float placedZ = 0.0f;
+            float placedHeading = 0.0f;
+            if (link->takePlacement(placedX, placedY, placedZ, placedHeading))
+            {
+                characterAt = {placedX, placedY, placedZ};
+                characterFacing = placedHeading;
+
+                // The trail is for backing out of somewhere collision has
+                // trapped us. Keeping it across a teleport would walk us back
+                // to a place that may be in another zone entirely.
+                breadcrumbs.clear();
+                breadcrumbTimer = 0.0f;
+
+                std::printf("placed at %.1f %.1f %.1f facing %.0f degrees\n", characterAt.x, characterAt.y,
+                            characterAt.z, characterFacing * 180.0f / 3.14159265f);
+            }
+
             link->setCharacter(characterAt.x, characterAt.y, characterAt.z, characterFacing);
             if (link->stopping())
             {

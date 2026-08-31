@@ -150,6 +150,14 @@ int32_t mh_viewer_take_jump(MhViewerHandle viewer)
     return viewer && viewer->link.takeJump() ? 1 : 0;
 }
 
+void mh_viewer_place_character(MhViewerHandle viewer, float x, float y, float z, float heading)
+{
+    if (viewer)
+    {
+        viewer->link.placeCharacter(x, y, z, heading);
+    }
+}
+
 int32_t mh_viewer_take_chat(MhViewerHandle viewer, char* buffer, int32_t capacity)
 {
     if (!viewer || !buffer || capacity <= 0)
