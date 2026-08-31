@@ -675,6 +675,24 @@ public sealed class FfxiGameSession : IDisposable
 
         foreach ((ushort id, int offset, int size) in FfxiZonePacket.EnumerateSubPackets(reply.Plaintext))
         {
+            // Whatever event the server has started, answered at once.
+            //
+            // A character the server thinks is in an event is not spawned for
+            // anyone else: present, addressable, receiving everyone's
+            // positions, and invisible to all of them. A brand new character
+            // zones in owing a whole opening cutscene, so this is the
+            // difference between a new character existing and not.
+            //
+            // Echoed back as it arrived - the ids belong to whatever the event
+            // is about, usually an NPC rather than us, and the server checks
+            // them.
+            FfxiEventStart? started = FfxiEventStart.TryParse(reply.Plaintext.AsSpan(offset, size));
+            if (started is not null && _zoneEndpoint is not null && _zone is not null)
+            {
+                _zone.SendEventEndAsync(_zoneEndpoint, started.UniqueNo, started.ActIndex, started.ZoneNo,
+                                        started.EventId).GetAwaiter().GetResult();
+            }
+
             // The login message, a fragment at a time. Each says where it sits
             // in the whole and the next has to be asked for - the server
             // answers exactly what it was asked for and nothing more.
