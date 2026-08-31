@@ -59,6 +59,24 @@ public sealed class FfxiAuthClient : IDisposable
     public Task<FfxiLoginResponse> CreateAccountAsync(string username, string password, CancellationToken ct = default) =>
         SendAsync(BuildRequest(FfxiLoginCommand.Create, username, password), ct);
 
+    /// <summary>
+    /// LOGIN_CHANGE_PASSWORD (auth_session.cpp): the current credentials plus
+    /// the replacement in `new_password`. The server validates the old password
+    /// and the account's TOTP if it has one, so this takes both.
+    ///
+    /// Every failure answers LOGIN_ERROR_CHANGE_PASSWORD - a wrong password, a
+    /// wrong code, a banned account and an empty new password are one result
+    /// from out here, so the message to the user cannot be more specific than
+    /// the server was.
+    /// </summary>
+    public Task<FfxiLoginResponse> ChangePasswordAsync(string username, string password, string newPassword,
+                                                       string? otp = null, CancellationToken ct = default)
+    {
+        JsonObject request = BuildRequest(FfxiLoginCommand.ChangePassword, username, password, otp);
+        request["new_password"] = newPassword;
+        return SendAsync(request, ct);
+    }
+
     private static JsonObject BuildRequest(FfxiLoginCommand command, string username, string password, string? otp = null, string? trustToken = null, bool trustThisComputer = false) =>
         new()
         {
