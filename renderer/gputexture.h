@@ -46,6 +46,29 @@ inline wgpu::Texture uploadTexture(const wgpu::Device& device, const ffxi::Textu
 
 /// A single white pixel, for geometry that has no texture - collision hulls,
 /// and any mesh whose texture is missing from the DAT.
+/// A single texel of a given colour, for meshes with no texture to bind.
+inline wgpu::Texture createSolidTexture(const wgpu::Device& device, uint8_t r, uint8_t g, uint8_t b, uint8_t a)
+{
+    wgpu::TextureDescriptor descriptor{};
+    descriptor.usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst;
+    descriptor.dimension = wgpu::TextureDimension::e2D;
+    descriptor.size = {1, 1, 1};
+    descriptor.format = wgpu::TextureFormat::RGBA8Unorm;
+    descriptor.mipLevelCount = 1;
+    descriptor.sampleCount = 1;
+
+    wgpu::Texture texture = device.CreateTexture(&descriptor);
+    const uint8_t texel[4] = {r, g, b, a};
+
+    wgpu::TexelCopyTextureInfo destination{};
+    destination.texture = texture;
+    wgpu::TexelCopyBufferLayout layout{};
+    layout.bytesPerRow = 4;
+    layout.rowsPerImage = 1;
+    device.GetQueue().WriteTexture(&destination, texel, sizeof(texel), &layout, &descriptor.size);
+    return texture;
+}
+
 inline wgpu::Texture createWhiteTexture(const wgpu::Device& device)
 {
     wgpu::TextureDescriptor descriptor{};

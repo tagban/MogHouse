@@ -671,9 +671,18 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     wgpu::Buffer uniformBuffer;
     wgpu::RenderPipeline pipeline;
     wgpu::RenderPipeline cutoutPipeline;
+    wgpu::RenderPipeline translucentPipeline;
     wgpu::BindGroupLayout zoneBindGroupLayout;
     wgpu::Sampler sampler;
     wgpu::Texture whiteTexture;
+    // Bound to water meshes, which name no texture at all in their mesh
+    // header - FFXI supplies theirs some other way, and until that is worked
+    // out the white fallback makes a canal look like a sheet of paper.
+    //
+    // A placeholder, and deliberately a recognisable one: this is a flat
+    // colour, not water, and it should look like a stand-in rather than like
+    // a rendering someone signed off.
+    wgpu::Texture waterFallbackTexture;
     std::vector<wgpu::Texture> batchTextures;
     std::vector<wgpu::BindGroup> batchBindGroups;
     uint32_t indexCount = 0;
@@ -764,6 +773,28 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         cutoutDescriptor.fragment = &cutoutFragment;
         cutoutPipeline = device.CreateRenderPipeline(&cutoutDescriptor);
 
+        // And once more for water: the same shader, blended, and not writing
+        // depth so a surface does not hide the one behind it. Bastok Markets
+        // has two water meshes stacked - a darker body with a lighter sheet
+        // over it - and with depth writes on, whichever drew first won.
+        wgpu::BlendState surfaceBlend{
+            .color = {.operation = wgpu::BlendOperation::Add,
+                      .srcFactor = wgpu::BlendFactor::SrcAlpha,
+                      .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
+            .alpha = {.operation = wgpu::BlendOperation::Add,
+                      .srcFactor = wgpu::BlendFactor::One,
+                      .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha}};
+        wgpu::ColorTargetState surfaceTarget{.format = surfaceFormat, .blend = &surfaceBlend};
+        wgpu::FragmentState surfaceFragment{
+            .module = module, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &surfaceTarget};
+        wgpu::DepthStencilState surfaceDepth{.format = kDepthFormat,
+                                             .depthWriteEnabled = wgpu::OptionalBool::False,
+                                             .depthCompare = wgpu::CompareFunction::Less};
+        wgpu::RenderPipelineDescriptor surfaceDescriptor = pipelineDescriptor;
+        surfaceDescriptor.fragment = &surfaceFragment;
+        surfaceDescriptor.depthStencil = &surfaceDepth;
+        translucentPipeline = device.CreateRenderPipeline(&surfaceDescriptor);
+
         // WebGPU has no bindless arrays, so each texture needs its own bind
         // group and its own draw. Fine at a zone's few dozen textures; this is
         // the thing that will need atlasing or caching at a larger scale.
@@ -775,7 +806,9 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         sampler = device.CreateSampler(&samplerDescriptor);
 
         whiteTexture = mh::createWhiteTexture(device);
+        waterFallbackTexture = mh::createSolidTexture(device, 60, 105, 125, 165);
         const wgpu::TextureView whiteView = whiteTexture.CreateView();
+        const wgpu::TextureView waterFallbackView = waterFallbackTexture.CreateView();
 
         if (!zone->waterIndices.empty())
         {
@@ -868,12 +901,23 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         std::unordered_map<std::string, wgpu::TextureView> uploadedViews;
         size_t uploaded = 0;
         size_t untextured = 0;
+        // Counted apart from untextured. A mesh naming a texture the DAT does
+        // not hold and a mesh naming none at all both land on the white
+        // fallback and look identical on screen, but only the first is a
+        // lookup failure - and only the first was being counted. Bastok
+        // Markets' water meshes are the second kind, so the line said "0 with
+        // no texture" while the water rendered as a sheet of pure white.
+        size_t unnamed = 0;
         for (const mh::InstancedDraw& batch : zone->draws)
         {
+            if (batch.texture.empty())
+            {
+                ++unnamed;
+            }
             // Cached by name: instancing produces one draw per mesh, and many
             // meshes share a texture. Uploading per draw meant 397 GPU textures
             // for 46 distinct images.
-            wgpu::TextureView view = whiteView;
+            wgpu::TextureView view = batch.water ? waterFallbackView : whiteView;
             if (!batch.texture.empty())
             {
                 auto cached = uploadedViews.find(batch.texture);
@@ -914,6 +958,10 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             wgpu::BindGroupDescriptor bindGroupDescriptor{
                 .layout = zoneBindGroupLayout, .entryCount = 3, .entries = entries};
             batchBindGroups.push_back(device.CreateBindGroup(&bindGroupDescriptor));
+        }
+        if (unnamed)
+        {
+            std::printf("  %zu draws name no texture at all - they render white\n", unnamed);
         }
         std::printf("%zu draws, %zu textures uploaded, %zu with no texture in this DAT\n", zone->draws.size(),
                     uploaded, untextured);
@@ -1855,12 +1903,16 @@ constexpr float kGravity = 26.0f;
                     const std::optional<float> here =
                         collision.groundAt(characterAt.x, characterAt.z, characterAt.y, kFallReach);
 
+                    // Water is not a barrier. It was one here for a while, on
+                    // the reasoning that FFXI has no swimming - but the game
+                    // does not stop you walking in, it stops you *getting*
+                    // there, and the floor of a canal you have fallen into is
+                    // as walkable as any other. Refusing the step modelled the
+                    // intent rather than the behaviour, and left a character
+                    // stuck at the edge of water it should have been able to
+                    // cross. Collision::waterDepthAt still reports the depth;
+                    // nothing acts on it.
                     const auto refused = [&](float x, float z) {
-                        const std::optional<float> depth = collision.waterDepthAt(x, z, characterAt.y);
-                        if (depth && *depth > kWadeDepth)
-                        {
-                            return true;
-                        }
                         const std::optional<float> there = collision.groundAt(x, z, characterAt.y, kFallReach);
                         return here && there && (*here - *there) > kMaxStepDown;
                     };
@@ -2084,17 +2136,28 @@ constexpr float kGravity = 26.0f;
             pass.SetVertexBuffer(0, vertexBuffer);
             pass.SetVertexBuffer(1, instanceBuffer);
             pass.SetIndexBuffer(indexBuffer, wgpu::IndexFormat::Uint32);
-            for (size_t i = 0; i < zone->draws.size() && i < batchBindGroups.size(); ++i)
+            // Two passes over the same list: everything solid, then the water
+            // over the top of it. Water blends and does not write depth, so it
+            // has to come after whatever is meant to show through it, and a
+            // list in model-name order does not give that for free.
+            for (int layer = 0; layer < 2; ++layer)
             {
-                const mh::InstancedDraw& draw = zone->draws[i];
-                // cutoutMode: 0 never cuts out, 1 always, otherwise the
-                // texture's own measurement decides.
-                const bool cutout = cutoutMode == 0   ? false
-                                    : cutoutMode == 1 ? true
-                                                      : draw.cutout;
-                pass.SetPipeline(cutout ? cutoutPipeline : pipeline);
-                pass.SetBindGroup(0, batchBindGroups[i]);
-                pass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
+                for (size_t i = 0; i < zone->draws.size() && i < batchBindGroups.size(); ++i)
+                {
+                    const mh::InstancedDraw& draw = zone->draws[i];
+                    if (draw.water != (layer == 1))
+                    {
+                        continue;
+                    }
+                    // cutoutMode: 0 never cuts out, 1 always, otherwise the
+                    // texture's own measurement decides.
+                    const bool cutout = cutoutMode == 0   ? false
+                                        : cutoutMode == 1 ? true
+                                                          : draw.cutout;
+                    pass.SetPipeline(draw.water ? translucentPipeline : (cutout ? cutoutPipeline : pipeline));
+                    pass.SetBindGroup(0, batchBindGroups[i]);
+                    pass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
+                }
             }
 
             if (!characterBindGroups.empty())

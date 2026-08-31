@@ -1,6 +1,7 @@
 #include "scene.h"
 
 #include <cstdlib>
+#include <string>
 
 #include <algorithm>
 #include <cmath>
@@ -80,6 +81,32 @@ Mat4 placementTransform(const ffxi::Placement& placement)
     return m;
 }
 
+/// Whether a model is one of the meshes FFXI uses for water surfaces.
+///
+/// Water is ordinary placed geometry with a recognisable name, not something
+/// derived from the MZB's per-cell height - the naming convention is the one
+/// vekien/xi-model-viewer matches on, with "suimen" being the Japanese for
+/// water surface.
+bool isWaterModel(const std::string& name)
+{
+    static const char* kExact[] = {"water", "water2", "lowsea", "2lowsea", "lowcol", "suimen", "tamadai"};
+    std::string lower;
+    lower.reserve(name.size());
+    for (char c : name)
+    {
+        lower.push_back(c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c);
+    }
+    for (const char* one : kExact)
+    {
+        if (lower == one)
+        {
+            return true;
+        }
+    }
+    return lower.rfind("sea", 0) == 0 || lower.rfind("water", 0) == 0 || lower.rfind("ocean", 0) == 0 ||
+           lower.find("suimen") != std::string::npos;
+}
+
 Vec3 transformPoint(const float* m, const Vec3& p)
 {
     return {m[0] * p.x + m[4] * p.y + m[8] * p.z + m[12], m[1] * p.x + m[5] * p.y + m[9] * p.z + m[13],
@@ -117,9 +144,18 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
 
     // Every placement of each model, so a model's geometry can be uploaded once
     // and drawn against the whole list.
+    // MOGHOUSE_SKIP_WATER_MODELS leaves out the meshes FFXI names as water -
+    // "water", "water2", "suimen", "lowsea" and friends - which is how you
+    // find out whether a suspicious flat expanse is one of them or a hole.
+    const bool skipWaterModels = std::getenv("MOGHOUSE_SKIP_WATER_MODELS") != nullptr;
+
     std::map<std::string, std::vector<Mat4>> byModel;
     for (const ffxi::Placement& placement : zone.placements)
     {
+        if (skipWaterModels && isWaterModel(placement.model))
+        {
+            continue;
+        }
         if (models.find(placement.model) == models.end())
         {
             ++placementsMissing;
@@ -136,6 +172,7 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
     for (const auto& [name, transforms] : byModel)
     {
         const ffxi::Model& model = models.find(name)->second;
+        const bool water = isWaterModel(name);
 
         const uint32_t instanceOffset = static_cast<uint32_t>(scene.instances.size() / 16);
         for (const Mat4& transform : transforms)
@@ -180,7 +217,7 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
                 }
             }
 
-            scene.draws.push_back(InstancedDraw{mesh.texture, cutout, indexStart,
+            scene.draws.push_back(InstancedDraw{mesh.texture, cutout, water, indexStart,
                                                 static_cast<uint32_t>(scene.indices.size()) - indexStart,
                                                 instanceOffset, static_cast<uint32_t>(transforms.size())});
 
@@ -210,7 +247,18 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
     // TODO saying its own water handling is wrong, so this is not settled
     // enough to be sure a strange looking zone is the geometry's fault. Being
     // able to take the water away answers that in one look.
-    const bool skipWater = std::getenv("MOGHOUSE_NO_WATER") != nullptr;
+    // MOGHOUSE_MZB_WATER puts back the quads this used to synthesise from the
+    // collision grid's per-cell water height. They are off by default because
+    // the zone already contains its water as named geometry, and the derived
+    // version disagreed with it: sampled across Bastok Markets the heights
+    // tracked each cell's own floor at a constant 0.70 above it, which is not
+    // what water does - it does not climb stairs.
+    //
+    // The field is still read, and Collision::waterDepthAt still uses it to
+    // decide what may be waded into. Knowing how deep the water is and drawing
+    // its surface are different questions, and lotus-engine's own TODO says as
+    // much about the mesh it builds here.
+    const bool skipWater = std::getenv("MOGHOUSE_MZB_WATER") == nullptr;
     for (const ffxi::CollisionInstance& instance : zone.instances)
     {
         if (skipWater || instance.waterHeight == 0.0f || instance.mesh >= zone.collision.size())

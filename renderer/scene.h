@@ -25,6 +25,14 @@ struct InstancedDraw
 {
     std::string texture;
     bool cutout{};
+
+    /// One of FFXI's water surfaces, drawn translucent and last.
+    ///
+    /// Water is ordinary placed geometry with a recognisable model name, not
+    /// something derived from the MZB's per-cell height field. Drawn opaque it
+    /// comes out a flat white sheet, because the texture carries the water in
+    /// its alpha.
+    bool water{};
     uint32_t indexOffset{};
     uint32_t indexCount{};
     uint32_t instanceOffset{};

@@ -383,7 +383,11 @@ int main(int argc, char** argv)
                                 lo[0], hi[0], lo[1], hi[1], lo[2], hi[2]);
                 }
                 std::printf("  %zu vertices, %zu triangles\n", vertices, triangles);
-                for (size_t i = 0; i < zone.placements.size() && i < 5; ++i)
+                // Five is enough to see the shape of the table; MOGHOUSE_LIST_PLACEMENTS
+                // prints all of them, which is how you find out whether a zone
+                // names its water meshes.
+                const size_t listed = std::getenv("MOGHOUSE_LIST_PLACEMENTS") ? zone.placements.size() : 5;
+                for (size_t i = 0; i < zone.placements.size() && i < listed; ++i)
                 {
                     const ffxi::Placement& p = zone.placements[i];
                     std::printf("  %-16s %9.2f %8.2f %8.2f\n", p.model.c_str(), p.translate[0], p.translate[1], p.translate[2]);
