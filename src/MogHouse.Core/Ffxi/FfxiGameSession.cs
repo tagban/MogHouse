@@ -381,6 +381,11 @@ public sealed class FfxiGameSession : IDisposable
             ZoneState.EventPara != 0 || ZoneState.EventMode != 0)
         {
             Status?.Invoke($"Arrived inside event {ZoneState.EventPara} - ending it.");
+            ChatReceived?.Invoke(new FfxiChatLine(
+                DateTimeOffset.Now,
+                FfxiChatMessageType.System1,
+                "",
+                $"[cutscene {ZoneState.EventPara} was already playing and has been skipped]"));
             _endedEvents.Add((ZoneState.UniqueNo, ZoneState.EventPara));
             await _zone.SendEventEndAsync(_zoneEndpoint, ZoneState.UniqueNo, ZoneState.ActIndex,
                                           ZoneState.EventNum, ZoneState.EventPara, ct);
@@ -743,6 +748,19 @@ public sealed class FfxiGameSession : IDisposable
                 {
                     _zone.SendEventEndAsync(_zoneEndpoint, started.UniqueNo, started.ActIndex, started.ZoneNo,
                                             started.EventId).GetAwaiter().GetResult();
+
+                    // Say that it happened.
+                    //
+                    // The script that would play this cutscene is in the
+                    // client's own DATs and we cannot read it yet, so all we
+                    // can do is end it - but ending it without a word is
+                    // indistinguishable from nothing having happened, and the
+                    // player is left wondering why an NPC ignored them.
+                    ChatReceived?.Invoke(new FfxiChatLine(
+                        DateTimeOffset.Now,
+                        FfxiChatMessageType.System1,
+                        Speaker(started.UniqueNo),
+                        $"[cutscene {started.EventId} skipped - this client cannot play them yet]"));
                 }
             }
 
