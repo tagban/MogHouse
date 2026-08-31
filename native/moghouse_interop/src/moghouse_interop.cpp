@@ -127,6 +127,25 @@ void mh_viewer_set_entities(MhViewerHandle viewer, const MhRadarEntity* entities
     viewer->link.setEntities(std::move(copied));
 }
 
+void mh_viewer_set_zone_lines(MhViewerHandle viewer, const MhZoneLine* lines, int32_t count)
+{
+    if (!viewer)
+    {
+        return;
+    }
+
+    std::vector<mh::ZoneLineMarker> copied;
+    if (lines && count > 0)
+    {
+        copied.reserve(static_cast<size_t>(count));
+        for (int32_t i = 0; i < count; ++i)
+        {
+            copied.push_back(mh::ZoneLineMarker{lines[i].x, lines[i].y, lines[i].z, lines[i].radius});
+        }
+    }
+    viewer->link.setZoneLines(std::move(copied));
+}
+
 void mh_viewer_push_chat(MhViewerHandle viewer, const char* line)
 {
     if (!viewer || !line)

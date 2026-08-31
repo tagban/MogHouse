@@ -164,6 +164,30 @@ public sealed class LiveRadar : IDisposable
     /// nothing else, so this does not try to preserve the text exactly - it is
     /// a monitor for whether data is flowing, not a chat client.
     /// </remarks>
+    /// <summary>
+    /// Where this zone's exits are, so the renderer can draw them.
+    ///
+    /// The same (x, -y, -z) the rest of the world uses: the zone line's
+    /// vertical is where the player's feet will be, and the marker rises
+    /// from there.
+    /// </summary>
+    public void ShowZoneLines(IReadOnlyList<FfxiZoneLine> lines)
+    {
+        var markers = new NativeZoneLine[lines.Count];
+        for (int i = 0; i < lines.Count; i++)
+        {
+            markers[i] = new NativeZoneLine
+            {
+                X = lines[i].FromX,
+                Y = -lines[i].FromVertical,
+                Z = -lines[i].FromDepth,
+                Radius = lines[i].Radius,
+            };
+        }
+
+        _viewer.SetZoneLines(markers);
+    }
+
     public void Say(string? sender, string? text)
     {
         if (_closed)

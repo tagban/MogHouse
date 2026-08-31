@@ -123,6 +123,22 @@ MH_API int32_t mh_viewer_run(MhViewerHandle viewer);
 /// mh_viewer_run is going, which is the point of the whole file.
 MH_API void mh_viewer_set_entities(MhViewerHandle viewer, const MhRadarEntity* entities, int32_t count);
 
+/// One of this zone's exits, as somewhere to draw a marker.
+///
+/// Y is up, matching everything else that crosses this boundary, and the
+/// radius is how close counts as touching the line.
+typedef struct MhZoneLine
+{
+    float x;
+    float y;
+    float z;
+    float radius;
+} MhZoneLine;
+
+/// Replaces the zone lines drawn in the world. Wholesale: a line belongs to
+/// the zone it came from and means nothing on the other side.
+MH_API void mh_viewer_set_zone_lines(MhViewerHandle viewer, const MhZoneLine* lines, int32_t count);
+
 /// Adds one line to the chat panel. UTF-8 in, though the panel's font only
 /// covers letters, digits and a little punctuation - anything else becomes a
 /// space rather than a wrong glyph.

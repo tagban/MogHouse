@@ -1124,6 +1124,7 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
     }
 
     session.ChatReceived += line => radar?.Say(line.Sender, line.Text);
+    radar.ShowZoneLines(session.ZoneLines);
 
     // Zoning. The renderer holds one zone's geometry, collision and name table,
     // and none of it survives a move - so it is opened again on the other side.
@@ -1150,6 +1151,7 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
         if (radar is not null)
         {
             radar.Say("", $"Now in zone {zone}.");
+            radar.ShowZoneLines(session.ZoneLines);
         }
     };
 

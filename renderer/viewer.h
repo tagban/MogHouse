@@ -24,6 +24,24 @@ namespace mh
 /// One tracked thing. The radar only needs x and z - it is a plan view, and a
 /// dot above you is still a dot - but the same list now also puts a body in
 /// the world, which needs somewhere to stand and a way to face.
+/// A zone line, as somewhere to draw rather than somewhere to stand.
+///
+/// The client knows where these are - it has to, since only the client can ask
+/// to change zone - but the player had no way to see one. Walking to the edge
+/// of a zone and guessing where the boundary is only works if you already know
+/// the zone, so this is the client telling the player what it can already see.
+///
+/// Y is up here as everywhere past the DAT readers, and the radius is the
+/// larger half-extent of the box the server keeps: being generous costs an
+/// early zone rather than a missed one.
+struct ZoneLineMarker
+{
+    float x{};
+    float y{};
+    float z{};
+    float radius{};
+};
+
 struct RadarEntity
 {
     float x{};
@@ -173,6 +191,13 @@ public:
     /// A copy, so the render loop is never holding the lock while it draws.
     std::vector<RadarEntity> entities() const;
 
+    /// Where this zone's exits are, so they can be drawn.
+    ///
+    /// Replaced wholesale on every zone change: a line belongs to the zone it
+    /// was read from and means nothing on the other side.
+    void setZoneLines(std::vector<ZoneLineMarker> lines);
+    std::vector<ZoneLineMarker> zoneLines() const;
+
     /// Asks the viewer to close its window and return.
     void stop();
     bool stopping() const;
@@ -226,6 +251,7 @@ public:
 private:
     mutable std::mutex mutex_;
     std::vector<RadarEntity> entities_;
+    std::vector<ZoneLineMarker> zoneLines_;
     std::atomic<bool> stop_{false};
     float character_[4]{};
     bool haveCharacter_{false};

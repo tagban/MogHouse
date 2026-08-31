@@ -195,6 +195,19 @@ public sealed class FfxiGameSession : IDisposable
     /// </summary>
     public void PlaceAt(float x, float vertical, float depth, sbyte facing)
     {
+        // Not while we are between zones.
+        //
+        // The renderer showing the zone we are leaving keeps reporting a
+        // position in it, and the server takes the last one it is told.
+        // Walking into the line to West Sarutabaruta put the character at
+        // the line's own coordinates in West Sarutabaruta - which is the
+        // middle of the zone - rather than where the server had already
+        // put them, because we overwrote its placement with ours.
+        if (_placementSuspended)
+        {
+            return;
+        }
+
         bool shifted = x != PosX || vertical != PosVertical || depth != PosDepth;
 
         PosX = x;
@@ -531,6 +544,13 @@ public sealed class FfxiGameSession : IDisposable
     private IPEndPoint? _pendingZone;
 
     /// <summary>
+    /// Set from the moment a zone change is asked for until the renderer has
+    /// been reopened on the other side. Anything reporting a position during
+    /// that window is describing the zone we are leaving.
+    /// </summary>
+    private bool _placementSuspended;
+
+    /// <summary>
     /// Completes a zone change: rotate the key the way the server just did,
     /// restart the counters, and introduce ourselves to the new zone server
     /// with a fresh 0x00A and GAMEOK.
@@ -577,7 +597,11 @@ public sealed class FfxiGameSession : IDisposable
             TryLoadZoneLines();
             // Event ids only mean anything within a zone.
             _endedEvents.Clear();
+            // ZoneChanged reopens the renderer on the far side, so by the
+            // time it returns anything reporting a position is describing
+            // the zone we are now actually in.
             ZoneChanged?.Invoke(ZoneState.ZoneNo);
+            _placementSuspended = false;
             Status?.Invoke($"Now in zone {ZoneState.ZoneNo}.");
         }
     }
@@ -682,6 +706,7 @@ public sealed class FfxiGameSession : IDisposable
             // second, and the server takes a moment to answer, so without a
             // guard a single step onto a line fires a dozen requests.
             _zoneLineRequested = line.Id;
+            _placementSuspended = true;
             await _zone.SendZoneLineAsync(_zoneEndpoint, line.Id, PosX, PosVertical, PosDepth, ZoneState.ActIndex);
             return;
         }

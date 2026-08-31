@@ -8,6 +8,20 @@ namespace MogHouse.Core.Interop;
 /// Blittable and laid out to match MhRadarEntity, so an array of these crosses
 /// the boundary as a pointer with no marshalling.
 /// </remarks>
+/// <summary>
+/// One zone line, as somewhere to draw rather than somewhere to stand.
+///
+/// Matches MhZoneLine. Y is up here, as everywhere across this boundary.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+public struct NativeZoneLine
+{
+    public float X;
+    public float Y;
+    public float Z;
+    public float Radius;
+}
+
 [StructLayout(LayoutKind.Sequential)]
 public struct NativeRadarEntity
 {
@@ -268,6 +282,16 @@ public sealed partial class NativeViewer : IDisposable
         mh_viewer_set_entities(_handle, entities, entities.Length);
     }
 
+    /// <summary>Replaces the zone lines drawn in the world.</summary>
+    public void SetZoneLines(ReadOnlySpan<NativeZoneLine> lines)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+        mh_viewer_set_zone_lines(_handle, lines, lines.Length);
+    }
+
     /// <summary>
     /// Shows one line in the renderer's chat panel.
     /// </summary>
@@ -385,6 +409,9 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static partial void mh_viewer_set_entities(IntPtr viewer, ReadOnlySpan<NativeRadarEntity> entities, int count);
+
+    [LibraryImport(LibraryName)]
+    private static partial void mh_viewer_set_zone_lines(IntPtr viewer, ReadOnlySpan<NativeZoneLine> lines, int count);
 
     [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
     private static partial void mh_viewer_push_chat(IntPtr viewer, string line);

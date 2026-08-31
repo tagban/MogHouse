@@ -29,6 +29,7 @@
 #include "chat_shader.h"
 #include "hud_shader.h"
 #include "nameplate_shader.h"
+#include "zoneline_shader.h"
 #include "textfont.h"
 #include "radar_shader.h"
 #include "scene.h"
@@ -185,6 +186,14 @@ const char* backendName(wgpu::BackendType backend)
 /// A character kept in a form that can still be posed. The geometry is what
 /// gets drawn; the skeleton, meshes and animations are what it is rebuilt from
 /// every frame.
+/// Matches ZoneLineUniforms in zoneline_shader.h.
+struct ZoneLineUniforms
+{
+    float viewProjection[16]{};
+    float counts[4]{};
+    float lines[mh::kZoneLineMarkers][4]{};
+};
+
 struct LoadedCharacter
 {
     ffxi::Skeleton skeleton;
@@ -451,6 +460,18 @@ void mh::ViewerLink::setEntities(std::vector<RadarEntity> entities)
 {
     const std::lock_guard<std::mutex> guard{mutex_};
     entities_ = std::move(entities);
+}
+
+void mh::ViewerLink::setZoneLines(std::vector<ZoneLineMarker> lines)
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+    zoneLines_ = std::move(lines);
+}
+
+std::vector<mh::ZoneLineMarker> mh::ViewerLink::zoneLines() const
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+    return zoneLines_;
 }
 
 std::vector<mh::RadarEntity> mh::ViewerLink::entities() const
@@ -1450,6 +1471,67 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         wgpu::BindGroupDescriptor plateBindGroupDescriptor{
             .layout = plateBindGroupLayout, .entryCount = 3, .entries = plateEntries};
         plateBindGroup = device.CreateBindGroup(&plateBindGroupDescriptor);
+    }
+
+    wgpu::Buffer zoneLineUniformBuffer;
+    wgpu::RenderPipeline zoneLinePipeline;
+    wgpu::BindGroup zoneLineBindGroup;
+    {
+        wgpu::BufferDescriptor zoneLineBufferDescriptor{
+            .usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst, .size = sizeof(ZoneLineUniforms)};
+        zoneLineUniformBuffer = device.CreateBuffer(&zoneLineBufferDescriptor);
+
+        wgpu::ShaderSourceWGSL zoneLineWgsl;
+        zoneLineWgsl.code = mh::kZoneLineShader;
+        wgpu::ShaderModuleDescriptor zoneLineModuleDescriptor{.nextInChain = &zoneLineWgsl};
+        wgpu::ShaderModule zoneLineModule = device.CreateShaderModule(&zoneLineModuleDescriptor);
+
+        wgpu::BindGroupLayoutEntry zoneLineLayoutEntry{};
+        zoneLineLayoutEntry.binding = 0;
+        zoneLineLayoutEntry.visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+        zoneLineLayoutEntry.buffer.type = wgpu::BufferBindingType::Uniform;
+
+        wgpu::BindGroupLayoutDescriptor zoneLineLayoutDescriptor{.entryCount = 1, .entries = &zoneLineLayoutEntry};
+        wgpu::BindGroupLayout zoneLineBindGroupLayout = device.CreateBindGroupLayout(&zoneLineLayoutDescriptor);
+        wgpu::PipelineLayoutDescriptor zoneLinePipelineLayoutDescriptor{
+            .bindGroupLayoutCount = 1, .bindGroupLayouts = &zoneLineBindGroupLayout};
+        wgpu::PipelineLayout zoneLinePipelineLayout = device.CreatePipelineLayout(&zoneLinePipelineLayoutDescriptor);
+
+        // Added rather than blended over: a glow brightens what is behind it.
+        wgpu::BlendState zoneLineBlend{
+            .color = {.operation = wgpu::BlendOperation::Add,
+                      .srcFactor = wgpu::BlendFactor::SrcAlpha,
+                      .dstFactor = wgpu::BlendFactor::One},
+            .alpha = {.operation = wgpu::BlendOperation::Add,
+                      .srcFactor = wgpu::BlendFactor::One,
+                      .dstFactor = wgpu::BlendFactor::One}};
+        wgpu::ColorTargetState zoneLineTarget{.format = surfaceFormat, .blend = &zoneLineBlend};
+        wgpu::FragmentState zoneLineFragment{.module = zoneLineModule,
+                                             .entryPoint = "fragmentMain",
+                                             .targetCount = 1,
+                                             .targets = &zoneLineTarget};
+
+        // Occluded by the world but not writing depth: a line behind a wall
+        // stays behind it, and two rings overlapping do not cut each other up.
+        wgpu::DepthStencilState zoneLineDepth{.format = kDepthFormat,
+                                              .depthWriteEnabled = false,
+                                              .depthCompare = wgpu::CompareFunction::LessEqual};
+
+        wgpu::RenderPipelineDescriptor zoneLinePipelineDescriptor{
+            .layout = zoneLinePipelineLayout,
+            .vertex = {.module = zoneLineModule, .entryPoint = "vertexMain"},
+            .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
+            .depthStencil = &zoneLineDepth,
+            .fragment = &zoneLineFragment};
+        zoneLinePipeline = device.CreateRenderPipeline(&zoneLinePipelineDescriptor);
+
+        wgpu::BindGroupEntry zoneLineEntry{};
+        zoneLineEntry.binding = 0;
+        zoneLineEntry.buffer = zoneLineUniformBuffer;
+        zoneLineEntry.size = sizeof(ZoneLineUniforms);
+        wgpu::BindGroupDescriptor zoneLineBindGroupDescriptor{
+            .layout = zoneLineBindGroupLayout, .entryCount = 1, .entries = &zoneLineEntry};
+        zoneLineBindGroup = device.CreateBindGroup(&zoneLineBindGroupDescriptor);
     }
 
     wgpu::Buffer chatUniformBuffer;
@@ -3153,6 +3235,38 @@ constexpr float kGravity = 26.0f;
 
                 // The player's index buffer again, for whatever draws next.
                 pass.SetIndexBuffer(characterIndexBuffer, wgpu::IndexFormat::Uint32);
+            }
+
+            // The zone's exits, standing in the world.
+            //
+            // Drawn after the world and the characters so the glow lies over
+            // them, and before the HUD so it stays behind the panels.
+            if (zoneLinePipeline && zoneLineBindGroup)
+            {
+                const std::vector<mh::ZoneLineMarker> lines = link ? link->zoneLines()
+                                                                   : std::vector<mh::ZoneLineMarker>{};
+                const int drawn = std::min(static_cast<int>(lines.size()), mh::kZoneLineMarkers);
+                if (drawn > 0)
+                {
+                    ZoneLineUniforms markers{};
+                    std::memcpy(markers.viewProjection, viewProjection.m, sizeof(markers.viewProjection));
+                    markers.counts[0] = static_cast<float>(drawn);
+                    markers.counts[1] = mh::kZoneLineHeight;
+                    markers.counts[2] = nowSeconds;
+
+                    for (int i = 0; i < drawn; ++i)
+                    {
+                        markers.lines[i][0] = lines[static_cast<size_t>(i)].x;
+                        markers.lines[i][1] = lines[static_cast<size_t>(i)].y;
+                        markers.lines[i][2] = lines[static_cast<size_t>(i)].z;
+                        markers.lines[i][3] = lines[static_cast<size_t>(i)].radius;
+                    }
+
+                    queue.WriteBuffer(zoneLineUniformBuffer, 0, &markers, sizeof(markers));
+                    pass.SetPipeline(zoneLinePipeline);
+                    pass.SetBindGroup(0, zoneLineBindGroup);
+                    pass.Draw(mh::kZoneLineSegments * 6, static_cast<uint32_t>(drawn));
+                }
             }
 
             if (radarPipeline && radarBindGroup)
