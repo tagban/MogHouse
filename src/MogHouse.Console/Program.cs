@@ -1126,6 +1126,7 @@ sealed class LiveRadar : IDisposable
                 // same pi - h correction the player's own heading does.
                 Heading = (float)(Math.PI - (visible[i].Direction & 0xFF) * (Math.PI * 2) / 256),
                 Kind = (int)visible[i].Kind,
+                Id = visible[i].UniqueNo,
             };
             entity.SetName(visible[i].Name);
             entities[i] = entity;

@@ -12,6 +12,7 @@
 #include "ffxi/mmb.h"
 #include "ffxi/lighting.h"
 #include "ffxi/mo2.h"
+#include "ffxi/entitynames.h"
 #include "ffxi/mzb.h"
 #include "ffxi/os2.h"
 #include "ffxi/skeleton.h"
@@ -504,6 +505,11 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     std::setvbuf(stdout, nullptr, _IONBF, 0);
 
     std::string zoneId;
+
+    // Filled the first time entities arrive - see the nameplate loop, which
+    // works out the zone from an entity's own id.
+    ffxi::EntityNames entityNames;
+    bool triedEntityNames = false;
     std::optional<mh::Scene> zone;
     mh::Collision collision;
     std::unordered_map<std::string, ffxi::Texture> textures;
@@ -2921,6 +2927,33 @@ constexpr float kGravity = 26.0f;
                 plate.atlas[2] = static_cast<float>(textFont.width);
                 plate.atlas[3] = static_cast<float>(textFont.height);
 
+                // The zone's own name table, loaded the first time an entity
+                // arrives. The server sends NPCs with no name, and the numeric
+                // zone is not otherwise known here - but every entity id
+                // carries the zone it belongs to, so the first one to arrive
+                // says which table to read.
+                if (!triedEntityNames && !radarEntities.empty())
+                {
+                    for (const mh::RadarEntity& entity : radarEntities)
+                    {
+                        if (entity.id > 0x1000000u)
+                        {
+                            const auto zone = static_cast<uint16_t>((entity.id - 0x1000000u) >> 12);
+                            try
+                            {
+                                const ffxi::FileTable table{ffxi::defaultInstallRoot()};
+                                entityNames = ffxi::EntityNames::load(table, zone);
+                            }
+                            catch (const std::exception& e)
+                            {
+                                std::printf("no entity names: %s\n", e.what());
+                            }
+                            triedEntityNames = true;
+                            break;
+                        }
+                    }
+                }
+
                 int named = 0;
                 for (const mh::RadarEntity& entity : radarEntities)
                 {
@@ -2928,7 +2961,13 @@ constexpr float kGravity = 26.0f;
                     {
                         break;
                     }
-                    if (entity.name.empty())
+
+                    // The server's name where it gave one - players - and the
+                    // zone's table otherwise, which is where every NPC's name
+                    // actually lives.
+                    const std::string& shown =
+                        entity.name.empty() ? entityNames.lookup(entity.id) : entity.name;
+                    if (shown.empty())
                     {
                         continue;
                     }
@@ -2966,7 +3005,7 @@ constexpr float kGravity = 26.0f;
                     const float cell = static_cast<float>(textFont.cell);
                     float pen = 0.0f;
                     int written = 0;
-                    for (char raw : entity.name)
+                    for (char raw : shown)
                     {
                         if (written >= mh::kNameplateChars)
                         {

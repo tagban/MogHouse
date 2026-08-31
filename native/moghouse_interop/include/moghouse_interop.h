@@ -49,6 +49,11 @@ typedef struct MhRadarEntity
     /// array stays blittable and crosses as a pointer - a char* per entity
     /// would mean owning lifetimes across a thread boundary for no gain.
     char name[20];
+
+    /// The server's id, 0x1000000 | zone << 12 | targid. Zero means unknown.
+    /// Used to find a name in the zone's own name table when the server sends
+    /// none, which for NPCs it always does.
+    uint32_t id;
 } MhRadarEntity;
 
 /// What to open. Every string is borrowed for the duration of the create call

@@ -77,6 +77,7 @@ add_library(ffxi-dat STATIC
     ffxi/look.cpp
     ffxi/mmb.cpp
     ffxi/mo2.cpp
+    ffxi/entitynames.cpp
     ffxi/mzb.cpp
     ffxi/os2.cpp
     ffxi/skeleton.cpp

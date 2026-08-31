@@ -28,6 +28,12 @@ public struct NativeRadarEntity
     /// </summary>
     public unsafe fixed byte Name[20];
 
+    /// <summary>
+    /// The server's id for this entity. The renderer uses it to find a name in
+    /// the zone's own name table, because the server sends NPCs without one.
+    /// </summary>
+    public uint Id;
+
     /// <summary>Writes a name in, truncated and NUL terminated.</summary>
     public unsafe void SetName(string? value)
     {

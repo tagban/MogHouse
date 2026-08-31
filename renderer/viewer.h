@@ -42,6 +42,13 @@ struct RadarEntity
     /// Shown over the body. Empty draws nothing, which is what an entity the
     /// server has not named yet should look like.
     std::string name;
+
+    /// The server's id for this entity, 0x1000000 | zone << 12 | targid.
+    ///
+    /// Carried so a name can be found for it. The server sends NPCs with no
+    /// name at all - the names are in the client's own files, one table per
+    /// zone - so without this every NPC in a city is anonymous.
+    uint32_t id{};
 };
 
 /// How many tracked entities get drawn as bodies. Beyond this they stay dots -
