@@ -848,7 +848,11 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             // FFXI's own water texture, scrolled, rather than an invented
             // colour. The models nothing places - kw01 for rivers, ike for
             // ponds, umi1 for sea - all carry one of these.
-            wgpu::TextureView waterView = whiteTexture.CreateView();
+            // Blue, not white. This looks for a texture by name and falls
+            // back when it finds none, and it finds none in Bastok Markets -
+            // so every pooled quad painted an opaque white patch over the
+            // floor it was sitting on. Read as missing floor, which is fair.
+            wgpu::TextureView waterView = waterFallbackTexture.CreateView();
             for (const char* candidate : {"effect  kaw1", "effect  ike1", "effect  ike2", "effect  umna", "effect  nami"})
             {
                 auto found = textures.find(candidate);
