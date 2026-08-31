@@ -44,6 +44,11 @@ typedef struct MhRadarEntity
     float y;
     float heading;
     int32_t kind;
+
+    /// Shown over the body, NUL terminated, ASCII. Fixed width so the whole
+    /// array stays blittable and crosses as a pointer - a char* per entity
+    /// would mean owning lifetimes across a thread boundary for no gain.
+    char name[20];
 } MhRadarEntity;
 
 /// What to open. Every string is borrowed for the duration of the create call

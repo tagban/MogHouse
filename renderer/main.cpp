@@ -91,10 +91,12 @@ ViewerOptions optionsFromEnvironment(int argc, char** argv)
             // "x,z,kind" still works; "x,z,kind,y,heading" stands a body
             // there too. The short form leaves it at ground level facing +z,
             // which is what a radar-only test wants.
-            const int read = std::sscanf(one.c_str(), "%f,%f,%d,%f,%f", &x, &z, &kind, &y, &heading);
+            char name[24] = {};
+            const int read =
+                std::sscanf(one.c_str(), "%f,%f,%d,%f,%f,%23[^;]", &x, &z, &kind, &y, &heading, name);
             if (read >= 3)
             {
-                options.testEntities.push_back(mh::RadarEntity{x, z, y, heading, kind});
+                options.testEntities.push_back(mh::RadarEntity{x, z, y, heading, kind, std::string{name}});
             }
             if (end == std::string::npos)
             {

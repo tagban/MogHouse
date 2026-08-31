@@ -22,6 +22,35 @@ public struct NativeRadarEntity
 
     /// <summary>Cast from <see cref="Ffxi.FfxiEntityKind"/>; the values match.</summary>
     public int Kind;
+
+    /// <summary>
+    /// Shown over the body. Fixed width and ASCII so the array stays blittable.
+    /// </summary>
+    public unsafe fixed byte Name[20];
+
+    /// <summary>Writes a name in, truncated and NUL terminated.</summary>
+    public unsafe void SetName(string? value)
+    {
+        fixed (byte* target = Name)
+        {
+            int written = 0;
+            if (!string.IsNullOrEmpty(value))
+            {
+                // The renderer's font has no lower case and no accents, and it
+                // turns anything it does not know into a space. Cutting to
+                // ASCII here keeps that decision in one place.
+                foreach (char c in value)
+                {
+                    if (written >= 19)
+                    {
+                        break;
+                    }
+                    target[written++] = c < 128 ? (byte)c : (byte)' ';
+                }
+            }
+            target[written] = 0;
+        }
+    }
 }
 
 /// <summary>What to open the viewer on.</summary>

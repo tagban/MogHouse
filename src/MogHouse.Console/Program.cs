@@ -921,7 +921,7 @@ sealed class LiveRadar : IDisposable
         var entities = new NativeRadarEntity[visible.Count];
         for (int i = 0; i < visible.Count; i++)
         {
-            entities[i] = new NativeRadarEntity
+            NativeRadarEntity entity = new()
             {
                 X = visible[i].X,
                 // Depth flips into the renderer's frame, the same as the
@@ -935,6 +935,8 @@ sealed class LiveRadar : IDisposable
                 Heading = (float)(Math.PI - (visible[i].Direction & 0xFF) * (Math.PI * 2) / 256),
                 Kind = (int)visible[i].Kind,
             };
+            entity.SetName(visible[i].Name);
+            entities[i] = entity;
         }
         _viewer.SetEntities(entities);
     }

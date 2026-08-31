@@ -24,6 +24,7 @@
 #include "coverage.h"
 #include "linalg.h"
 #include "chat_shader.h"
+#include "nameplate_shader.h"
 #include "radar_shader.h"
 #include "scene.h"
 #include "surface.h"
@@ -82,6 +83,15 @@ inline int glyphIndex(char raw)
 /// A character cell in the chat panel, wide over tall. The glyph is 4x6 with
 /// a column of space beside it and two rows above and below.
 inline constexpr float kGlyphAspect = 5.0f / 8.0f;
+
+/// Matches NameplateUniforms in nameplate_shader.h.
+struct NameplateUniforms
+{
+    float viewProjection[16];
+    float counts[4];
+    float positions[mh::kNameplateMax][4];
+    float glyphs[mh::kNameplateMax * mh::kNameplateChars][4];
+};
 
 /// Matches ChatUniforms in chat_shader.h.
 struct ChatUniforms
@@ -1069,6 +1079,64 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     wgpu::RenderPipeline radarPipeline;
     wgpu::BindGroup radarBindGroup;
 
+    wgpu::Buffer plateUniformBuffer;
+    wgpu::RenderPipeline platePipeline;
+    wgpu::BindGroup plateBindGroup;
+    {
+        wgpu::BufferDescriptor plateBufferDescriptor{.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
+                                                     .size = sizeof(NameplateUniforms)};
+        plateUniformBuffer = device.CreateBuffer(&plateBufferDescriptor);
+
+        wgpu::ShaderSourceWGSL plateWgsl;
+        plateWgsl.code = mh::kNameplateShader;
+        wgpu::ShaderModuleDescriptor plateModuleDescriptor{.nextInChain = &plateWgsl};
+        wgpu::ShaderModule plateModule = device.CreateShaderModule(&plateModuleDescriptor);
+
+        wgpu::BindGroupLayoutEntry plateLayoutEntry{};
+        plateLayoutEntry.binding = 0;
+        plateLayoutEntry.visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+        plateLayoutEntry.buffer.type = wgpu::BufferBindingType::Uniform;
+
+        wgpu::BindGroupLayoutDescriptor plateLayoutDescriptor{.entryCount = 1, .entries = &plateLayoutEntry};
+        wgpu::BindGroupLayout plateBindGroupLayout = device.CreateBindGroupLayout(&plateLayoutDescriptor);
+        wgpu::PipelineLayoutDescriptor platePipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
+                                                                     .bindGroupLayouts = &plateBindGroupLayout};
+        wgpu::PipelineLayout platePipelineLayout = device.CreatePipelineLayout(&platePipelineLayoutDescriptor);
+
+        wgpu::BlendState plateBlend{
+            .color = {.operation = wgpu::BlendOperation::Add,
+                      .srcFactor = wgpu::BlendFactor::SrcAlpha,
+                      .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
+            .alpha = {.operation = wgpu::BlendOperation::Add,
+                      .srcFactor = wgpu::BlendFactor::One,
+                      .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha}};
+        wgpu::ColorTargetState plateTarget{.format = surfaceFormat, .blend = &plateBlend};
+        wgpu::FragmentState plateFragment{
+            .module = plateModule, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &plateTarget};
+
+        // Names sit over the world, not in it: a body behind a wall still has
+        // a readable name, which is what makes them useful for finding things.
+        wgpu::DepthStencilState plateDepth{.format = kDepthFormat,
+                                           .depthWriteEnabled = false,
+                                           .depthCompare = wgpu::CompareFunction::Always};
+
+        wgpu::RenderPipelineDescriptor platePipelineDescriptor{
+            .layout = platePipelineLayout,
+            .vertex = {.module = plateModule, .entryPoint = "vertexMain"},
+            .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
+            .depthStencil = &plateDepth,
+            .fragment = &plateFragment};
+        platePipeline = device.CreateRenderPipeline(&platePipelineDescriptor);
+
+        wgpu::BindGroupEntry plateEntry{};
+        plateEntry.binding = 0;
+        plateEntry.buffer = plateUniformBuffer;
+        plateEntry.size = sizeof(NameplateUniforms);
+        wgpu::BindGroupDescriptor plateBindGroupDescriptor{
+            .layout = plateBindGroupLayout, .entryCount = 1, .entries = &plateEntry};
+        plateBindGroup = device.CreateBindGroup(&plateBindGroupDescriptor);
+    }
+
     wgpu::Buffer chatUniformBuffer;
     wgpu::RenderPipeline chatPipeline;
     wgpu::BindGroup chatBindGroup;
@@ -1307,6 +1375,14 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // needs a zone loaded. Its geometry is already in world orientation, so
     // its one instance is a plain translation rather than a placement matrix.
     wgpu::Buffer characterVertexBuffer;
+    // The same geometry frozen in the bind pose, for everyone who is not the
+    // player. They shared the player's animated buffer at first, so every NPC
+    // in the zone walked in step with whoever was driving - which looks less
+    // like a bug than like the whole city being puppeted, but is one.
+    //
+    // Their own animations need per-entity skinning and a buffer each. Standing
+    // still is the honest placeholder until then.
+    wgpu::Buffer entityVertexBuffer;
     wgpu::Buffer characterIndexBuffer;
     wgpu::Buffer characterInstanceBuffer;
     std::vector<wgpu::Texture> characterTextures;
@@ -1318,6 +1394,13 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                                              wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst);
         characterIndexBuffer = createBuffer(device, character->geometry.indices.data(),
                                             character->geometry.indices.size() * sizeof(uint32_t), wgpu::BufferUsage::Index);
+
+        // Taken before the animation loop touches the geometry, so this is the
+        // rest pose rather than whatever frame happened to be current.
+        mh::reskin(character->geometry, mh::bindPose(character->skeleton), character->meshes);
+        entityVertexBuffer = createBuffer(device, character->geometry.vertices.data(),
+                                          character->geometry.vertices.size() * sizeof(mh::Vertex),
+                                          wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst);
 
         // Slot 0 is the player. The rest are the tracked entities, which
         // share this one skinned mesh: every NPC and every other player is
@@ -2024,16 +2107,27 @@ constexpr float kGravity = 26.0f;
                     queue.WriteBuffer(characterVertexBuffer, 0, character->geometry.vertices.data(),
                                       character->geometry.vertices.size() * sizeof(mh::Vertex));
                 }
-                pass.SetVertexBuffer(0, characterVertexBuffer);
                 pass.SetVertexBuffer(1, characterInstanceBuffer);
                 pass.SetIndexBuffer(characterIndexBuffer, wgpu::IndexFormat::Uint32);
+
+                // Instance 0 is the player, animated. The rest are everyone
+                // else, from the still buffer, reached with firstInstance so
+                // they read the same instance data without sharing a pose.
                 for (size_t i = 0; i < character->geometry.batches.size() && i < characterBindGroups.size(); ++i)
                 {
                     const mh::Batch& batch = character->geometry.batches[i];
                     pass.SetPipeline(batch.cutout ? cutoutPipeline : pipeline);
                     pass.SetBindGroup(0, characterBindGroups[i]);
-                    pass.DrawIndexed(batch.indexCount, static_cast<uint32_t>(drawnBodies + 1),
-                                     batch.indexOffset, 0, 0);
+
+                    pass.SetVertexBuffer(0, characterVertexBuffer);
+                    pass.DrawIndexed(batch.indexCount, 1, batch.indexOffset, 0, 0);
+
+                    if (drawnBodies > 0 && entityVertexBuffer)
+                    {
+                        pass.SetVertexBuffer(0, entityVertexBuffer);
+                        pass.DrawIndexed(batch.indexCount, static_cast<uint32_t>(drawnBodies), batch.indexOffset, 0,
+                                         1);
+                    }
                 }
             }
 
@@ -2076,6 +2170,51 @@ constexpr float kGravity = 26.0f;
                 pass.SetPipeline(radarPipeline);
                 pass.SetBindGroup(0, radarBindGroup);
                 pass.Draw(3);
+            }
+
+            if (platePipeline && plateBindGroup && !radarEntities.empty())
+            {
+                NameplateUniforms plate{};
+                std::memcpy(plate.viewProjection, viewProjection.m, sizeof(plate.viewProjection));
+
+                const float windowAspect = static_cast<float>(width) / static_cast<float>(height);
+                plate.counts[1] = 0.006f;      // glyph pixel height in NDC
+                plate.counts[2] = windowAspect;
+
+                int named = 0;
+                for (const mh::RadarEntity& entity : radarEntities)
+                {
+                    if (named >= mh::kNameplateMax)
+                    {
+                        break;
+                    }
+                    if (entity.name.empty())
+                    {
+                        continue;
+                    }
+                    // Over the head rather than at the feet. The model is about
+                    // 1.8 tall and the name wants a little air above that.
+                    plate.positions[named][0] = entity.x;
+                    plate.positions[named][1] = entity.y + 2.2f;
+                    plate.positions[named][2] = entity.z;
+                    for (int column = 0; column < mh::kNameplateChars; ++column)
+                    {
+                        const int glyph = column < static_cast<int>(entity.name.size())
+                                              ? glyphIndex(entity.name[static_cast<size_t>(column)])
+                                              : 0;
+                        plate.glyphs[named * mh::kNameplateChars + column][0] = static_cast<float>(glyph);
+                    }
+                    ++named;
+                }
+
+                if (named > 0)
+                {
+                    plate.counts[0] = static_cast<float>(named);
+                    queue.WriteBuffer(plateUniformBuffer, 0, &plate, sizeof(plate));
+                    pass.SetPipeline(platePipeline);
+                    pass.SetBindGroup(0, plateBindGroup);
+                    pass.Draw(3);
+                }
             }
 
             if (chatPipeline && chatBindGroup)

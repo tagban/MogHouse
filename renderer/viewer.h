@@ -38,6 +38,10 @@ struct RadarEntity
 
     /// 0 player, 1 npc, 2 enemy - matching MogHouse.Core's FfxiEntityKind.
     int kind{};
+
+    /// Shown over the body. Empty draws nothing, which is what an entity the
+    /// server has not named yet should look like.
+    std::string name;
 };
 
 /// How many tracked entities get drawn as bodies. Beyond this they stay dots -
