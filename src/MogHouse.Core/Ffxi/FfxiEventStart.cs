@@ -47,6 +47,20 @@ public sealed record FfxiEventStart(
             return null;
         }
 
+        // Which packet this is, before reading it as one.
+        //
+        // Without this every sub-packet long enough to reach Mode parses as an
+        // event, and the numbers that come out are whatever happened to be at
+        // those offsets - 11348, 45321, 13758 for a character whose actual
+        // event was 305. The server answers each with "Event ID mismatch" and
+        // the real event is never ended, so a new character stays in its
+        // opening cutscene forever.
+        (ushort id, _) = FfxiZonePacket.UnpackIdAndSize(BinaryPrimitives.ReadUInt16LittleEndian(subPacket));
+        if (id != PacketId)
+        {
+            return null;
+        }
+
         return new FfxiEventStart(
             UniqueNo: BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(OffsetUniqueNo, 4)),
             ActIndex: BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(OffsetActIndex, 2)),
