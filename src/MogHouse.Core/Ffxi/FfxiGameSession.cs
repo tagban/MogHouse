@@ -329,6 +329,11 @@ public sealed class FfxiGameSession : IDisposable
         // character arrives knowing nothing about itself.
         await _zone.SendGameOkAsync(_zoneEndpoint, ct);
 
+        // The login message has to be asked for; it is not pushed with
+        // everything else at zone-in. A client that never sends this sees
+        // nothing, which looks exactly like a server with nothing to say.
+        await _zone.SendServerMessageRequestAsync(_zoneEndpoint, 0, ct);
+
         TryLoadNavMesh();
         TryLoadZoneLines();
         Status?.Invoke($"In {(ZoneState is null ? "zone" : $"zone {ZoneState.ZoneNo}")} as {Handoff.CharacterName}.");
@@ -502,6 +507,7 @@ public sealed class FfxiGameSession : IDisposable
         }
 
         await _zone.SendGameOkAsync(destination);
+        await _zone.SendServerMessageRequestAsync(destination);
 
         if (ZoneState is not null)
         {
@@ -518,6 +524,9 @@ public sealed class FfxiGameSession : IDisposable
     }
 
     /// <summary>Which zone line we have already asked about, so one step does not fire a dozen requests.</summary>
+    /// <summary>Built up across fragments, then split into lines once the last lands.</summary>
+    private readonly System.Text.StringBuilder _serverMessage = new();
+
     private uint? _zoneLineRequested;
 
     private void TryLoadZoneLines()
@@ -651,6 +660,35 @@ public sealed class FfxiGameSession : IDisposable
 
         foreach ((ushort id, int offset, int size) in FfxiZonePacket.EnumerateSubPackets(reply.Plaintext))
         {
+            // The login message, a fragment at a time. Each says where it sits
+            // in the whole and the next has to be asked for - the server
+            // answers exactly what it was asked for and nothing more.
+            FfxiServerMessageFragment? fragment =
+                FfxiServerMessageFragment.TryParse(reply.Plaintext.AsSpan(offset, size));
+            if (fragment is not null)
+            {
+                _serverMessage.Append(fragment.Text);
+                if (fragment.NextOffset is int next && _zoneEndpoint is not null)
+                {
+                    // Inline: this runs on the receive path, and the packet
+                    // counter it shares is not safe to advance from elsewhere.
+                    _zone?.SendServerMessageRequestAsync(_zoneEndpoint, next).GetAwaiter().GetResult();
+                }
+                else
+                {
+                    foreach (string line in _serverMessage.ToString().Replace("\r\n", "\n").Split('\n'))
+                    {
+                        if (line.Trim().Length > 0)
+                        {
+                            ChatReceived?.Invoke(new FfxiChatLine(DateTimeOffset.Now, FfxiChatMessageType.System1,
+                                                                  "Server", line.Trim()));
+                        }
+                    }
+
+                    _serverMessage.Clear();
+                }
+            }
+
             FfxiChatMessage? chat = FfxiChatMessage.TryParse(reply.Plaintext.AsSpan(offset, size));
             if (chat is not null && chat.Text.Length > 0)
             {
