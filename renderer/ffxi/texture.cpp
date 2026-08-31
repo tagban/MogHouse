@@ -133,9 +133,19 @@ Texture parseTexture(const Chunk& chunk)
             clearBlocks ? static_cast<float>(clearAndBlack) / static_cast<float>(clearBlocks) : 0.0f;
         break;
     }
+    case 0x81:
     case 0xB1:
     {
         // 8-bit indices into a 256-entry BGRA palette, stored bottom-up.
+        //
+        // 0x81 is the same thing in an older dress. It is what the early zones
+        // use - zone 0's textures are every one of them 0x81 - and rejecting it
+        // left that zone drawn entirely white, which reads as missing textures
+        // rather than as an unread format.
+        //
+        // Checked before assuming: its palette starts where this one's does and
+        // decodes to a stone wall, a green tree and a perfectly neutral grey
+        // smoke, which is what those three ought to be.
         if (kPalettedDataOffset + static_cast<size_t>(texture.width) * texture.height > data.size())
         {
             throw std::runtime_error("texture: paletted data runs past end of chunk");
