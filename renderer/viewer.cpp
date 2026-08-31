@@ -1448,7 +1448,11 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     /// How fast a fall accelerates, in units per second squared. Not measured
     /// against anything - FFXI's own value is not in the DATs - so it is
     /// tuned to look right at this scale, where a character is 1.8 units tall.
-    constexpr float kGravity = 26.0f;
+    /// How deep the water may be and still be walked into. Ankle-deep puddles
+/// and fountain rims are walkable in FFXI; a canal is not.
+constexpr float kWadeDepth = 1.2f;
+
+constexpr float kGravity = 26.0f;
 
     /// How far below the feet still counts as standing on something. Slopes
     /// and the discrete steps of a walk both leave small gaps, and treating
@@ -1591,13 +1595,40 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                     !collision.empty() &&
                     !collision.groundAt(stepped.x, stepped.z, characterAt.y, kFallReach).has_value();
 
+                // Wading is fine, swimming is not - FFXI has none. Without
+                // this a canal is just a floor a long way down: the character
+                // walks off the quay and stands on the bottom.
+                //
+                // Refused per axis rather than outright, so walking into a
+                // shoreline at an angle slides along it instead of sticking.
+                mh::Vec3 allowed = stepped;
+                if (!collision.empty() && !intoTheVoid)
+                {
+                    const auto tooDeep = [&](float x, float z) {
+                        const std::optional<float> depth = collision.waterDepthAt(x, z, characterAt.y);
+                        return depth && *depth > kWadeDepth;
+                    };
+                    if (tooDeep(allowed.x, allowed.z))
+                    {
+                        allowed = {stepped.x, stepped.y, characterAt.z};
+                        if (tooDeep(allowed.x, allowed.z))
+                        {
+                            allowed = {characterAt.x, stepped.y, stepped.z};
+                            if (tooDeep(allowed.x, allowed.z))
+                            {
+                                allowed = {characterAt.x, stepped.y, characterAt.z};
+                            }
+                        }
+                    }
+                }
+
                 if (!intoTheVoid)
                 {
-                    const float dx = stepped.x - characterAt.x;
-                    const float dz = stepped.z - characterAt.z;
+                    const float dx = allowed.x - characterAt.x;
+                    const float dz = allowed.z - characterAt.z;
                     moved = std::sqrt(dx * dx + dz * dz);
-                    characterAt.x = stepped.x;
-                    characterAt.z = stepped.z;
+                    characterAt.x = allowed.x;
+                    characterAt.z = allowed.z;
                 }
 
                 // Facing follows the camera, not the step. Walking backwards or

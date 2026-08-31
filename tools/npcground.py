@@ -77,10 +77,14 @@ def main():
         print(f"zone {zone_id} is not installed")
         return 2
 
-    # The vertical is the same under both candidates; only depth differs.
+    # All four horizontal sign choices. Two of them are rotations - a half
+    # turn about X and a half turn about Z - and both have determinant +1, so
+    # "is it a rotation" does not pick between them. The other two are mirrors.
     candidates = {
-        "rotation   (x, -y, -z)": [(x, -z, -y) for x, y, z in npcs],
-        "reflection (x, -y,  z)": [(x, z, -y) for x, y, z in npcs],
+        "rot about X  ( x, -y, -z)": [(x, -z, -y) for x, y, z in npcs],
+        "rot about Z  (-x, -y,  z)": [(-x, z, -y) for x, y, z in npcs],
+        "mirror       ( x, -y,  z)": [(x, z, -y) for x, y, z in npcs],
+        "mirror       (-x, -y, -z)": [(-x, -z, -y) for x, y, z in npcs],
     }
 
     for label, points in candidates.items():

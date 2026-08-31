@@ -123,6 +123,13 @@ Collision::Collision(const ffxi::Zone& zone)
             // down is just as much a floor as one pointing up.
             triangle.walkable = std::fabs(triangle.normal.y) >= kWalkableNormalY;
 
+            // Water is a property of the cell, not of the geometry, so it is
+            // copied onto each triangle the cell produced. Zero means none -
+            // the parser's own convention. The height is an FFXI vertical, so
+            // it turns the same way everything else does.
+            triangle.hasWater = instance.waterHeight != 0.0f;
+            triangle.waterY = -instance.waterHeight;
+
             for (const Vec3& p : {triangle.a, triangle.b, triangle.c})
             {
                 lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
@@ -251,6 +258,47 @@ std::optional<float> Collision::groundAt(float x, float z, float near, float max
         }
     }
     return best;
+}
+
+std::optional<float> Collision::waterDepthAt(float x, float z, float y) const
+{
+    if (triangles_.empty())
+    {
+        return std::nullopt;
+    }
+
+    const std::vector<uint32_t>* candidates = nullptr;
+    std::vector<uint32_t> scratch;
+    forEachNear(x, z, x, z, candidates, scratch);
+
+    // The floor nearest the height asked about, so a bridge over a canal is
+    // answered for the bridge rather than for the water under it.
+    std::optional<float> bestFloor;
+    std::optional<float> bestWater;
+    for (uint32_t index : *candidates)
+    {
+        const Triangle& triangle = triangles_[index];
+        if (!triangle.walkable || !triangle.hasWater)
+        {
+            continue;
+        }
+        const std::optional<float> floor = heightAt(triangle.a, triangle.b, triangle.c, x, z);
+        if (!floor)
+        {
+            continue;
+        }
+        if (!bestFloor || std::fabs(*floor - y) < std::fabs(*bestFloor - y))
+        {
+            bestFloor = floor;
+            bestWater = triangle.waterY;
+        }
+    }
+
+    if (!bestFloor || *bestWater <= *bestFloor)
+    {
+        return std::nullopt;
+    }
+    return *bestWater - *bestFloor;
 }
 
 std::vector<uint8_t> Collision::rasteriseWalkable(uint32_t size, const Vec3& centre, float halfExtent) const

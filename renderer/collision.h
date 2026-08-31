@@ -99,6 +99,16 @@ public:
     /// Every wall near a point that straddles a character standing there.
     std::vector<Blocker> blockersNear(const Vec3& at, float radius) const;
 
+    /// How deep the water is over the floor at (x, z) nearest `y`, or nothing
+    /// where there is no water.
+    ///
+    /// FFXI has no swimming. A city's canals and basins are not places you may
+    /// walk into and stand at the bottom of, which is exactly what happens with
+    /// no notion of water at all: the basin floor is a floor like any other, so
+    /// a character walks off the quay, sinks, and stands on the bottom while
+    /// the server reports them in deep water.
+    std::optional<float> waterDepthAt(float x, float z, float y) const;
+
     Vec3 boundsMin() const { return boundsMin_; }
     Vec3 boundsMax() const { return boundsMax_; }
 
@@ -110,6 +120,11 @@ private:
         /// True when the face is shallow enough to stand on. Anything steeper
         /// is a wall, and the two are queried differently.
         bool walkable;
+        /// The water surface over this face, and whether there is one at all.
+        /// MZB puts water on the cell rather than on the geometry, so this is
+        /// the instance's height copied onto every triangle it produced.
+        bool hasWater;
+        float waterY;
     };
 
     /// Every triangle whose x/z footprint touches this cell.

@@ -877,7 +877,12 @@ sealed class LiveRadar : IDisposable
             return null;
         }
 
-        double turns = heading / (Math.PI * 2);
+        // The half turn about X that builds the world reverses which way a
+        // yaw goes: the renderer's heading h has forward (sin h, 0, cos h), and
+        // in FFXI's frame that same direction is (sin h, 0, -cos h), which is
+        // the heading pi - h. Sending h unchanged reports a character facing
+        // its own mirror image - correct only when looking due east or west.
+        double turns = (Math.PI - heading) / (Math.PI * 2);
         turns -= Math.Floor(turns);
         return (x, -y, -z, (sbyte)(byte)Math.Round(turns * 256));
     }

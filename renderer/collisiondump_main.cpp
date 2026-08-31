@@ -67,9 +67,10 @@ int main(int argc, char** argv)
             while (std::scanf("%f %f %f", &px, &pz, &py) == 3)
             {
                 const std::optional<float> hit = collision.closestGroundAt(px, pz, py);
+                const std::optional<float> deep = collision.waterDepthAt(px, pz, py);
                 if (hit)
                 {
-                    std::printf("%.3f %.3f %.3f\n", px, pz, *hit);
+                    std::printf("%.3f %.3f %.3f water=%.2f\n", px, pz, *hit, deep ? *deep : 0.0f);
                 }
                 else
                 {
