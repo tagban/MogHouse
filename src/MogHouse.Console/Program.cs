@@ -479,12 +479,19 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                         });
                     }
 
+                    // The world's name, which the roster gives us and which the
+                    // real client shows above the login message.
+                    liveRadar?.Say("", $"Welcome to {selected.WorldName}.");
+
                     // The first sighting of each entity, raw. Which byte says
                     // "this is a shopkeeper, not a crab" is not derivable from
                     // the struct - bitfield blocks and a misaligned uint8 sit
                     // between the fields - so it gets found by diffing packets
                     // whose answer is already known from the server data.
                     var rawFirstSeen = new Dictionary<uint, byte[]>();
+                    var looksSeen = new Dictionary<FfxiLookKind, int>();
+                    var equipmentLooks = new Dictionary<uint, string>();
+                    var fixedModels = new HashSet<ushort>();
 
                     // Built up across fragments, then split into lines once the
                     // last one lands.
@@ -550,7 +557,12 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                         // tell the server, which is what makes anyone else see it.
                         jumpRequested: liveRadar is null ? null : liveRadar.TakeJump,
                         selfUniqueNo: handoff.ServerId,
-                        selfActIndex: () => tracker.SelfActIndex,
+                        // From the zone login reply, which is where the server
+                        // tells us our own targid. It never sends us the entity
+                        // update it sends for everyone else, so the tracker only
+                        // learns this if something else fills it in - and jumps
+                        // were being dropped for want of it.
+                        selfActIndex: () => zoneState.ActIndex != 0 ? zoneState.ActIndex : tracker.SelfActIndex,
                         ct: stopping.Token,
                         onReply: reply =>
                         {
@@ -574,6 +586,19 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                                     int count = entitiesSeen.GetValueOrDefault(entity.UniqueNo).Count + 1;
                                     entitiesSeen[entity.UniqueNo] = (entity.PacketId, isSelf, count);
                                     int before = tracker.Count;
+                                    if (entity.Look is FfxiEntityLook seen)
+                                    {
+                                        looksSeen[seen.Kind] = looksSeen.GetValueOrDefault(seen.Kind) + 1;
+                                        if (seen.IsEquipment)
+                                        {
+                                            equipmentLooks[entity.UniqueNo] = seen.ToLookString();
+                                        }
+                                        else if (seen.IsFixedModel && seen.ModelId != 0)
+                                        {
+                                            fixedModels.Add(seen.ModelId);
+                                        }
+                                    }
+
                                     tracker.Observe(entity, DateTimeOffset.UtcNow);
                                     if (entity.IsDespawn)
                                     {
@@ -727,6 +752,35 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                     }
 
                     liveRadar?.Dispose();
+
+                    // What the zone is actually made of, by how the server
+                    // describes each thing's appearance. Equipment looks can be
+                    // built from the files a player character already uses;
+                    // fixed model ids need a mapping that does not exist yet;
+                    // doors and transport are not character models at all.
+                    if (looksSeen.Count > 0)
+                    {
+                        Console.WriteLine();
+                        Console.WriteLine("Entity looks seen:");
+                        foreach ((FfxiLookKind kind, int count) in looksSeen.OrderByDescending(kv => kv.Value))
+                        {
+                            Console.WriteLine($"  {kind,-9} x{count}");
+                        }
+
+                        if (equipmentLooks.Count > 0)
+                        {
+                            Console.WriteLine("Equipment looks (race,face,head,body,hands,legs,feet):");
+                            foreach ((uint id, string spec) in equipmentLooks.Take(10))
+                            {
+                                Console.WriteLine($"  {id,-10} {spec}");
+                            }
+                        }
+
+                        if (fixedModels.Count > 0)
+                        {
+                            Console.WriteLine($"Fixed model ids: {string.Join(", ", fixedModels.Order().Take(20))}");
+                        }
+                    }
 
                     Console.WriteLine($"Despawns seen: {despawned.Count}");
 

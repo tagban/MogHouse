@@ -58,6 +58,7 @@ public sealed record FfxiEntityUpdate(
     byte? Allegiance = null,
     byte? HealthPercent = null,
     byte? BattleFlags = null,
+    FfxiEntityLook? Look = null,
     byte SendFlags = 0)
 {
     public const ushort PlayerPacketId = 0x00D;
@@ -169,6 +170,12 @@ public sealed record FfxiEntityUpdate(
     // Offsets confirmed against the compiled GP_SERV_CHAR_PC, not counted by
     // hand: the struct threads several bitfield blocks and a misaligned
     // uint8 between the head and the name.
+    /// look_t, at a fixed offset whatever kind it turns out to be. Only the
+    /// first two bytes are always present: the equipment form fills all twenty
+    /// and grows the packet to 0x48, while a fixed model writes four and a door
+    /// writes an id or a name instead.
+    private const int OffsetLook = 0x30;
+
     private const int OffsetFlags1 = 32;
     private const int OffsetName = 90;
     private const int NameLength = 16;
@@ -229,6 +236,8 @@ public sealed record FfxiEntityUpdate(
             }
         }
 
+        FfxiEntityLook? look = ReadLook(subPacket);
+
         return new FfxiEntityUpdate(
             SendFlags: subPacket[OffsetSendFlags],
             PacketId: id,
@@ -244,7 +253,54 @@ public sealed record FfxiEntityUpdate(
             RawFlags0: rawFlags0,
             Allegiance: allegiance,
             HealthPercent: healthPercent,
-            BattleFlags: battleFlags);
+            BattleFlags: battleFlags,
+            Look: look);
+    }
+
+    /// <summary>
+    /// The look_t at 0x30, as much of it as this packet actually carries.
+    /// Returns null when the packet stops short of it, which the smaller
+    /// position-only updates do.
+    /// </summary>
+    private static FfxiEntityLook? ReadLook(ReadOnlySpan<byte> subPacket)
+    {
+        if (subPacket.Length < OffsetLook + 4)
+        {
+            return null;
+        }
+
+        var kind = (FfxiLookKind)BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(OffsetLook, 2));
+
+        // Doors and transport put an id or a name where the model would be, so
+        // there is nothing here to read as an appearance.
+        if (kind is FfxiLookKind.Door or FfxiLookKind.Elevator or FfxiLookKind.Ship)
+        {
+            return new FfxiEntityLook(kind, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
+
+        ushort modelId = BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(OffsetLook + 2, 2));
+
+        // The equipment form is the only one that fills the whole structure,
+        // and only then is the packet long enough to hold it.
+        if (kind is FfxiLookKind.Equipped or FfxiLookKind.Chocobo && subPacket.Length >= OffsetLook + 20)
+        {
+            // Read one at a time rather than through a helper: a local
+            // function cannot capture the span this all comes from.
+            ReadOnlySpan<byte> slots = subPacket.Slice(OffsetLook + 4, 16);
+            return new FfxiEntityLook(kind, modelId,
+                                      Race: subPacket[OffsetLook + 3],
+                                      Face: subPacket[OffsetLook + 2],
+                                      Head: BinaryPrimitives.ReadUInt16LittleEndian(slots[..2]),
+                                      Body: BinaryPrimitives.ReadUInt16LittleEndian(slots[2..4]),
+                                      Hands: BinaryPrimitives.ReadUInt16LittleEndian(slots[4..6]),
+                                      Legs: BinaryPrimitives.ReadUInt16LittleEndian(slots[6..8]),
+                                      Feet: BinaryPrimitives.ReadUInt16LittleEndian(slots[8..10]),
+                                      Main: BinaryPrimitives.ReadUInt16LittleEndian(slots[10..12]),
+                                      Sub: BinaryPrimitives.ReadUInt16LittleEndian(slots[12..14]),
+                                      Ranged: BinaryPrimitives.ReadUInt16LittleEndian(slots[14..16]));
+        }
+
+        return new FfxiEntityLook(kind, modelId, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
 
     private static string ReadFixedString(ReadOnlySpan<byte> field)
