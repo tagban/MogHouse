@@ -191,6 +191,44 @@ public sealed class FfxiRosterClient : IDisposable
         return ParseZoneHandoff(viewBuffer.AsSpan(0, viewRead), DeriveSessionKey(sessionHash));
     }
 
+    /// <summary>
+    /// Makes a character, which the lobby does in two exchanges.
+    ///
+    /// 0x22 asks whether the name may be used and the server *keeps* it, so
+    /// 0x21 sends only the appearance and the server builds the character from
+    /// the name it is already holding. Sending 0x21 on its own makes a
+    /// character with no name.
+    ///
+    /// A refused name is one error code whatever the reason - taken, a banned
+    /// word, a digit in it - with the reason written only to the server's log.
+    /// Nothing here can be more specific than the server was, which is why
+    /// FfxiCharacterCreation checks what it can before sending.
+    /// </summary>
+    public async Task<string?> CreateCharacterAsync(FfxiNewCharacter character, byte[] sessionHash,
+                                                    CancellationToken ct = default)
+    {
+        NetworkStream viewStream = _view.GetStream();
+
+        await viewStream.WriteAsync(FfxiCharacterCreation.BuildCheckNameRequest(character.Name, sessionHash), ct);
+
+        var reply = new byte[0x40];
+        int read = await viewStream.ReadAsync(reply, ct);
+        if (!FfxiCharacterCreation.NameWasAccepted(reply.AsSpan(0, read)))
+        {
+            return $"The server will not take the name '{character.Name}'. It may already be in use, or not allowed here.";
+        }
+
+        await viewStream.WriteAsync(FfxiCharacterCreation.BuildCreateRequest(character, sessionHash), ct);
+
+        read = await viewStream.ReadAsync(reply, ct);
+        if (read < 9 || reply[4] != (byte)'I' || reply[5] != (byte)'X')
+        {
+            return "The server refused the character. Its log will say why.";
+        }
+
+        return null;
+    }
+
     internal static byte[] BuildViewAcquirePlayerDataRequest(ReadOnlySpan<byte> sessionHash)
     {
         var packet = new byte[FfxiConstants.PacketHeaderSize];

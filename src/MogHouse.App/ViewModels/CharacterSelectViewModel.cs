@@ -47,6 +47,14 @@ public partial class CharacterSelectViewModel : ViewModelBase
     /// Nothing to tell the server: the zone session has not been opened yet at
     /// this point, and the lobby connection is not ours to keep alive.
     /// </summary>
+    /// <summary>
+    /// Off to make one. The lobby connection stays open behind this - creating
+    /// a character happens on it.
+    /// </summary>
+    [RelayCommand]
+    private void CreateCharacter() =>
+        _shell.Navigate(new CreateCharacterViewModel(_shell, _sessionHash, _host));
+
     [RelayCommand]
     private void SignOut()
     {

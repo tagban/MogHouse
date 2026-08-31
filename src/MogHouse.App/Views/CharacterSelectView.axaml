@@ -53,6 +53,13 @@
               Margin="6,0,0,0"/>
     </Grid>
 
+    <Button Content="Create a character"
+            Command="{Binding CreateCharacterCommand}"
+            HorizontalAlignment="Center"
+            Background="Transparent"
+            BorderThickness="0"
+            Opacity="0.7"/>
+
     <TextBlock Text="{Binding Error}"
                Foreground="#EF5350"
                TextWrapping="Wrap"

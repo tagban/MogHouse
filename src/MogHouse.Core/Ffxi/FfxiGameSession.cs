@@ -278,6 +278,21 @@ public sealed class FfxiGameSession : IDisposable
     /// zone-in handshake. Movement is deliberately not started - see
     /// <see cref="StartHeartbeatAsync"/>.
     /// </summary>
+    /// <summary>
+    /// Makes a character on the lobby connection this session already holds.
+    /// Returns null when it worked, or what to tell the person when it did not.
+    /// </summary>
+    public async Task<string?> CreateCharacterAsync(FfxiNewCharacter character, byte[] sessionHash,
+                                                    CancellationToken ct = default)
+    {
+        if (_roster is null)
+        {
+            return "Not connected to the lobby - log in first.";
+        }
+
+        return await _roster.CreateCharacterAsync(character, sessionHash, ct);
+    }
+
     public async Task ConnectToZoneAsync(FfxiCharacter character, byte[] sessionHash, string host, CancellationToken ct = default)
     {
         if (_roster is null)
