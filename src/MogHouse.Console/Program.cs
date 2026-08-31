@@ -1103,12 +1103,13 @@ sealed class LiveRadar : IDisposable
             return null;
         }
 
-        // The half turn about X that builds the world reverses which way a
-        // yaw goes: the renderer's heading h has forward (sin h, 0, cos h), and
-        // in FFXI's frame that same direction is (sin h, 0, -cos h), which is
-        // the heading pi - h. Sending h unchanged reports a character facing
-        // its own mirror image - correct only when looking due east or west.
-        double turns = (Math.PI - heading) / (Math.PI * 2);
+        // The inverse of the import above, and wrong in the same way until
+        // now. The half turn about X reverses which way a yaw goes, which pi -
+        // h accounts for - but rotation zero faces +x rather than +z, and that
+        // quarter turn was missing. Both halves being wrong together meant a
+        // round trip through our own code agreed with itself, and only another
+        // client could see it.
+        double turns = (Math.PI / 2 - heading) / (Math.PI * 2);
         turns -= Math.Floor(turns);
         return (x, -y, -z, (sbyte)(byte)Math.Round(turns * 256));
     }
@@ -1158,7 +1159,14 @@ sealed class LiveRadar : IDisposable
                 // Direction is a byte over the full circle. The half turn
                 // about X reverses which way a yaw goes, so this carries the
                 // same pi - h correction the player's own heading does.
-                Heading = (float)(Math.PI - (visible[i].Direction & 0xFF) * (Math.PI * 2) / 256),
+                // Rotation zero faces +x in FFXI, and the angle runs the other
+                // way round: the server builds it as
+                // atan2(dz, dx) * -(128/pi) - see worldAngle in common/utils.cpp.
+                // Through the half turn about X that builds this world, that
+                // comes out as pi/2 - r, not pi - r. The quarter turn between
+                // those two is why NPCs stood facing across their counters
+                // instead of over them.
+                Heading = (float)(Math.PI / 2 - (visible[i].Direction & 0xFF) * (Math.PI * 2) / 256),
                 Kind = (int)visible[i].Kind,
                 Id = visible[i].UniqueNo,
                 NameHidden = visible[i].NameHidden ? 1 : 0,
