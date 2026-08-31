@@ -59,6 +59,7 @@ public sealed record FfxiEntityUpdate(
     byte? HealthPercent = null,
     byte? BattleFlags = null,
     FfxiEntityLook? Look = null,
+    byte? NameVis = null,
     byte SendFlags = 0)
 {
     public const ushort PlayerPacketId = 0x00D;
@@ -176,6 +177,12 @@ public sealed record FfxiEntityUpdate(
     /// writes an id or a name instead.
     private const int OffsetLook = 0x30;
 
+    /// xi::NameVis. Doors, zone lines and the like carry HideName: they have a
+    /// name, and the game shows it only once you target them.
+    private const int OffsetNameVis = 0x2B;
+
+    private const byte NameVisHideName = 0x08;
+
     private const int OffsetFlags1 = 32;
     private const int OffsetName = 90;
     private const int NameLength = 16;
@@ -237,6 +244,7 @@ public sealed record FfxiEntityUpdate(
         }
 
         FfxiEntityLook? look = ReadLook(subPacket);
+        byte? nameVis = subPacket.Length > OffsetNameVis ? subPacket[OffsetNameVis] : null;
 
         return new FfxiEntityUpdate(
             SendFlags: subPacket[OffsetSendFlags],
@@ -254,8 +262,16 @@ public sealed record FfxiEntityUpdate(
             Allegiance: allegiance,
             HealthPercent: healthPercent,
             BattleFlags: battleFlags,
-            Look: look);
+            Look: look,
+            NameVis: nameVis);
     }
+
+    /// <summary>
+    /// The server says to keep this one's name off screen until it is
+    /// targeted. Doors, zone lines and scenery carry it - they are named, and
+    /// the game shows the name only on target.
+    /// </summary>
+    public bool IsNameHidden => (NameVis & NameVisHideName) != 0;
 
     /// <summary>
     /// The look_t at 0x30, as much of it as this packet actually carries.

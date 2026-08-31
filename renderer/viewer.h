@@ -49,6 +49,10 @@ struct RadarEntity
     /// name at all - the names are in the client's own files, one table per
     /// zone - so without this every NPC in a city is anonymous.
     uint32_t id{};
+
+    /// The server wants the name shown only when this is targeted. Doors and
+    /// zone lines are named in the table but not labelled on screen.
+    bool nameHidden{};
 };
 
 /// How many tracked entities get drawn as bodies. Beyond this they stay dots -

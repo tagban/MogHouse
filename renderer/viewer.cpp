@@ -99,7 +99,7 @@ inline constexpr float kHudBright[3] = {0.97f, 0.97f, 1.00f};
 inline constexpr float kHudDim[3] = {0.78f, 0.82f, 0.90f};
 
 inline constexpr float kNameWhite[3] = {0.98f, 0.98f, 1.00f};
-inline constexpr float kNameNpc[3] = {0.98f, 0.98f, 1.00f};
+inline constexpr float kNameNpc[3] = {0.60f, 0.98f, 0.60f};
 inline constexpr float kNameMonster[3] = {0.98f, 0.86f, 0.30f};
 
 /// Matches HudUniforms in hud_shader.h.
@@ -2920,7 +2920,10 @@ constexpr float kGravity = 26.0f;
                 // 1:1 with the atlas, as the HUD is - see there. Names sit
                 // at a distance and shrink with it, so this is the size they
                 // reach at their crispest rather than a size they always are.
-                plate.counts[1] = static_cast<float>(textFont.cell) * 2.0f / static_cast<float>(height);
+                // Smaller than 1:1 with the atlas. Names sit out in the world
+                // rather than pinned to a panel, and a dozen of them at full
+                // size cover more of the zone than they label.
+                plate.counts[1] = static_cast<float>(textFont.cell) * 2.0f * 0.6f / static_cast<float>(height);
                 plate.counts[2] = windowAspect;
                 plate.atlas[0] = static_cast<float>(textFont.columns);
                 plate.atlas[1] = static_cast<float>(textFont.cell);
@@ -2965,6 +2968,15 @@ constexpr float kGravity = 26.0f;
                     // The server's name where it gave one - players - and the
                     // zone's table otherwise, which is where every NPC's name
                     // actually lives.
+                    // Doors, zone lines and scenery are named in the zone's
+                    // table, and the game shows the name only on target.
+                    // Drawing them all labels a city with things nobody asked
+                    // about.
+                    if (entity.nameHidden)
+                    {
+                        continue;
+                    }
+
                     const std::string& shown =
                         entity.name.empty() ? entityNames.lookup(entity.id) : entity.name;
                     if (shown.empty())

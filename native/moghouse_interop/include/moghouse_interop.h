@@ -54,6 +54,10 @@ typedef struct MhRadarEntity
     /// Used to find a name in the zone's own name table when the server sends
     /// none, which for NPCs it always does.
     uint32_t id;
+
+    /// Non-zero when the server wants the name kept off screen until this is
+    /// targeted. Doors and zone lines are named but not labelled.
+    int32_t nameHidden;
 } MhRadarEntity;
 
 /// What to open. Every string is borrowed for the duration of the create call

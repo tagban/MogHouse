@@ -16,6 +16,13 @@ public sealed record FfxiTrackedEntity(
     float Depth,
     sbyte Direction,
     bool Hidden,
+
+    /// <summary>
+    /// The server wants this one's name kept off screen until it is targeted -
+    /// doors, zone lines, scenery. They are named, and drawing the name
+    /// unprompted labels half a city with things nobody asked about.
+    /// </summary>
+    bool NameHidden,
     byte? HealthPercent,
     DateTimeOffset LastSeen);
 
@@ -124,6 +131,9 @@ public sealed class FfxiEntityTracker
             // Sticky the way the name is: a later update that carries no flags
             // must not turn an invisible thing visible.
             Hidden: update.RawFlags1 is null ? known?.Hidden ?? false : update.IsHidden,
+            // Sticky for the same reason: a position-only update carries no
+            // namevis byte, and must not reveal a door's name.
+            NameHidden: update.NameVis is null ? known?.NameHidden ?? false : update.IsNameHidden,
             HealthPercent: update.HealthPercent ?? known?.HealthPercent,
             LastSeen: now);
     }

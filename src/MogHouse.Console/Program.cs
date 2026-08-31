@@ -1127,6 +1127,7 @@ sealed class LiveRadar : IDisposable
                 Heading = (float)(Math.PI - (visible[i].Direction & 0xFF) * (Math.PI * 2) / 256),
                 Kind = (int)visible[i].Kind,
                 Id = visible[i].UniqueNo,
+                NameHidden = visible[i].NameHidden ? 1 : 0,
             };
             entity.SetName(visible[i].Name);
             entities[i] = entity;

@@ -34,6 +34,11 @@ public struct NativeRadarEntity
     /// </summary>
     public uint Id;
 
+    /// <summary>
+    /// Non-zero when the name should stay hidden until the entity is targeted.
+    /// </summary>
+    public int NameHidden;
+
     /// <summary>Writes a name in, truncated and NUL terminated.</summary>
     public unsafe void SetName(string? value)
     {
