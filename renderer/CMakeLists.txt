@@ -96,3 +96,10 @@ target_link_libraries(ffxi-chardump PRIVATE ffxi-dat)
 add_executable(ffxi-collisiondump collisiondump_main.cpp collision.cpp)
 target_include_directories(ffxi-collisiondump PRIVATE .)
 target_link_libraries(ffxi-collisiondump PRIVATE ffxi-dat)
+
+# Comparing the drawn world against the walked one needs the scene built but
+# never rasterised, so it runs without a GPU or a window. scene.cpp comes along
+# because that is the code under test.
+add_executable(ffxi-visiblecheck visiblecheck_main.cpp scene.cpp collision.cpp zonemesh.cpp)
+target_include_directories(ffxi-visiblecheck PRIVATE .)
+target_link_libraries(ffxi-visiblecheck PRIVATE ffxi-dat)
