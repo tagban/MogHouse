@@ -92,6 +92,10 @@ typedef struct MhViewerOptions
     /// table; the caller already knows what it asked for.
     const char* zone_name;
 
+    /// The name over our own character's head. The game shows everyone their
+    /// own nameplate, and the renderer has no idea who it is playing.
+    const char* player_name;
+
     /// Vana'diel clock as hhmm, or -1 to let the day run.
     int32_t time_of_day;
 

@@ -56,6 +56,7 @@ MhViewerHandle mh_viewer_create(const MhViewerOptions* options)
     viewer->options.characterAt = borrow(options->character_at);
     viewer->options.characterFacing = borrow(options->character_facing);
     viewer->options.zoneName = borrow(options->zone_name);
+    viewer->options.playerName = borrow(options->player_name);
     if (options->time_of_day >= 0)
     {
         viewer->options.timeOfDay = options->time_of_day;

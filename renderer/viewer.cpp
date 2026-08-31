@@ -100,6 +100,11 @@ inline constexpr float kHudDim[3] = {0.78f, 0.82f, 0.90f};
 
 inline constexpr float kNameWhite[3] = {0.98f, 0.98f, 1.00f};
 inline constexpr float kNameNpc[3] = {0.60f, 0.98f, 0.60f};
+
+/// How far above a character's feet its name sits. The models are about 1.8
+/// tall, so this is just clear of the head - far enough not to touch it, close
+/// enough that a crowd's names do not become a band across the screen.
+inline constexpr float kPlateHeight = 1.95f;
 inline constexpr float kNameMonster[3] = {0.98f, 0.86f, 0.30f};
 
 /// Matches HudUniforms in hud_shader.h.
@@ -3136,7 +3141,53 @@ constexpr float kGravity = 26.0f;
                     }
                 }
 
+                // Laid out here rather than in the shader: the font is
+                // proportional, so where a glyph starts depends on every glyph
+                // before it, and a fragment shader cannot accumulate that per
+                // pixel without redoing the whole string. Measured in cells, so
+                // the shader scales one number to whatever size it draws at.
+                const auto layOutPlate = [&textFont](NameplateUniforms& into, int slot, const std::string& text) {
+                    const float cell = static_cast<float>(textFont.cell);
+                    float pen = 0.0f;
+                    int written = 0;
+                    for (char raw : text)
+                    {
+                        if (written >= mh::kNameplateChars)
+                        {
+                            break;
+                        }
+                        const float advance = textFont.advanceOf(raw) / cell;
+                        float* glyph = into.glyphs[slot * mh::kNameplateChars + written];
+                        glyph[0] = static_cast<float>(textFont.indexOf(raw));
+                        glyph[1] = pen;
+                        glyph[2] = advance;
+                        pen += advance;
+                        ++written;
+                    }
+                    for (int spare = written; spare < mh::kNameplateChars; ++spare)
+                    {
+                        into.glyphs[slot * mh::kNameplateChars + spare][2] = 0.0f;
+                    }
+                    into.positions[slot][3] = pen;   // total width, in cells
+                    return slot + 1;
+                };
+
                 int named = 0;
+
+                // Our own name, over our own head. The game shows everyone
+                // their own nameplate; leaving it off made our character the
+                // only anonymous one on screen.
+                if (options.playerName && !options.playerName->empty() && character)
+                {
+                    plate.positions[named][0] = characterAt.x;
+                    plate.positions[named][1] = characterAt.y + kPlateHeight;
+                    plate.positions[named][2] = characterAt.z;
+                    plate.colours[named][0] = kNameWhite[0];
+                    plate.colours[named][1] = kNameWhite[1];
+                    plate.colours[named][2] = kNameWhite[2];
+                    named = layOutPlate(plate, named, *options.playerName);
+                }
+
                 for (const mh::RadarEntity& entity : radarEntities)
                 {
                     if (named >= mh::kNameplateMax)
@@ -3166,7 +3217,7 @@ constexpr float kGravity = 26.0f;
                     // Over the head rather than at the feet. The model is about
                     // 1.8 tall and the name wants a little air above that.
                     plate.positions[named][0] = entity.x;
-                    plate.positions[named][1] = entity.y + 2.2f;
+                    plate.positions[named][1] = entity.y + kPlateHeight;
                     plate.positions[named][2] = entity.z;
 
                     // Colour by what the entity is. The rest of the palette -
@@ -3186,36 +3237,7 @@ constexpr float kGravity = 26.0f;
                     plate.colours[named][1] = tint[1];
                     plate.colours[named][2] = tint[2];
 
-                    // Laid out here rather than in the shader: the font is
-                    // proportional, so where a glyph starts depends on every
-                    // glyph before it, and a fragment shader cannot accumulate
-                    // that per pixel without redoing the whole string.
-                    //
-                    // Measured in cells, so the shader scales one number to
-                    // whatever size the text is drawn at.
-                    const float cell = static_cast<float>(textFont.cell);
-                    float pen = 0.0f;
-                    int written = 0;
-                    for (char raw : shown)
-                    {
-                        if (written >= mh::kNameplateChars)
-                        {
-                            break;
-                        }
-                        const float advance = textFont.advanceOf(raw) / cell;
-                        float* glyph = plate.glyphs[named * mh::kNameplateChars + written];
-                        glyph[0] = static_cast<float>(textFont.indexOf(raw));
-                        glyph[1] = pen;
-                        glyph[2] = advance;
-                        pen += advance;
-                        ++written;
-                    }
-                    for (int spare = written; spare < mh::kNameplateChars; ++spare)
-                    {
-                        plate.glyphs[named * mh::kNameplateChars + spare][2] = 0.0f;
-                    }
-                    plate.positions[named][3] = pen;   // total width, in cells
-                    ++named;
+                    named = layOutPlate(plate, named, shown);
                 }
 
                 if (named > 0)

@@ -177,6 +177,13 @@ public sealed record FfxiEntityUpdate(
     /// writes an id or a name instead.
     private const int OffsetLook = 0x30;
 
+    /// A player's look sits somewhere else entirely, and without the leading
+    /// size field: face, race, then the eight equipment slots, running up to
+    /// the name at 0x5A. Found by looking for the slot tags - equipment ids
+    /// carry theirs in the high nibble, so a run reading 0x1xxx 0x2xxx 0x3xxx
+    /// 0x4xxx 0x5xxx can only be one thing.
+    private const int OffsetPlayerLook = 0x48;
+
     /// xi::NameVis. Doors, zone lines and the like carry HideName: they have a
     /// name, and the game shows it only once you target them.
     private const int OffsetNameVis = 0x2B;
@@ -243,7 +250,7 @@ public sealed record FfxiEntityUpdate(
             }
         }
 
-        FfxiEntityLook? look = ReadLook(subPacket);
+        FfxiEntityLook? look = id == PlayerPacketId ? ReadPlayerLook(subPacket) : ReadLook(subPacket);
         byte? nameVis = subPacket.Length > OffsetNameVis ? subPacket[OffsetNameVis] : null;
 
         return new FfxiEntityUpdate(
@@ -278,6 +285,32 @@ public sealed record FfxiEntityUpdate(
     /// Returns null when the packet stops short of it, which the smaller
     /// position-only updates do.
     /// </summary>
+    /// <summary>
+    /// A player's look, which the 0x00D packet lays out differently: no size
+    /// field, and further along. A player is always the equipment form - there
+    /// is no other way to describe one - so the kind is not read, it is known.
+    /// </summary>
+    private static FfxiEntityLook? ReadPlayerLook(ReadOnlySpan<byte> subPacket)
+    {
+        if (subPacket.Length < OffsetPlayerLook + 18)
+        {
+            return null;
+        }
+
+        ReadOnlySpan<byte> slots = subPacket.Slice(OffsetPlayerLook + 2, 16);
+        return new FfxiEntityLook(FfxiLookKind.Equipped, 0,
+                                  Race: subPacket[OffsetPlayerLook + 1],
+                                  Face: subPacket[OffsetPlayerLook],
+                                  Head: BinaryPrimitives.ReadUInt16LittleEndian(slots[..2]),
+                                  Body: BinaryPrimitives.ReadUInt16LittleEndian(slots[2..4]),
+                                  Hands: BinaryPrimitives.ReadUInt16LittleEndian(slots[4..6]),
+                                  Legs: BinaryPrimitives.ReadUInt16LittleEndian(slots[6..8]),
+                                  Feet: BinaryPrimitives.ReadUInt16LittleEndian(slots[8..10]),
+                                  Main: BinaryPrimitives.ReadUInt16LittleEndian(slots[10..12]),
+                                  Sub: BinaryPrimitives.ReadUInt16LittleEndian(slots[12..14]),
+                                  Ranged: BinaryPrimitives.ReadUInt16LittleEndian(slots[14..16]));
+    }
+
     private static FfxiEntityLook? ReadLook(ReadOnlySpan<byte> subPacket)
     {
         if (subPacket.Length < OffsetLook + 4)

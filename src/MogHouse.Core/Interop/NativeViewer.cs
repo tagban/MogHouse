@@ -100,6 +100,9 @@ public sealed record NativeViewerOptions
     /// <summary>"race,face,head,body,hands,legs,feet", or null for no character.</summary>
     public string? Look { get; init; }
 
+    /// <summary>The name to draw over our own character.</summary>
+    public string? PlayerName { get; init; }
+
     /// <summary>The server's Vana'diel clock in seconds; 0 runs the renderer's own.</summary>
     public uint ServerClock { get; init; }
 
@@ -207,6 +210,7 @@ public sealed partial class NativeViewer : IDisposable
         IntPtr facing = Utf8(options.CharacterFacing);
         IntPtr shot = Utf8(options.ScreenshotPath);
         IntPtr zoneName = Utf8(options.ZoneName);
+        IntPtr playerName = Utf8(options.PlayerName);
 
         try
         {
@@ -220,6 +224,7 @@ public sealed partial class NativeViewer : IDisposable
                 CharacterAt = at,
                 CharacterFacing = facing,
                 ZoneName = zoneName,
+                PlayerName = playerName,
                 TimeOfDay = options.TimeOfDay ?? -1,
                 ScreenshotPath = shot,
                 ScreenshotAfterFrames = options.ScreenshotAfterFrames,
@@ -329,6 +334,7 @@ public sealed partial class NativeViewer : IDisposable
         public IntPtr CharacterAt;
         public IntPtr CharacterFacing;
         public IntPtr ZoneName;
+        public IntPtr PlayerName;
         public int TimeOfDay;
         public IntPtr ScreenshotPath;
         public int ScreenshotAfterFrames;

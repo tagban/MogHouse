@@ -461,7 +461,14 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                         liveRadar = zoneState is null
                             ? null
                             : LiveRadar.Open(selected.Zone, zoneState.X, zoneState.Vertical, zoneState.Depth,
-                                             zoneState.GameTime);
+                                             zoneState.GameTime, selected.Name,
+                                             // The roster knows our race and face; the
+                                             // server never sends us the entity update
+                                             // it sends for everyone else, so equipment
+                                             // has to wait. Race alone is the difference
+                                             // between a Tarutaru and a Hume, which is
+                                             // the part you notice.
+                                             $"{selected.Race},{selected.Face},0,0,0,0,0");
                     }
 
                     // Closing the window is how a person ends the session, so it
@@ -1020,7 +1027,8 @@ sealed class LiveRadar : IDisposable
     /// the server reported. Returns null, with a reason, if anything needed is
     /// missing - a radar is not worth failing a login over.
     /// </summary>
-    public static LiveRadar? Open(int zoneId, float x, float vertical, float depth, uint serverClock = 0)
+    public static LiveRadar? Open(int zoneId, float x, float vertical, float depth, uint serverClock = 0,
+                                  string? playerName = null, string? playerLook = null)
     {
         string keys = Environment.GetEnvironmentVariable("MOGHOUSE_FFXI_KEYTABLE") ?? "";
         string keys2 = Environment.GetEnvironmentVariable("MOGHOUSE_FFXI_KEYTABLE2") ?? "";
@@ -1055,7 +1063,10 @@ sealed class LiveRadar : IDisposable
             ZonePath = zonePath,
             KeyTablePath = keys,
             KeyTable2Path = keys2,
-            Look = Environment.GetEnvironmentVariable("MOGHOUSE_LOOK") ?? "1,0,0,1,1,1,1",
+            // Who we actually are, when the caller knows. The fallback is a
+            // hume male, which is what every character used to be regardless of
+            // what the roster said they were.
+            Look = playerLook ?? Environment.GetEnvironmentVariable("MOGHOUSE_LOOK") ?? "1,0,0,1,1,1,1",
             // The server's own clock, so this client and a retail one
             // side by side show the same hour and the same light.
             ServerClock = serverClock,
@@ -1074,6 +1085,7 @@ sealed class LiveRadar : IDisposable
             // it. The wait is in frames, and it has to outlast the first few
             // entity updates or the shot shows an empty radar.
             ZoneName = FfxiZoneNames.Get((uint)zoneId) ?? $"ZONE {zoneId}",
+            PlayerName = playerName,
             ScreenshotPath = Environment.GetEnvironmentVariable("MOGHOUSE_SCREENSHOT"),
             ScreenshotAfterFrames =
                 int.TryParse(Environment.GetEnvironmentVariable("MOGHOUSE_SCREENSHOT_AFTER"), out int after)

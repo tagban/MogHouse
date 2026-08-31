@@ -95,6 +95,10 @@ struct ViewerOptions
     /// table and does not want one - the client already knows what zone it
     /// asked for, so it says.
     std::optional<std::string> zoneName;
+
+    /// Our own character's name, for the plate over its head. Unset draws none,
+    /// which is what the standalone viewer with nobody logged in wants.
+    std::optional<std::string> playerName;
     std::optional<std::string> camera;           ///< "x,y,z"
     std::optional<std::string> cameraLook;       ///< "yaw,pitch" in degrees
 
