@@ -230,6 +230,16 @@ public:
     void requestJump();
     bool takeJump();
 
+    /// Somebody the player asked to talk to, taken once.
+    ///
+    /// An NPC volunteers nothing: the server runs its onTrigger only when
+    /// asked, so a client that never asks hears nothing and looks like it has
+    /// broken dialogue rather than one that never started a conversation.
+    /// The renderer knows who is nearby and can be pointed at; only the client
+    /// can do the asking.
+    void requestTalk(uint32_t entityId);
+    bool takeTalk(uint32_t& entityId);
+
     /// A line the player typed and pressed return on, taken once.
     ///
     /// The renderer has no socket; the client does. Anything typed here has to
@@ -256,6 +266,7 @@ private:
     float character_[4]{};
     bool haveCharacter_{false};
     std::atomic<bool> jump_{false};
+    std::atomic<uint32_t> talk_{0};
     std::deque<std::string> outgoing_;
     float placement_[4]{};
     bool havePlacement_{false};

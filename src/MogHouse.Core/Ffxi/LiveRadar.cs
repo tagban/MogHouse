@@ -188,6 +188,9 @@ public sealed class LiveRadar : IDisposable
         _viewer.SetZoneLines(markers);
     }
 
+    /// <summary>Who the player asked to talk to this frame, or 0.</summary>
+    public uint TakeTalk() => _viewer.TakeTalk();
+
     public void Say(string? sender, string? text)
     {
         if (_closed)

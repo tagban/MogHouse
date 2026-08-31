@@ -1228,7 +1228,19 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
                 }
             }
 
-            radar?.Publish(tracker);
+            // Somebody the player pressed E at. The renderer knows who is in
+        // front; the ActIndex the server wants is the tracker's business.
+        if (radar?.TakeTalk() is uint talkTo and > 0)
+        {
+            var facing = tracker.Visible(DateTimeOffset.UtcNow)
+                                .FirstOrDefault(e => e.UniqueNo == talkTo);
+            if (facing is not null)
+            {
+                await session.TalkToAsync(facing.UniqueNo, facing.ActIndex);
+            }
+        }
+
+        radar?.Publish(tracker);
 
             if (radar is not null && radar.Closed)
             {

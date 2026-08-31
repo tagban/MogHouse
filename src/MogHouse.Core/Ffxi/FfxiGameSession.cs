@@ -865,6 +865,23 @@ public sealed class FfxiGameSession : IDisposable
         }
     }
 
+    /// <summary>
+    /// Talks to an NPC, which is the only way to make one say anything.
+    ///
+    /// The server runs an NPC's onTrigger when asked and not before, and
+    /// answers with either a line of dialogue as a TALKNUM id or an event.
+    /// Both now reach the chat window.
+    /// </summary>
+    public async Task TalkToAsync(uint uniqueNo, ushort actIndex)
+    {
+        if (_zone is null || _zoneEndpoint is null)
+        {
+            return;
+        }
+
+        await _zone.SendActionAsync(_zoneEndpoint, uniqueNo, actIndex);
+    }
+
     public async Task SayAsync(string message, FfxiChatKind kind = FfxiChatKind.Say)
     {
         if (_zone is null || _zoneEndpoint is null)

@@ -324,6 +324,9 @@ public sealed partial class NativeViewer : IDisposable
     /// </summary>
     public bool TakeJump() => !_disposed && _handle != IntPtr.Zero && mh_viewer_take_jump(_handle) != 0;
 
+    /// <summary>Who the player asked to talk to, or 0 if nobody.</summary>
+    public uint TakeTalk() => _disposed || _handle == IntPtr.Zero ? 0 : mh_viewer_take_talk(_handle);
+
     /// <summary>
     /// The next line the player typed, or null if they have not pressed return
     /// since this was last called.
@@ -422,6 +425,9 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static partial int mh_viewer_take_jump(IntPtr viewer);
+
+    [LibraryImport(LibraryName)]
+    private static partial uint mh_viewer_take_talk(IntPtr viewer);
 
     [LibraryImport(LibraryName)]
     private static unsafe partial int mh_viewer_take_chat(IntPtr viewer, byte* buffer, int capacity);

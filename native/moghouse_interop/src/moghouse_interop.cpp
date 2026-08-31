@@ -146,6 +146,17 @@ void mh_viewer_set_zone_lines(MhViewerHandle viewer, const MhZoneLine* lines, in
     viewer->link.setZoneLines(std::move(copied));
 }
 
+uint32_t mh_viewer_take_talk(MhViewerHandle viewer)
+{
+    if (!viewer)
+    {
+        return 0;
+    }
+
+    uint32_t entityId = 0;
+    return viewer->link.takeTalk(entityId) ? entityId : 0;
+}
+
 void mh_viewer_push_chat(MhViewerHandle viewer, const char* line)
 {
     if (!viewer || !line)

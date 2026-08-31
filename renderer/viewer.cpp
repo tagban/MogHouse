@@ -572,6 +572,16 @@ void mh::ViewerLink::requestJump() { jump_ = true; }
 /// set it.
 bool mh::ViewerLink::takeJump() { return jump_.exchange(false); }
 
+void mh::ViewerLink::requestTalk(uint32_t entityId) { talk_ = entityId; }
+
+/// Exchange rather than a read and a clear, for the same reason takeJump is.
+/// Entity 0 is nobody, which is what makes it usable as "nothing pending".
+bool mh::ViewerLink::takeTalk(uint32_t& entityId)
+{
+    entityId = talk_.exchange(0);
+    return entityId != 0;
+}
+
 void mh::ViewerLink::stop() { stop_ = true; }
 
 bool mh::ViewerLink::stopping() const { return stop_; }
@@ -2465,6 +2475,52 @@ constexpr float kGravity = 26.0f;
                         {
                             link->requestJump();
                         }
+                    }
+                }
+                else if (event.key.key == SDLK_E && driving && link)
+                {
+                    // Talk to whoever is closest in front.
+                    //
+                    // The real client targets first and acts second; this is
+                    // the short version, because a target you cannot see the
+                    // name of is not worth the extra step yet. In front rather
+                    // than merely near, so standing between two NPCs picks the
+                    // one being faced instead of whichever happens to be a few
+                    // centimetres closer.
+                    const float facing = camera.yaw;
+                    const float aheadX = -std::sin(facing);
+                    const float aheadZ = -std::cos(facing);
+
+                    uint32_t chosen = 0;
+                    float best = 0.0f;
+                    for (const mh::RadarEntity& entity : radarEntities)
+                    {
+                        const float dx = entity.x - characterAt.x;
+                        const float dz = entity.z - characterAt.z;
+                        const float distance = std::sqrt(dx * dx + dz * dz);
+                        if (distance < 0.01f || distance > 6.0f)
+                        {
+                            continue;
+                        }
+
+                        // How squarely it is in front, as a cosine.
+                        const float towards = (dx / distance) * aheadX + (dz / distance) * aheadZ;
+                        if (towards < 0.5f)
+                        {
+                            continue;   // off to the side or behind
+                        }
+
+                        const float score = towards / distance;
+                        if (score > best)
+                        {
+                            best = score;
+                            chosen = entity.id;
+                        }
+                    }
+
+                    if (chosen != 0)
+                    {
+                        link->requestTalk(chosen);
                     }
                 }
                 else if (event.key.key == SDLK_KP_MINUS)

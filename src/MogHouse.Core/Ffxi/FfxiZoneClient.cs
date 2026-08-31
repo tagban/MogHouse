@@ -441,6 +441,16 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
     public async Task SendChatAsync(IPEndPoint zoneServer, FfxiChatKind kind, string message, CancellationToken ct = default) =>
         await SendEncryptedAsync(zoneServer, FfxiChatPacket.Build(kind, message, (ushort)(_ownCounter + 1)), ct);
 
+    /// <summary>
+    /// Acts on a target - talking to an NPC, for now. Same sync caveat as
+    /// chat: a stale counter is skipped silently by the server's parse loop.
+    /// </summary>
+    public async Task SendActionAsync(IPEndPoint zoneServer, uint uniqueNo, ushort actIndex,
+                                      ushort actionId = FfxiActionPacket.ActionTalk,
+                                      CancellationToken ct = default) =>
+        await SendEncryptedAsync(zoneServer, FfxiActionPacket.Build(uniqueNo, actIndex, actionId,
+                                                                    (ushort)(_ownCounter + 1)), ct);
+
     /// <summary>Sends a tell, with the same sync caveat as <see cref="SendChatAsync"/>.</summary>
     public async Task SendTellAsync(IPEndPoint zoneServer, string recipient, string message, CancellationToken ct = default) =>
         await SendEncryptedAsync(zoneServer, FfxiTellPacket.Build(recipient, message, (ushort)(_ownCounter + 1)), ct);

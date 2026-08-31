@@ -139,6 +139,10 @@ typedef struct MhZoneLine
 /// the zone it came from and means nothing on the other side.
 MH_API void mh_viewer_set_zone_lines(MhViewerHandle viewer, const MhZoneLine* lines, int32_t count);
 
+/// Takes the entity the player asked to talk to, if any. Returns 0 when
+/// nothing is pending; the request is consumed either way.
+MH_API uint32_t mh_viewer_take_talk(MhViewerHandle viewer);
+
 /// Adds one line to the chat panel. UTF-8 in, though the panel's font only
 /// covers letters, digits and a little punctuation - anything else becomes a
 /// space rather than a wrong glyph.
