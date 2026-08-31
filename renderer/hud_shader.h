@@ -84,7 +84,9 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
         let width = widthCells * cellWide;
 
         // A little air around the text, which is where the background shows.
-        let padX = cellWide * 0.25;
+        // Wide enough on the right for the last glyph's full cell, which
+        // reaches past where the pen stopped.
+        let padX = cellWide * 0.9;
         let padY = cellHigh * 0.12;
 
         let local = vec2<f32>(in.ndc.x - box.x, in.ndc.y - box.y);
@@ -98,18 +100,35 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
             alpha = max(alpha, box.w);
         }
 
-        if (local.x < 0.0 || local.x >= width || local.y < 0.0 || local.y >= cellHigh) {
+        // A cell of slack on the right, because the last glyph reaches past
+        // where the pen stopped. Without it the box clips the final letter
+        // even though the sampling no longer does.
+        if (local.x < 0.0 || local.x >= width + cellWide || local.y < 0.0 || local.y >= cellHigh) {
             continue;   // in the padding, not on a glyph
         }
 
+        // Each glyph is sampled across its whole cell, not across its
+        // advance.
+        //
+        // The advance is how far the pen moves on to the next letter; the ink,
+        // and especially the outline around it, is wider than that. Sampling
+        // only the advance cut the right hand edge off every letter - most
+        // visibly on narrow ones, where the outline is a larger share of the
+        // width.
+        //
+        // Cells therefore overlap, so this cannot stop at the first hit: it
+        // takes the strongest coverage of any glyph over this fragment, which
+        // is also what makes neighbouring outlines join up instead of
+        // stopping dead against each other.
         let xCells = local.x / cellWide;
+        var fill = 0.0;
+        var outline = 0.0;
         for (var i = 0; i < kChars; i = i + 1) {
             let glyph = hud.glyphs[slot * kChars + i];
-            let advance = glyph.z;
-            if (advance <= 0.0) {
+            if (glyph.z <= 0.0) {
                 continue;
             }
-            if (xCells < glyph.y || xCells >= glyph.y + advance) {
+            if (xCells < glyph.y || xCells >= glyph.y + 1.0) {
                 continue;
             }
 
@@ -122,15 +141,14 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
             let uv = vec2<f32>((col * cell + insideX * cell) / atlasWidth,
                                (row * cell + insideY * cell) / atlasHeight);
             let sampled = textureSampleLevel(fontTexture, fontSampler, uv, 0.0);
+            fill = max(fill, sampled.r);
+            outline = max(outline, sampled.g);
+        }
 
-            let fill = sampled.r;
-            let outline = sampled.g;
-            let together = max(fill, outline);
-            if (together > 0.02) {
-                colour = mix(vec3<f32>(0.0, 0.0, 0.0), hud.colours[slot].rgb, fill);
-                alpha = max(alpha, together);
-            }
-            break;
+        let together = max(fill, outline);
+        if (together > 0.02) {
+            colour = mix(vec3<f32>(0.0, 0.0, 0.0), hud.colours[slot].rgb, fill);
+            alpha = max(alpha, together);
         }
     }
 

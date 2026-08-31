@@ -2117,7 +2117,12 @@ constexpr float kGravity = 26.0f;
         const bool forward = held[SDL_SCANCODE_W] || held[SDL_SCANCODE_KP_8];
         const bool backward = held[SDL_SCANCODE_S] || held[SDL_SCANCODE_KP_2];
 
-        const float turn = (held[SDL_SCANCODE_KP_6] ? 1.0f : 0.0f) - (held[SDL_SCANCODE_KP_4] ? 1.0f : 0.0f);
+        // 4 turns left and 6 turns right, from the character's point of view.
+        //
+        // Yaw runs the other way here - forward is (sin yaw, 0, cos yaw), so a
+        // rising yaw swings to the left - and adding the turn directly made
+        // both keys do the opposite of what they say.
+        const float turn = (held[SDL_SCANCODE_KP_4] ? 1.0f : 0.0f) - (held[SDL_SCANCODE_KP_6] ? 1.0f : 0.0f);
         if (turn != 0.0f)
         {
             camera.yaw += turn * 2.2f * delta;
@@ -2499,8 +2504,8 @@ constexpr float kGravity = 26.0f;
                 // radar's own top edge was already at 0.96 and the clock drew
                 // off the top of the window.
                 radar.placement[0] = 0.78f;
-                radar.placement[1] = 0.58f;
-                radar.placement[2] = 0.24f;
+                radar.placement[1] = 0.50f;
+                radar.placement[2] = 0.21f;
                 radar.placement[3] = static_cast<float>(width) / static_cast<float>(height);
 
                 radar.mapExtent[0] = mapCentreX;
@@ -2517,11 +2522,11 @@ constexpr float kGravity = 26.0f;
 
                 const size_t shown = std::min(radarEntities.size(), static_cast<size_t>(mh::kRadarMaxEntities));
                 radar.counts[0] = static_cast<float>(shown);
-                radar.counts[1] = static_cast<float>(labelIndices.size());
-                for (size_t i = 0; i < labelIndices.size(); ++i)
-                {
-                    radar.label[i][0] = static_cast<float>(labelIndices[i]);
-                }
+                // The radar's own zone label is off. It was drawn from the
+                // 4x6 bitmap font across the bottom of the map, and the HUD
+                // now sets the same name in a real typeface underneath - two
+                // of them, one of them worse, in the same place.
+                radar.counts[1] = 0.0f;
                 for (size_t i = 0; i < shown; ++i)
                 {
                     radar.entities[i][0] = radarEntities[i].x;
@@ -2539,12 +2544,21 @@ constexpr float kGravity = 26.0f;
             {
                 HudUniforms hud{};
                 const float windowAspect = static_cast<float>(width) / static_cast<float>(height);
-                // One atlas cell in NDC y, which is not the height of the
-                // letters: a glyph fills about two thirds of its cell and the
-                // rest is room for the outline and the descenders. Asking for
-                // 0.052 was asking for text about 0.035 tall, which is why it
-                // stayed hard to read after being made "bigger" once already.
-                hud.counts[1] = 0.085f;
+                // One atlas texel to one screen pixel.
+                //
+                // Raising this by hand twice did not fix the text, because the
+                // problem was never the size - it was the sampling. The atlas
+                // was generated at a 72 pixel cell and drawn at about 19, so
+                // every glyph was minified nearly four times through a linear
+                // filter with no mipmaps, which thins the strokes and softens
+                // the edges into mush. Bigger only made bigger mush.
+                //
+                // Deriving the size from the atlas and the window instead
+                // keeps it at 1:1, where the glyph the generator drew is the
+                // glyph that reaches the screen. The atlas is generated near
+                // display size for the same reason; a scale far from 1.0 will
+                // soften again, so the labels stay close to it.
+                hud.counts[1] = static_cast<float>(textFont.cell) * 2.0f / static_cast<float>(height);
                 hud.counts[2] = windowAspect;
                 hud.atlas[0] = static_cast<float>(textFont.columns);
                 hud.atlas[1] = static_cast<float>(textFont.cell);
@@ -2556,8 +2570,19 @@ constexpr float kGravity = 26.0f;
                 // Laid out around the radar rather than at fixed corners, so
                 // the two stay together if the radar ever moves.
                 const float radarCentreX = 0.78f;
-                const float radarCentreY = 0.58f;
-                const float radarRadius = 0.24f;
+                const float radarCentreY = 0.50f;
+                const float radarRadius = 0.21f;
+
+                // Stacked by the height of a line rather than by numbers
+                // chosen to look right at one text size. The size is derived
+                // from the atlas and the window now, so anything hand-tuned
+                // against it comes apart the moment either changes - which is
+                // exactly what happened when the text went to 1:1 and every
+                // label landed on its neighbour.
+                const float line = hud.counts[1];
+                const float gap = line * 0.18f;
+                const float above = radarCentreY + radarRadius;
+                const float below = radarCentreY - radarRadius;
 
                 const auto label = [&](const std::string& text, float centreX, float bottomY, float scale,
                                        const float* tint, float background) {
@@ -2604,12 +2629,12 @@ constexpr float kGravity = 26.0f;
                                                    "Iceday",     "Lightningday", "Lightsday", "Darksday"};
                 char clock[32] = {};
                 std::snprintf(clock, sizeof(clock), "%02d:%02d", clockMinutes / 60, clockMinutes % 60);
-                label(clock, radarCentreX, radarCentreY + radarRadius + 0.105f, 1.15f, kHudBright, 0.5f);
+                label(clock, radarCentreX, above + gap * 2.0f + line * 1.6f, 1.0f, kHudBright, 0.55f);
 
                 if (vanaSeconds > 0)
                 {
                     label(kWeekdays[(vanaSeconds / 86400ull) % 8ull], radarCentreX,
-                          radarCentreY + radarRadius + 0.048f, 0.62f, kHudDim, 0.5f);
+                          above + gap * 2.0f + line * 0.5f, 1.0f, kHudDim, 0.55f);
                 }
 
                 // Compass letters around the ring.
@@ -2622,18 +2647,17 @@ constexpr float kGravity = 26.0f;
                 {
                     const float ringX = radarRadius * 1.16f / windowAspect;
                     const float ringY = radarRadius * 1.16f;
-                    const float half = hud.counts[1] * 0.62f * 0.5f;
-                    label("N", radarCentreX, radarCentreY + ringY - half, 0.62f, kHudBright, 0.0f);
-                    label("S", radarCentreX, radarCentreY - ringY - half, 0.62f, kHudDim, 0.0f);
-                    label("E", radarCentreX + ringX, radarCentreY - half, 0.62f, kHudDim, 0.0f);
-                    label("W", radarCentreX - ringX, radarCentreY - half, 0.62f, kHudDim, 0.0f);
+                    const float half = hud.counts[1] * 0.5f;
+                    label("N", radarCentreX, radarCentreY + ringY - half, 1.0f, kHudBright, 0.0f);
+                    label("S", radarCentreX, radarCentreY - ringY - half, 1.0f, kHudDim, 0.0f);
+                    label("E", radarCentreX + ringX, radarCentreY - half, 1.0f, kHudDim, 0.0f);
+                    label("W", radarCentreX - ringX, radarCentreY - half, 1.0f, kHudDim, 0.0f);
                 }
 
                 // The zone name, as a ribbon under the radar.
                 if (options.zoneName)
                 {
-                    label(*options.zoneName, radarCentreX, radarCentreY - radarRadius - 0.082f, 0.80f, kHudBright,
-                          0.5f);
+                    label(*options.zoneName, radarCentreX, below - gap * 2.0f - line, 1.0f, kHudBright, 0.55f);
                 }
 
                 // And where we are. FFXI shows a lettered grid here; that
@@ -2644,7 +2668,7 @@ constexpr float kGravity = 26.0f;
                 {
                     char position[32] = {};
                     std::snprintf(position, sizeof(position), "%.0f  %.0f", characterAt.x, -characterAt.z);
-                    label(position, radarCentreX, radarCentreY - radarRadius - 0.152f, 0.62f, kHudDim, 0.5f);
+                    label(position, radarCentreX, below - gap * 3.0f - line * 2.0f, 1.0f, kHudDim, 0.55f);
                 }
 
                 if (labels > 0)
@@ -2666,7 +2690,10 @@ constexpr float kGravity = 26.0f;
                 // One atlas cell, in NDC y. A cell is taller than the glyph
                 // inside it - the outline needs somewhere to go - so the text
                 // reads a good deal smaller than this number suggests.
-                plate.counts[1] = 0.085f;
+                // 1:1 with the atlas, as the HUD is - see there. Names sit
+                // at a distance and shrink with it, so this is the size they
+                // reach at their crispest rather than a size they always are.
+                plate.counts[1] = static_cast<float>(textFont.cell) * 2.0f / static_cast<float>(height);
                 plate.counts[2] = windowAspect;
                 plate.atlas[0] = static_cast<float>(textFont.columns);
                 plate.atlas[1] = static_cast<float>(textFont.cell);

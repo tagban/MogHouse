@@ -96,27 +96,31 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
         let left = screen.x - width * 0.5;
         let local = vec2<f32>(in.ndc.x - left, in.ndc.y - screen.y);
 
-        if (local.x < 0.0 || local.x >= width || local.y < 0.0 || local.y >= textHeight) {
+        // A cell of slack on the right, for the last glyph reaching past
+        // where the pen stopped.
+        if (local.x < 0.0 || local.x >= width + cellWide || local.y < 0.0 || local.y >= textHeight) {
             continue;   // the cheap test almost every fragment takes
         }
 
         // Which glyph of this name the fragment is over. The offsets are
         // already laid out, so this is a search rather than an accumulation.
+        // Sampled across the whole cell rather than across the advance -
+        // see hud_shader.h, which had the same fault and the same fix. The
+        // advance is how far the pen moves; the ink and its outline are wider,
+        // and sampling only the advance clips every letter's right edge.
         let xCells = local.x / cellWide;
+        var fill = 0.0;
+        var outline = 0.0;
         for (var i = 0; i < kChars; i = i + 1) {
             let glyph = plate.glyphs[slot * kChars + i];
-            let advance = glyph.z;
-            if (advance <= 0.0) {
+            if (glyph.z <= 0.0) {
                 continue;
             }
-            if (xCells < glyph.y || xCells >= glyph.y + advance) {
+            if (xCells < glyph.y || xCells >= glyph.y + 1.0) {
                 continue;
             }
 
-            // Into the glyph's own cell, then into the atlas. The cell is
-            // square and the glyph sits at its top left, so a proportional
-            // glyph uses only part of its cell's width.
-            let insideX = (xCells - glyph.y) / 1.0;
+            let insideX = xCells - glyph.y;
             let insideY = 1.0 - local.y / textHeight;
 
             let index = i32(glyph.x);
@@ -126,18 +130,16 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
             let uv = vec2<f32>((col * cell + insideX * cell) / atlasWidth,
                                (row * cell + insideY * cell) / atlasHeight);
             let sampled = textureSampleLevel(fontTexture, fontSampler, uv, 0.0);
+            fill = max(fill, sampled.r);
+            outline = max(outline, sampled.g);
+        }
 
-            // Red is the glyph, green is the outline around it. Drawing the
-            // outline first and the glyph over it keeps a light name readable
-            // on pale stone without a panel behind it.
-            let fill = sampled.r;
-            let outline = sampled.g;
-            let together = max(fill, outline);
-            if (together > 0.02) {
-                colour = mix(vec3<f32>(0.0, 0.0, 0.0), plate.colours[slot].rgb, fill);
-                alpha = max(alpha, together);
-            }
-            break;
+        // Red is the glyph, green is the outline around it, which is what
+        // keeps a light name readable on pale stone with no panel behind it.
+        let together = max(fill, outline);
+        if (together > 0.02) {
+            colour = mix(vec3<f32>(0.0, 0.0, 0.0), plate.colours[slot].rgb, fill);
+            alpha = max(alpha, together);
         }
     }
 
