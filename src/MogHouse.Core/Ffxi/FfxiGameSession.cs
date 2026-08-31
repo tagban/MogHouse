@@ -349,6 +349,35 @@ public sealed class FfxiGameSession : IDisposable
         // nothing, which looks exactly like a server with nothing to say.
         await _zone.SendServerMessageRequestAsync(_zoneEndpoint, 0, ct);
 
+        // An event the character was already in when we arrived.
+        //
+        // Answering the 0x032 the server sends only covers events it starts
+        // while we are listening. A character who was parked in one - anyone
+        // who logged out mid-cutscene, or was put somewhere by other means -
+        // is already in it at zone-in, and the server does not announce it
+        // again. It is in the login reply, which says what event is open.
+        //
+        // Nobody sees a character in an event, so this is the difference
+        // between existing and not. EVENTEND is validated on the event id
+        // alone, so our own ids are fine even when the event belongs to an
+        // NPC.
+        // The server fills these four in only when it has an event open
+        // (0x00a_login.cpp: `if (csid != -1)`), and sets the character's
+        // animation to Event in the same breath - so all four zero means no
+        // event, and anything else means we are standing in one.
+        //
+        // EventNum is the zone and EventPara the event id, exactly as in the
+        // 0x032 we would have answered had we been listening, so they go back
+        // as they arrived.
+        if (ZoneState.EventNo != 0 || ZoneState.EventNum != 0 ||
+            ZoneState.EventPara != 0 || ZoneState.EventMode != 0)
+        {
+            Status?.Invoke($"Arrived inside event {ZoneState.EventPara} - ending it.");
+            _endedEvents.Add((ZoneState.UniqueNo, ZoneState.EventPara));
+            await _zone.SendEventEndAsync(_zoneEndpoint, ZoneState.UniqueNo, ZoneState.ActIndex,
+                                          ZoneState.EventNum, ZoneState.EventPara, ct);
+        }
+
         TryLoadNavMesh();
         TryLoadZoneLines();
         Status?.Invoke($"In {(ZoneState is null ? "zone" : $"zone {ZoneState.ZoneNo}")} as {Handoff.CharacterName}.");

@@ -1073,7 +1073,12 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
                                       session.ZoneState.GameTime, selected.Name, look);
     if (radar is null)
     {
+        // We are logged in at this point, so walking away here is what
+        // leaves a session for the server to reap on a timeout - the next
+        // attempt then fails on 201 for a minute, blaming the login rather
+        // than the renderer that actually failed.
         Console.WriteLine("Could not open the renderer.");
+        await session.LogoutAsync();
         return 1;
     }
 
@@ -1114,65 +1119,82 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
     // to be reaped on a timeout.
     bool leaving = false;
 
-    while (radar is not null && session.IsConnected && !leaving)
-    {
-        // Where the renderer walked to, which is what the zone-line check runs
-        // against.
-        if (radar.Position() is (float x, float vertical, float depth, sbyte direction))
-        {
-            session.PlaceAt(x, vertical, depth, direction);
-        }
+    // A file another process can create to ask us to log out. Closing the
+    // window works when there is someone at it; this is how a script stops
+    // the client without killing it and stranding the session.
+    string? stopFile = flags.TryGetValue("zone-stopfile", out string? stopPath) && stopPath.Length > 0
+        ? stopPath
+        : null;
 
-        while (radar?.TakeChat() is { Length: > 0 } typed)
+    // The character stays logged in on the server until we say otherwise,
+    // and a session left behind locks the next login out for a minute. An
+    // exception in the loop strands one exactly as surely as a clean exit
+    // does, so the goodbye goes in a finally.
+    try
+    {
+        while (radar is not null && session.IsConnected && !leaving && !(stopFile is not null && File.Exists(stopFile)))
         {
-            // The client's own commands never reach the server as chat.
-            FfxiClientCommand command = FfxiClientCommands.Parse(typed);
-            switch (command.Kind)
+            // Where the renderer walked to, which is what the zone-line check runs
+            // against.
+            if (radar.Position() is (float x, float vertical, float depth, sbyte direction))
             {
-                case FfxiClientCommandKind.Logout:
-                    radar?.Say("", "Logging out...");
-                    await session.LogoutAsync(FfxiLogoutKind.Logout);
-                    leaving = true;
-                    break;
-
-                case FfxiClientCommandKind.Shutdown:
-                    radar?.Say("", "Shutting down...");
-                    await session.LogoutAsync(FfxiLogoutKind.Shutdown);
-                    leaving = true;
-                    break;
-
-                case FfxiClientCommandKind.Unsupported:
-                    radar?.Say("", $"/{command.Name} is not something this client does yet.");
-                    break;
-
-                default:
-                    await session.SayAsync(typed);
-                    break;
+                session.PlaceAt(x, vertical, depth, direction);
             }
+
+            while (radar?.TakeChat() is { Length: > 0 } typed)
+            {
+                // The client's own commands never reach the server as chat.
+                FfxiClientCommand command = FfxiClientCommands.Parse(typed);
+                switch (command.Kind)
+                {
+                    case FfxiClientCommandKind.Logout:
+                        radar?.Say("", "Logging out...");
+                        await session.LogoutAsync(FfxiLogoutKind.Logout);
+                        leaving = true;
+                        break;
+
+                    case FfxiClientCommandKind.Shutdown:
+                        radar?.Say("", "Shutting down...");
+                        await session.LogoutAsync(FfxiLogoutKind.Shutdown);
+                        leaving = true;
+                        break;
+
+                    case FfxiClientCommandKind.Unsupported:
+                        radar?.Say("", $"/{command.Name} is not something this client does yet.");
+                        break;
+
+                    default:
+                        await session.SayAsync(typed);
+                        break;
+                }
+            }
+
+            radar?.Publish(tracker);
+
+            if (radar is not null && radar.Closed)
+            {
+                break;
+            }
+
+            await Task.Delay(50);
         }
-
-        radar?.Publish(tracker);
-
-        if (radar is not null && radar.Closed)
+    }
+    finally
+    {
+        Console.WriteLine("Leaving.");
+        if (leaving)
         {
-            break;
+            // Already asked; give the server its Leavegame window rather than
+            // asking twice and closing underneath it.
+            await Task.Delay(TimeSpan.FromSeconds(6));   // the server's Leavegame effect runs five
         }
-
-        await Task.Delay(50);
+        else
+        {
+            await session.LogoutAsync();
+        }
+        radar?.Dispose();
     }
 
-    Console.WriteLine("Leaving.");
-    if (leaving)
-    {
-        // Already asked; give the server its Leavegame window rather than
-        // asking twice and closing underneath it.
-        await Task.Delay(TimeSpan.FromSeconds(6));   // the server's Leavegame effect runs five
-    }
-    else
-    {
-        await session.LogoutAsync();
-    }
-    radar?.Dispose();
     return 0;
 }
 

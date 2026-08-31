@@ -42,6 +42,34 @@ DIALOG_BASE = 6420
 NPC_BASE = 6720
 
 
+def decode(raw):
+    """One line of DAT text as something printable.
+
+    0x07 is a line break within one entry, not a separator between entries.
+    0x81 leads a two byte sequence the retail client renders as nothing in
+    English text, so it is dropped rather than shown as two replacement
+    characters in the middle of a word.
+    """
+    out = bytearray()
+    i = 0
+    while i < len(raw):
+        byte = raw[i]
+        if byte == 0x07:
+            out.append(0x0A)
+        elif byte in (0x81, 0x87) and i + 1 < len(raw):
+            # Two byte sequences. 0x87 0xB2 and 0x87 0xB3 are the quotes
+            # the menus are named in - "Map", "Markers" - and are worth
+            # keeping; the rest render as nothing in English text.
+            pair = raw[i + 1]
+            if byte == 0x87 and pair in (0xB2, 0xB3):
+                out.append(0x22)
+            i += 1
+        elif byte >= 0x20:
+            out.append(byte)
+        i += 1
+    return out.decode("ascii", "replace")
+
+
 def dialogue(table, zone):
     """Every line of text a zone can say, in order."""
     path = table.path(DIALOG_BASE + zone)
@@ -59,11 +87,15 @@ def dialogue(table, zone):
             lines.append("")
             continue
 
-        body = plain[offset + 6:offset + 2048]
-        end = body.find(b"\0")
-        if end >= 0:
-            body = body[:end]
-        lines.append(body.decode("ascii", "replace"))
+        # Four bytes of header, then the text, then 0xFF - which the
+        # file-wide XOR turns into 0x7F. Checked against LandSandBoat's own
+        # IDs.lua for this zone, which quotes by id the strings it uses:
+        # 14, 32, 4140 and 4702 all come back character for character. A
+        # six byte header ate the first two letters of every line, and a
+        # NUL terminator ran past the end of the text into what follows.
+        body = plain[offset + 4:offset + 4096]
+        stops = [at for at in (body.find(bytes([0])), body.find(bytes([0x7F]))) if at >= 0]
+        lines.append(decode(body[:min(stops, default=len(body))]))
     return lines
 
 

@@ -57,9 +57,16 @@ public sealed record FfxiZoneLoginReply(
     // so a non-zero EventNo on a character nobody can see is a strong signal,
     // not a curiosity.
     private const int OffsetEventNo = Body + 60;
-    private const int OffsetEventNum = Body + 84;
-    private const int OffsetEventPara = Body + 86;
-    private const int OffsetEventMode = Body + 88;
+    //
+    // Counted past GrapIDTbl[9] at 64 and MusicNum[5] at 82. Skipping the
+    // five music slots put these ten bytes early, so the event id read back
+    // as a background music track - a plausible-looking small number that
+    // the server rejected as the wrong event. LoginState at 124 and
+    // ZoneSubNo at 154 sit past all of it and were always right, which is
+    // what pins the rest of the layout down.
+    private const int OffsetEventNum = Body + 94;
+    private const int OffsetEventPara = Body + 96;
+    private const int OffsetEventMode = Body + 98;
     private const int OffsetLoginState = Body + 124;
     private const int OffsetGameTime = Body + 56;
     private const int OffsetMapNumber = Body + 62;
