@@ -398,6 +398,55 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
             await zone.SendGameOkAsync(zoneEndpoint);
             Console.WriteLine("Sent GP_CLI_COMMAND_GAMEOK (0x00C) - zone-in handshake completed.");
 
+            // The server starts an event at zone-in and waits to be told it is
+            // over. Until then the character is InEvent, and a character in an
+            // event is never spawned for anyone else: present, addressable by
+            // name, reachable with !goto, receiving everyone else's positions,
+            // and invisible to all of them.
+            //
+            // The map server said so every time we logged out:
+            //   Invalid GP_CLI_COMMAND_REQLOGOUT packet: Invalid state: InEvent
+            //
+            // Sent unconditionally, with event id zero. The server compares
+            // EventPara against currentEvent->eventId and said what it wanted:
+            //
+            //   Invalid GP_CLI_COMMAND_EVENTEND packet: Event ID mismatch 0 != 152
+            //
+            // Zero is a real event id here, not the absence of one - isInEvent
+            // tests eventId != -1 - so the zone-in event is event zero and
+            // there is nothing to read out of the login reply to find it.
+            //
+            // Which is just as well, because the EventNo, EventNum and
+            // EventPara offsets in FfxiZoneLoginReply are guesses that read
+            // 235 and 152 - the zone id and the same number three times - and
+            // sending those is exactly what produced the mismatch above.
+            if (zoneState is not null)
+            {
+                // Event 0, then event 7.
+                //
+                // scripts/quests/hiddenQuests/New_Character_Cutscenes.lua runs
+                // the opening cutscene for anyone whose newCharacterCS is still
+                // notSeen, and Quest's is. Its onZoneIn returns event 0 - "CS 0
+                // is not a typo" - and its onEventFinish for 0 immediately
+                // starts event 7 with isHidden set. Only when 7 finishes does
+                // notSeen clear.
+                //
+                // So ending event 0 alone moves the character from one hidden
+                // event straight into the next, which looks exactly like
+                // nothing happened. Both have to go.
+                //
+                // The same script explains the spawn point: it calls
+                // setPos(-280, -12, -90) itself, which is why this character
+                // has appeared at that spot every single time regardless of
+                // where it was left.
+                foreach (ushort cutscene in new ushort[] { 0, 7 })
+                {
+                    await zone.SendEventEndAsync(zoneEndpoint, zoneState.UniqueNo, zoneState.ActIndex, cutscene, cutscene);
+                    Console.WriteLine($"Sent GP_CLI_COMMAND_EVENTEND (0x05B) for event {cutscene}.");
+                    await Task.Delay(600);
+                }
+            }
+
             if (flags.TryGetValue("zone-hold", out string? holdSeconds) && int.TryParse(holdSeconds, out int seconds))
             {
                 Console.WriteLine("Ctrl+C to stop early.");

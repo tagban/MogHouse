@@ -455,6 +455,15 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
     public async Task SendGameOkAsync(IPEndPoint zoneServer, CancellationToken ct = default) =>
         await SendEncryptedAsync(zoneServer, FfxiGameOkPacket.Build((ushort)(_ownCounter + 1)), ct);
 
+    /// <summary>
+    /// Ends the event the server started at zone-in, so the character stops
+    /// being invisible to everyone else. See FfxiEventEndPacket.
+    /// </summary>
+    public async Task SendEventEndAsync(IPEndPoint zoneServer, uint uniqueNo, ushort actIndex, ushort eventNum,
+                                        ushort eventPara, CancellationToken ct = default) =>
+        await SendEncryptedAsync(
+            zoneServer, FfxiEventEndPacket.Build(uniqueNo, actIndex, eventNum, eventPara, (ushort)(_ownCounter + 1)), ct);
+
     /// <param name="onReply">
     /// Called for every decoded reply. Handy for tracing what the server is
     /// actually telling us during a session.
