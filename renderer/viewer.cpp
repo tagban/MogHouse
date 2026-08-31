@@ -1307,7 +1307,15 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         // (sin, cos) - the same convention camera.yaw and the radar notch use.
         // The model faces +x when unrotated, so the rotation that points it
         // along the heading is a quarter turn less.
-        const float turn = 1.57079633f - characterFacing;
+        //
+        // Less, not more. The matrix below sends local +x to
+        // (cos turn, 0, -sin turn); for that to equal (sin f, 0, cos f) the
+        // turn has to be f - pi/2. With the quarter turn the other way round
+        // the z component comes out negated, which is the same mistake the
+        // heading reported to the server had: correct only when facing due
+        // east or west, backwards when facing north, and reading as a
+        // character that turns the wrong way as it walks.
+        const float turn = characterFacing - 1.57079633f;
         const float c = std::cos(turn);
         const float sn = std::sin(turn);
         const float instance[16] = {c,  0, -sn, 0, 0, 1, 0, 0, sn, 0, c, 0,
@@ -1458,6 +1466,12 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 /// and fountain rims are walkable in FFXI; a canal is not.
 constexpr float kWadeDepth = 1.2f;
 
+/// How far a single step may drop before it is refused.
+///
+/// Generous enough for a stair tread or a kerb, short enough that walking off
+/// a quay or into a gap in the geometry stops at the edge.
+constexpr float kMaxStepDown = 1.6f;
+
 constexpr float kGravity = 26.0f;
 
     /// How far below the feet still counts as standing on something. Slopes
@@ -1601,26 +1615,46 @@ constexpr float kGravity = 26.0f;
                     !collision.empty() &&
                     !collision.groundAt(stepped.x, stepped.z, characterAt.y, kFallReach).has_value();
 
-                // Wading is fine, swimming is not - FFXI has none. Without
-                // this a canal is just a floor a long way down: the character
-                // walks off the quay and stands on the bottom.
+                // What a step is not allowed to do, beyond hitting a wall.
                 //
-                // Refused per axis rather than outright, so walking into a
-                // shoreline at an angle slides along it instead of sticking.
+                // Wading is fine, swimming is not - FFXI has none - so water
+                // deeper than the knee stops a step the way a wall does.
+                //
+                // And a drop stops it too. Blocking on walls alone is only as
+                // good as the walls: where a zone has a hole in it there is no
+                // wall around the hole, so a step off the edge is a legal step
+                // into a fall. FFXI does not let a character walk off an edge
+                // at all, and neither should this.
+                //
+                // Measured against the floor under each end rather than
+                // against the character's own height, so it reads the same
+                // whether they are standing or already in the air.
+                //
+                // Refused per axis rather than outright, so walking into an
+                // edge at an angle slides along it instead of sticking.
                 mh::Vec3 allowed = stepped;
                 if (!collision.empty() && !intoTheVoid)
                 {
-                    const auto tooDeep = [&](float x, float z) {
+                    const std::optional<float> here =
+                        collision.groundAt(characterAt.x, characterAt.z, characterAt.y, kFallReach);
+
+                    const auto refused = [&](float x, float z) {
                         const std::optional<float> depth = collision.waterDepthAt(x, z, characterAt.y);
-                        return depth && *depth > kWadeDepth;
+                        if (depth && *depth > kWadeDepth)
+                        {
+                            return true;
+                        }
+                        const std::optional<float> there = collision.groundAt(x, z, characterAt.y, kFallReach);
+                        return here && there && (*here - *there) > kMaxStepDown;
                     };
-                    if (tooDeep(allowed.x, allowed.z))
+
+                    if (refused(allowed.x, allowed.z))
                     {
                         allowed = {stepped.x, stepped.y, characterAt.z};
-                        if (tooDeep(allowed.x, allowed.z))
+                        if (refused(allowed.x, allowed.z))
                         {
                             allowed = {characterAt.x, stepped.y, stepped.z};
-                            if (tooDeep(allowed.x, allowed.z))
+                            if (refused(allowed.x, allowed.z))
                             {
                                 allowed = {characterAt.x, stepped.y, characterAt.z};
                             }
