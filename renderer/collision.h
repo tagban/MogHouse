@@ -109,6 +109,16 @@ public:
     /// the server reports them in deep water.
     std::optional<float> waterDepthAt(float x, float z, float y) const;
 
+    /// How far along `from` -> `to` the first solid face is, as a fraction of
+    /// the way, or nothing if the line is clear.
+    ///
+    /// The camera needs this. Orbiting a character indoors puts the eye through
+    /// the wall behind them and leaves you looking at the outside of the house
+    /// they are standing in - the game pulls the camera in to the wall instead.
+    /// Walls only: floors and ceilings would drag the camera down every time it
+    /// looked up a slope.
+    std::optional<float> firstWallAlong(const Vec3& from, const Vec3& to) const;
+
     Vec3 boundsMin() const { return boundsMin_; }
     Vec3 boundsMax() const { return boundsMax_; }
 

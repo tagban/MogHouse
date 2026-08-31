@@ -101,10 +101,11 @@ inline constexpr float kHudDim[3] = {0.78f, 0.82f, 0.90f};
 inline constexpr float kNameWhite[3] = {0.98f, 0.98f, 1.00f};
 inline constexpr float kNameNpc[3] = {0.60f, 0.98f, 0.60f};
 
-/// How far above a character's feet its name sits. The models are about 1.8
-/// tall, so this is just clear of the head - far enough not to touch it, close
-/// enough that a crowd's names do not become a band across the screen.
-inline constexpr float kPlateHeight = 1.95f;
+/// How far above the top of a character its name sits. Added to the model's
+/// own height rather than used as one: a fixed height tuned for a hume left a
+/// tarutaru's name floating a whole body length over its head, because a taru
+/// is 0.94 tall against a hume's 1.79.
+inline constexpr float kPlateClearance = 0.16f;
 inline constexpr float kNameMonster[3] = {0.98f, 0.86f, 0.30f};
 
 /// Matches HudUniforms in hud_shader.h.
@@ -510,6 +511,11 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     std::setvbuf(stdout, nullptr, _IONBF, 0);
 
     std::string zoneId;
+
+    // How far back the player has asked the camera to sit. Kept apart from
+    // camera.distance, which a wall can shorten for a frame - folding the two
+    // together means walking through a doorway permanently zooms you in.
+    float wantedDistance = 6.0f;
 
     // Filled the first time entities arrive - see the nameplate loop, which
     // works out the zone from an entity's own id.
@@ -2333,10 +2339,16 @@ constexpr float kGravity = 26.0f;
                 // wants the zone's own scale. Sharing one floor meant the
                 // wheel stopped a long way short of the character in a city,
                 // where a twentieth of the radius is still tens of units.
-                camera.distance = driving
-                    ? std::clamp(camera.distance * (event.wheel.y > 0 ? 0.9f : 1.1f), 1.5f, 25.0f)
-                    : std::clamp(camera.distance * (event.wheel.y > 0 ? 0.9f : 1.1f), radius * 0.05f,
-                                 radius * 12.0f);
+                if (driving)
+                {
+                    wantedDistance = std::clamp(wantedDistance * (event.wheel.y > 0 ? 0.9f : 1.1f), 1.5f, 25.0f);
+                    camera.distance = wantedDistance;
+                }
+                else
+                {
+                    camera.distance = std::clamp(camera.distance * (event.wheel.y > 0 ? 0.9f : 1.1f),
+                                                 radius * 0.05f, radius * 12.0f);
+                }
             }
         }
 
@@ -2579,7 +2591,27 @@ constexpr float kGravity = 26.0f;
             // The camera sits behind and above the character, at head height.
             camera.orbiting = true;
             camera.target = {characterAt.x, characterAt.y + 1.2f, characterAt.z};
-            camera.distance = std::clamp(camera.distance - zoom * 0.6f, 1.5f, 25.0f);
+            // What the player asked for, which a wall may not let them have.
+            wantedDistance = std::clamp(wantedDistance - zoom * 0.6f, 1.5f, 25.0f);
+            camera.distance = wantedDistance;
+
+            // Indoors the eye ends up through the wall behind the character,
+            // looking at the outside of the building they are standing in -
+            // which is what logging in inside a house looked like. Pull in to
+            // whatever the line of sight hits first.
+            //
+            // The wanted distance is kept separate from the one in use: pulling
+            // in must not be remembered, or stepping back into the open would
+            // leave the camera wherever the last doorway put it.
+            if (!collision.empty() && !noclip)
+            {
+                const mh::Vec3 wanted = camera.eye();
+                if (auto blocked = collision.firstWallAlong(camera.target, wanted))
+                {
+                    const float reach = camera.distance * *blocked;
+                    camera.distance = std::max(reach - 0.25f, 0.6f);
+                }
+            }
         }
         else
         {
@@ -3180,7 +3212,7 @@ constexpr float kGravity = 26.0f;
                 if (options.playerName && !options.playerName->empty() && character)
                 {
                     plate.positions[named][0] = characterAt.x;
-                    plate.positions[named][1] = characterAt.y + kPlateHeight;
+                    plate.positions[named][1] = characterAt.y + character->geometry.height() + kPlateClearance;
                     plate.positions[named][2] = characterAt.z;
                     plate.colours[named][0] = kNameWhite[0];
                     plate.colours[named][1] = kNameWhite[1];
@@ -3216,8 +3248,16 @@ constexpr float kGravity = 26.0f;
 
                     // Over the head rather than at the feet. The model is about
                     // 1.8 tall and the name wants a little air above that.
+                    // Each entity's own model decides how high its name sits.
+                    // A galka and a tarutaru standing together want quite
+                    // different numbers, and the shared body is the fallback
+                    // for anyone we could not build.
+                    const DrawableCharacter* plateModel = entity.hasLook() ? modelFor(entity.look) : nullptr;
+                    const float bodyHeight = plateModel ? plateModel->loaded.geometry.height()
+                                                        : (character ? character->geometry.height() : 1.8f);
+
                     plate.positions[named][0] = entity.x;
-                    plate.positions[named][1] = entity.y + kPlateHeight;
+                    plate.positions[named][1] = entity.y + bodyHeight + kPlateClearance;
                     plate.positions[named][2] = entity.z;
 
                     // Colour by what the entity is. The rest of the palette -

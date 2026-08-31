@@ -260,6 +260,66 @@ std::optional<float> Collision::groundAt(float x, float z, float near, float max
     return best;
 }
 
+std::optional<float> Collision::firstWallAlong(const Vec3& from, const Vec3& to) const
+{
+    const Vec3 along{to.x - from.x, to.y - from.y, to.z - from.z};
+
+    // Moller-Trumbore, against every wall whose footprint the line crosses.
+    // The grid is indexed by x/z, so the query box is the line's own footprint
+    // rather than a radius - a camera pulled twenty units back would otherwise
+    // test most of the zone.
+    const std::vector<uint32_t>* single = nullptr;
+    std::vector<uint32_t> scratch;
+    forEachNear(std::min(from.x, to.x), std::min(from.z, to.z), std::max(from.x, to.x), std::max(from.z, to.z),
+                single, scratch);
+    const std::vector<uint32_t>& candidates = single ? *single : scratch;
+
+    std::optional<float> nearest;
+    for (uint32_t index : candidates)
+    {
+        const Triangle& triangle = triangles_[index];
+        if (triangle.walkable)
+        {
+            continue;   // a floor is not what puts the camera outside
+        }
+
+        const Vec3 edge1{triangle.b.x - triangle.a.x, triangle.b.y - triangle.a.y, triangle.b.z - triangle.a.z};
+        const Vec3 edge2{triangle.c.x - triangle.a.x, triangle.c.y - triangle.a.y, triangle.c.z - triangle.a.z};
+
+        const Vec3 pv{along.y * edge2.z - along.z * edge2.y, along.z * edge2.x - along.x * edge2.z,
+                      along.x * edge2.y - along.y * edge2.x};
+        const float det = edge1.x * pv.x + edge1.y * pv.y + edge1.z * pv.z;
+        if (std::fabs(det) < 1e-8f)
+        {
+            continue;   // the line runs along the face
+        }
+
+        const float inverse = 1.0f / det;
+        const Vec3 tv{from.x - triangle.a.x, from.y - triangle.a.y, from.z - triangle.a.z};
+        const float u = (tv.x * pv.x + tv.y * pv.y + tv.z * pv.z) * inverse;
+        if (u < 0.0f || u > 1.0f)
+        {
+            continue;
+        }
+
+        const Vec3 qv{tv.y * edge1.z - tv.z * edge1.y, tv.z * edge1.x - tv.x * edge1.z,
+                      tv.x * edge1.y - tv.y * edge1.x};
+        const float v = (along.x * qv.x + along.y * qv.y + along.z * qv.z) * inverse;
+        if (v < 0.0f || u + v > 1.0f)
+        {
+            continue;
+        }
+
+        const float hit = (edge2.x * qv.x + edge2.y * qv.y + edge2.z * qv.z) * inverse;
+        if (hit > 1e-4f && hit <= 1.0f && (!nearest || hit < *nearest))
+        {
+            nearest = hit;
+        }
+    }
+
+    return nearest;
+}
+
 std::optional<float> Collision::waterDepthAt(float x, float z, float y) const
 {
     if (triangles_.empty())
