@@ -197,16 +197,14 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
             }
 
             auto texture = textures.find(mesh.texture);
-            // Alpha tested if the texture has fully transparent texels at all,
-            // not only if those texels also compressed to black.
+            // Only the black-where-clear tell, deliberately.
             //
-            // blackWhereClear measures one particular DXT tell, and it is a
-            // good one for foliage. A cloth awning whose clear area is not
-            // black scores below it, gets drawn opaque, and its transparent
-            // texels come out as black blobs on the cloth.
-            const bool cutout = texture != textures.end() &&
-                                (texture->second.blackWhereClear > kCutoutSignal ||
-                                 texture->second.alphaZero > kAnyTransparency);
+            // Widening this to "any fully transparent texel at all" was an
+            // attempt at the awnings' black blobs. It did not fix them and it
+            // punched the ground out: terrain textures carry transparency that
+            // is a blend factor, not a mask, so alpha testing them discards
+            // the paving. See docs/dxt3-format.md - which said so already.
+            const bool cutout = texture != textures.end() && texture->second.blackWhereClear > kCutoutSignal;
             const float layerOffset = static_cast<float>(meshIndex) * kLayerSeparation;
 
             const uint32_t vertexBase = static_cast<uint32_t>(scene.vertices.size());
