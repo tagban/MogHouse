@@ -455,9 +455,14 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
     public async Task SendGameOkAsync(IPEndPoint zoneServer, CancellationToken ct = default) =>
         await SendEncryptedAsync(zoneServer, FfxiGameOkPacket.Build((ushort)(_ownCounter + 1)), ct);
 
+    /// <summary>How many events this session has ended. Diagnostic only.</summary>
+    public int EventsEnded => eventsEnded;
+
+    private int eventsEnded;
+
     /// <summary>
-    /// Ends the event the server started at zone-in, so the character stops
-    /// being invisible to everyone else. See FfxiEventEndPacket.
+    /// Ends an event the server started, so the character stops being
+    /// invisible to everyone else. See FfxiEventEndPacket.
     /// </summary>
     public async Task SendEventEndAsync(IPEndPoint zoneServer, uint uniqueNo, ushort actIndex, ushort eventNum,
                                         ushort eventPara, CancellationToken ct = default) =>
@@ -621,6 +626,36 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
                 }
 
                 onReply?.Invoke(incoming);
+
+                // Answer any cutscene the server starts.
+                //
+                // A character the server considers to be in an event is never
+                // spawned for other players, so an unanswered event makes this
+                // client invisible for as long as it lasts. Which event, and
+                // when, is not something to guess at: the ids are script
+                // decisions - the opening Bastok cutscene is 0 and then 7, and
+                // a zone-in on a character who has already seen it was 22 - so
+                // the only durable answer is to reply to whatever arrives.
+                foreach ((ushort id, int offset, int size) in FfxiZonePacket.EnumerateSubPackets(incoming.Plaintext))
+                {
+                    if (id != FfxiEventStart.PacketId)
+                    {
+                        continue;
+                    }
+
+                    FfxiEventStart? started = FfxiEventStart.TryParse(incoming.Plaintext.AsSpan(offset, size));
+                    if (started is null)
+                    {
+                        continue;
+                    }
+
+                    // Echoed back as it arrived. UniqueNo and ActIndex belong
+                    // to whatever the event is about, usually an NPC rather
+                    // than us, and the server checks them.
+                    await SendEventEndAsync(zoneServer, started.UniqueNo, started.ActIndex, started.ZoneNo,
+                                            started.EventId, ct);
+                    eventsEnded++;
+                }
             }
 
             // If replies kept arriving right up to the deadline the loop above

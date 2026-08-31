@@ -26,6 +26,7 @@
 #include "coverage.h"
 #include "linalg.h"
 #include "chat_shader.h"
+#include "hud_shader.h"
 #include "nameplate_shader.h"
 #include "textfont.h"
 #include "radar_shader.h"
@@ -92,9 +93,22 @@ inline constexpr float kGlyphAspect = 5.0f / 8.0f;
 /// The full list a player would expect - party, linkshell, friend, pet - needs
 /// membership this client does not read from any packet yet. Rather than guess
 /// at those, only the three that can actually be told apart are coloured.
+inline constexpr float kHudBright[3] = {0.97f, 0.97f, 1.00f};
+inline constexpr float kHudDim[3] = {0.78f, 0.82f, 0.90f};
+
 inline constexpr float kNameWhite[3] = {0.98f, 0.98f, 1.00f};
 inline constexpr float kNameNpc[3] = {0.98f, 0.98f, 1.00f};
 inline constexpr float kNameMonster[3] = {0.98f, 0.86f, 0.30f};
+
+/// Matches HudUniforms in hud_shader.h.
+struct HudUniforms
+{
+    float counts[4];
+    float atlas[4];
+    float boxes[mh::kHudStrings][4];
+    float colours[mh::kHudStrings][4];
+    float glyphs[mh::kHudStrings * mh::kHudChars][4];
+};
 
 /// Matches NameplateUniforms in nameplate_shader.h.
 struct NameplateUniforms
@@ -1176,6 +1190,85 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         queue.WriteTexture(&destination, textFont.pixels.data(), textFont.pixels.size(), &layout, &extent);
     }
 
+    // Shared by the nameplates and the HUD, which draw the same atlas.
+    wgpu::Sampler fontSampler;
+    if (fontTexture)
+    {
+        wgpu::SamplerDescriptor fontSamplerDescriptor{};
+        fontSamplerDescriptor.magFilter = wgpu::FilterMode::Linear;
+        fontSamplerDescriptor.minFilter = wgpu::FilterMode::Linear;
+        fontSamplerDescriptor.addressModeU = wgpu::AddressMode::ClampToEdge;
+        fontSamplerDescriptor.addressModeV = wgpu::AddressMode::ClampToEdge;
+        fontSampler = device.CreateSampler(&fontSamplerDescriptor);
+    }
+
+    wgpu::Buffer hudUniformBuffer;
+    wgpu::RenderPipeline hudPipeline;
+    wgpu::BindGroup hudBindGroup;
+    if (fontTexture)
+    {
+        wgpu::BufferDescriptor hudBufferDescriptor{.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
+                                                   .size = sizeof(HudUniforms)};
+        hudUniformBuffer = device.CreateBuffer(&hudBufferDescriptor);
+
+        wgpu::ShaderSourceWGSL hudWgsl;
+        hudWgsl.code = mh::kHudShader;
+        wgpu::ShaderModuleDescriptor hudModuleDescriptor{.nextInChain = &hudWgsl};
+        wgpu::ShaderModule hudModule = device.CreateShaderModule(&hudModuleDescriptor);
+
+        wgpu::BindGroupLayoutEntry hudLayoutEntries[3] = {};
+        hudLayoutEntries[0].binding = 0;
+        hudLayoutEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+        hudLayoutEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
+        hudLayoutEntries[1].binding = 1;
+        hudLayoutEntries[1].visibility = wgpu::ShaderStage::Fragment;
+        hudLayoutEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
+        hudLayoutEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+        hudLayoutEntries[2].binding = 2;
+        hudLayoutEntries[2].visibility = wgpu::ShaderStage::Fragment;
+        hudLayoutEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
+
+        wgpu::BindGroupLayoutDescriptor hudLayoutDescriptor{.entryCount = 3, .entries = hudLayoutEntries};
+        wgpu::BindGroupLayout hudBindGroupLayout = device.CreateBindGroupLayout(&hudLayoutDescriptor);
+        wgpu::PipelineLayoutDescriptor hudPipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
+                                                                   .bindGroupLayouts = &hudBindGroupLayout};
+        wgpu::PipelineLayout hudPipelineLayout = device.CreatePipelineLayout(&hudPipelineLayoutDescriptor);
+
+        wgpu::BlendState hudBlend{
+            .color = {.operation = wgpu::BlendOperation::Add,
+                      .srcFactor = wgpu::BlendFactor::SrcAlpha,
+                      .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
+            .alpha = {.operation = wgpu::BlendOperation::Add,
+                      .srcFactor = wgpu::BlendFactor::One,
+                      .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha}};
+        wgpu::ColorTargetState hudTarget{.format = surfaceFormat, .blend = &hudBlend};
+        wgpu::FragmentState hudFragment{
+            .module = hudModule, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &hudTarget};
+        wgpu::DepthStencilState hudDepth{.format = kDepthFormat,
+                                         .depthWriteEnabled = wgpu::OptionalBool::False,
+                                         .depthCompare = wgpu::CompareFunction::Always};
+
+        wgpu::RenderPipelineDescriptor hudPipelineDescriptor{
+            .layout = hudPipelineLayout,
+            .vertex = {.module = hudModule, .entryPoint = "vertexMain"},
+            .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
+            .depthStencil = &hudDepth,
+            .fragment = &hudFragment};
+        hudPipeline = device.CreateRenderPipeline(&hudPipelineDescriptor);
+
+        wgpu::BindGroupEntry hudEntries[3] = {};
+        hudEntries[0].binding = 0;
+        hudEntries[0].buffer = hudUniformBuffer;
+        hudEntries[0].size = sizeof(HudUniforms);
+        hudEntries[1].binding = 1;
+        hudEntries[1].textureView = fontTexture.CreateView();
+        hudEntries[2].binding = 2;
+        hudEntries[2].sampler = fontSampler;
+        wgpu::BindGroupDescriptor hudBindGroupDescriptor{
+            .layout = hudBindGroupLayout, .entryCount = 3, .entries = hudEntries};
+        hudBindGroup = device.CreateBindGroup(&hudBindGroupDescriptor);
+    }
+
     wgpu::Buffer plateUniformBuffer;
     wgpu::RenderPipeline platePipeline;
     wgpu::BindGroup plateBindGroup;
@@ -1232,13 +1325,6 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             .depthStencil = &plateDepth,
             .fragment = &plateFragment};
         platePipeline = device.CreateRenderPipeline(&platePipelineDescriptor);
-
-        wgpu::SamplerDescriptor fontSamplerDescriptor{};
-        fontSamplerDescriptor.magFilter = wgpu::FilterMode::Linear;
-        fontSamplerDescriptor.minFilter = wgpu::FilterMode::Linear;
-        fontSamplerDescriptor.addressModeU = wgpu::AddressMode::ClampToEdge;
-        fontSamplerDescriptor.addressModeV = wgpu::AddressMode::ClampToEdge;
-        wgpu::Sampler fontSampler = device.CreateSampler(&fontSamplerDescriptor);
 
         wgpu::BindGroupEntry plateEntries[3] = {};
         plateEntries[0].binding = 0;
@@ -2372,10 +2458,13 @@ constexpr float kGravity = 26.0f;
             if (radarPipeline && radarBindGroup)
             {
                 RadarUniforms radar{};
-                // Top right, a fifth of the shorter side across.
+                // Top right, a fifth of the shorter side across, and low
+                // enough to leave room for the clock over it - at 0.70 the
+                // radar's own top edge was already at 0.96 and the clock drew
+                // off the top of the window.
                 radar.placement[0] = 0.78f;
-                radar.placement[1] = 0.70f;
-                radar.placement[2] = 0.26f;
+                radar.placement[1] = 0.58f;
+                radar.placement[2] = 0.24f;
                 radar.placement[3] = static_cast<float>(width) / static_cast<float>(height);
 
                 radar.mapExtent[0] = mapCentreX;
@@ -2408,6 +2497,106 @@ constexpr float kGravity = 26.0f;
                 pass.SetPipeline(radarPipeline);
                 pass.SetBindGroup(0, radarBindGroup);
                 pass.Draw(3);
+            }
+
+            if (hudPipeline && hudBindGroup)
+            {
+                HudUniforms hud{};
+                const float windowAspect = static_cast<float>(width) / static_cast<float>(height);
+                hud.counts[1] = 0.052f;      // one atlas cell, in NDC y
+                hud.counts[2] = windowAspect;
+                hud.atlas[0] = static_cast<float>(textFont.columns);
+                hud.atlas[1] = static_cast<float>(textFont.cell);
+                hud.atlas[2] = static_cast<float>(textFont.width);
+                hud.atlas[3] = static_cast<float>(textFont.height);
+
+                int labels = 0;
+
+                // Laid out around the radar rather than at fixed corners, so
+                // the two stay together if the radar ever moves.
+                const float radarCentreX = 0.78f;
+                const float radarCentreY = 0.58f;
+                const float radarRadius = 0.24f;
+
+                const auto label = [&](const std::string& text, float centreX, float bottomY, float scale,
+                                       const float* tint, float background) {
+                    if (labels >= mh::kHudStrings || text.empty() || textFont.empty())
+                    {
+                        return;
+                    }
+                    const float cellSize = static_cast<float>(textFont.cell);
+                    float pen = 0.0f;
+                    int written = 0;
+                    for (char raw : text)
+                    {
+                        if (written >= mh::kHudChars)
+                        {
+                            break;
+                        }
+                        const float advance = textFont.advanceOf(raw) / cellSize;
+                        float* glyph = hud.glyphs[labels * mh::kHudChars + written];
+                        glyph[0] = static_cast<float>(textFont.indexOf(raw));
+                        glyph[1] = pen;
+                        glyph[2] = advance;
+                        pen += advance;
+                        ++written;
+                    }
+
+                    // Centred on the radar's column, which is what makes the
+                    // clock and the zone name read as one instrument.
+                    const float cellWide = (hud.counts[1] * scale) / windowAspect;
+                    hud.boxes[labels][0] = centreX - pen * cellWide * 0.5f;
+                    hud.boxes[labels][1] = bottomY;
+                    hud.boxes[labels][2] = pen;
+                    hud.boxes[labels][3] = background;
+                    hud.colours[labels][0] = tint[0];
+                    hud.colours[labels][1] = tint[1];
+                    hud.colours[labels][2] = tint[2];
+                    hud.colours[labels][3] = scale;
+                    ++labels;
+                };
+
+                // The clock, above the radar. Vana'diel's week is eight days
+                // and its hour is 2.4 real seconds; both come from the
+                // server's own clock when it gave us one.
+                static const char* kWeekdays[8] = {"Firesday",   "Earthsday",    "Watersday", "Windsday",
+                                                   "Iceday",     "Lightningday", "Lightsday", "Darksday"};
+                char clock[32] = {};
+                std::snprintf(clock, sizeof(clock), "%02d:%02d", clockMinutes / 60, clockMinutes % 60);
+                label(clock, radarCentreX, radarCentreY + radarRadius + 0.075f, 1.25f, kHudBright, 0.5f);
+
+                if (vanaSeconds > 0)
+                {
+                    label(kWeekdays[(vanaSeconds / 86400ull) % 8ull], radarCentreX,
+                          radarCentreY + radarRadius + 0.028f, 0.75f, kHudDim, 0.5f);
+                }
+
+                // The zone name, as a ribbon under the radar.
+                if (options.zoneName)
+                {
+                    label(*options.zoneName, radarCentreX, radarCentreY - radarRadius - 0.052f, 0.95f, kHudBright,
+                          0.5f);
+                }
+
+                // And where we are. FFXI shows a lettered grid here; that
+                // comes from map bounds in the DATs which nothing reads yet,
+                // so these are the coordinates the server itself uses - which
+                // at least match what !pos prints.
+                if (character)
+                {
+                    char position[32] = {};
+                    std::snprintf(position, sizeof(position), "%.0f  %.0f", characterAt.x, -characterAt.z);
+                    label(position, radarCentreX, radarCentreY - radarRadius - 0.108f, 0.75f, kHudDim, 0.5f);
+                }
+
+                if (labels > 0)
+                {
+                    hud.counts[0] = static_cast<float>(labels);
+                    queue.WriteBuffer(hudUniformBuffer, 0, &hud, sizeof(hud));
+                    pass.SetPipeline(hudPipeline);
+                    pass.SetBindGroup(0, hudBindGroup);
+                    pass.Draw(3);
+                }
             }
 
             if (platePipeline && plateBindGroup && !radarEntities.empty())
