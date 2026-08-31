@@ -12,6 +12,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
@@ -50,6 +51,24 @@ int main(int argc, char** argv)
     for (int arg = 1; arg < argc; ++arg)
     {
         ffxi::DatFile dat{std::filesystem::path{argv[arg]}};
+
+        // What is actually in this file. Most types go unread, and knowing
+        // which are present is the difference between "we do not draw the
+        // fountain's flames" and "the flames are not in this file at all".
+        if (std::getenv("MOGHOUSE_CHUNK_TALLY"))
+        {
+            std::map<uint8_t, size_t> tally;
+            for (const ffxi::Chunk& chunk : dat.chunks())
+            {
+                ++tally[chunk.type];
+            }
+            std::printf("chunk types:");
+            for (const auto& one : tally)
+            {
+                std::printf("  0x%02X x%zu", one.first, one.second);
+            }
+            std::printf("\n");
+        }
         // Models. The check that matters is whether vertices land inside the
         // bounding box the model declares for itself - a wrong stride or offset
         // scatters them outside it immediately.

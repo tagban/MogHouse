@@ -2508,7 +2508,12 @@ constexpr float kGravity = 26.0f;
             {
                 HudUniforms hud{};
                 const float windowAspect = static_cast<float>(width) / static_cast<float>(height);
-                hud.counts[1] = 0.052f;      // one atlas cell, in NDC y
+                // One atlas cell in NDC y, which is not the height of the
+                // letters: a glyph fills about two thirds of its cell and the
+                // rest is room for the outline and the descenders. Asking for
+                // 0.052 was asking for text about 0.035 tall, which is why it
+                // stayed hard to read after being made "bigger" once already.
+                hud.counts[1] = 0.085f;
                 hud.counts[2] = windowAspect;
                 hud.atlas[0] = static_cast<float>(textFont.columns);
                 hud.atlas[1] = static_cast<float>(textFont.cell);
@@ -2568,18 +2573,35 @@ constexpr float kGravity = 26.0f;
                                                    "Iceday",     "Lightningday", "Lightsday", "Darksday"};
                 char clock[32] = {};
                 std::snprintf(clock, sizeof(clock), "%02d:%02d", clockMinutes / 60, clockMinutes % 60);
-                label(clock, radarCentreX, radarCentreY + radarRadius + 0.075f, 1.25f, kHudBright, 0.5f);
+                label(clock, radarCentreX, radarCentreY + radarRadius + 0.105f, 1.15f, kHudBright, 0.5f);
 
                 if (vanaSeconds > 0)
                 {
                     label(kWeekdays[(vanaSeconds / 86400ull) % 8ull], radarCentreX,
-                          radarCentreY + radarRadius + 0.028f, 0.75f, kHudDim, 0.5f);
+                          radarCentreY + radarRadius + 0.048f, 0.62f, kHudDim, 0.5f);
+                }
+
+                // Compass letters around the ring.
+                //
+                // The map itself is north up - the radar maps its offsets
+                // straight to world coordinates without rotating them - so
+                // these belong at fixed points. The part that moves is the
+                // heading notch the radar already draws; a ring that turned as
+                // well would disagree with the map under it.
+                {
+                    const float ringX = radarRadius * 1.16f / windowAspect;
+                    const float ringY = radarRadius * 1.16f;
+                    const float half = hud.counts[1] * 0.62f * 0.5f;
+                    label("N", radarCentreX, radarCentreY + ringY - half, 0.62f, kHudBright, 0.0f);
+                    label("S", radarCentreX, radarCentreY - ringY - half, 0.62f, kHudDim, 0.0f);
+                    label("E", radarCentreX + ringX, radarCentreY - half, 0.62f, kHudDim, 0.0f);
+                    label("W", radarCentreX - ringX, radarCentreY - half, 0.62f, kHudDim, 0.0f);
                 }
 
                 // The zone name, as a ribbon under the radar.
                 if (options.zoneName)
                 {
-                    label(*options.zoneName, radarCentreX, radarCentreY - radarRadius - 0.052f, 0.95f, kHudBright,
+                    label(*options.zoneName, radarCentreX, radarCentreY - radarRadius - 0.082f, 0.80f, kHudBright,
                           0.5f);
                 }
 
@@ -2591,7 +2613,7 @@ constexpr float kGravity = 26.0f;
                 {
                     char position[32] = {};
                     std::snprintf(position, sizeof(position), "%.0f  %.0f", characterAt.x, -characterAt.z);
-                    label(position, radarCentreX, radarCentreY - radarRadius - 0.108f, 0.75f, kHudDim, 0.5f);
+                    label(position, radarCentreX, radarCentreY - radarRadius - 0.152f, 0.62f, kHudDim, 0.5f);
                 }
 
                 if (labels > 0)
@@ -2613,7 +2635,7 @@ constexpr float kGravity = 26.0f;
                 // One atlas cell, in NDC y. A cell is taller than the glyph
                 // inside it - the outline needs somewhere to go - so the text
                 // reads a good deal smaller than this number suggests.
-                plate.counts[1] = 0.060f;
+                plate.counts[1] = 0.085f;
                 plate.counts[2] = windowAspect;
                 plate.atlas[0] = static_cast<float>(textFont.columns);
                 plate.atlas[1] = static_cast<float>(textFont.cell);
