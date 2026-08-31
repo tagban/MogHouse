@@ -176,6 +176,33 @@ public sealed class FfxiGameSession : IDisposable
     private static readonly TimeSpan StepInterval = TimeSpan.FromMilliseconds(120);
 
     /// <summary>Steps the character horizontally and turns it to face the direction of travel.</summary>
+    /// <summary>
+    /// Reports where the character actually is, rather than asking to be moved.
+    ///
+    /// <see cref="Move"/> walks against the navmesh, which is a coarse thing
+    /// built for pathfinding. A renderer has the zone's own collision mesh and
+    /// has already decided what the character could and could not walk into, so
+    /// it says where it ended up and this follows. The zone-line check still
+    /// runs - walking across one is the whole point of knowing where you are.
+    /// </summary>
+    public void PlaceAt(float x, float vertical, float depth, sbyte facing)
+    {
+        bool shifted = x != PosX || vertical != PosVertical || depth != PosDepth;
+
+        PosX = x;
+        PosVertical = vertical;
+        PosDepth = depth;
+        Facing = facing;
+
+        if (!shifted)
+        {
+            return;
+        }
+
+        Moved?.Invoke();
+        _ = CheckZoneLinesAsync();
+    }
+
     public void Move(float dx, float dz)
     {
         if (dx == 0 && dz == 0)
