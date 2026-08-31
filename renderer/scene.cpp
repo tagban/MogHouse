@@ -196,11 +196,23 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
 
         for (size_t v = 0; v < vertexCount; ++v)
         {
-            const Vec3 world = transformPoint(instance.transform,
-                                              {mesh.vertices[v * 3], mesh.vertices[v * 3 + 1], mesh.vertices[v * 3 + 2]});
+            // transformPoint applies the instance matrix and nothing else, so
+            // this is still in FFXI's frame and has to be turned the same way
+            // the geometry is - see renderer/zonemesh.cpp. The vertical is
+            // already the water height rather than a transformed one, so only
+            // the depth axis is left to flip.
+            //
+            // Everything else reaches the world through toWorld and got this
+            // for free. This path did not, and the result was a sheet of water
+            // sitting where the market floor should be: mirrored about z while
+            // the ground it was meant to fill stayed put.
+            const Vec3 raw = transformPoint(instance.transform,
+                                            {mesh.vertices[v * 3], mesh.vertices[v * 3 + 1], mesh.vertices[v * 3 + 2]});
+            const Vec3 world{raw.x, y, -raw.z};
+
             Vertex vertex{};
             vertex.position[0] = world.x;
-            vertex.position[1] = y;
+            vertex.position[1] = world.y;
             vertex.position[2] = world.z;
             vertex.normal[1] = 1.0f;
             // World-space UVs, so the texture is continuous across cells rather
