@@ -21,6 +21,22 @@ constexpr float kCutoutSignal = 0.2f;
 
 /// Builds a placement's transform, with the turn out of FFXI's frame folded
 /// in so everything downstream can assume Y is up.
+///
+/// The rotation composes as T . Rz.Ry.Rx . S. The order matters and is not
+/// guessable: an earlier composition here agreed with this one exactly
+/// whenever the Z rotation was zero, and differed otherwise, so it placed most
+/// of a zone correctly and scattered the handful of models that are turned
+/// about Z - a few buildings out by a constant while everything around them
+/// was within 0.07 of where the server says it is.
+///
+/// Measured over 5199 points where collision reports a floor, asking whether
+/// anything is drawn within 0.6 of it (ffxi-visiblecheck):
+///
+///   T . Rz.Ry.Rx . S   99.0%,  33 drawn but out of place
+///   the earlier order  93.8%, 306 drawn but out of place
+///
+/// The order is the one vekien/xi-model-viewer uses, which the user pointed
+/// at after this had been chased through three wrong explanations.
 Mat4 placementTransform(const ffxi::Placement& placement)
 {
     const float sx = std::sin(placement.rotate[0]), cx = std::cos(placement.rotate[0]);
@@ -28,17 +44,17 @@ Mat4 placementTransform(const ffxi::Placement& placement)
     const float sz = std::sin(placement.rotate[2]), cz = std::cos(placement.rotate[2]);
 
     Mat4 m = Mat4::identity();
-    m.m[0] = (cy * cz + sy * sx * sz) * placement.scale[0];
-    m.m[1] = (cx * sz) * placement.scale[0];
-    m.m[2] = (-sy * cz + cy * sx * sz) * placement.scale[0];
+    m.m[0] = (cy * cz) * placement.scale[0];
+    m.m[1] = (cy * sz) * placement.scale[0];
+    m.m[2] = (-sy) * placement.scale[0];
 
-    m.m[4] = (-cy * sz + sy * sx * cz) * placement.scale[1];
-    m.m[5] = (cx * cz) * placement.scale[1];
-    m.m[6] = (sy * sz + cy * sx * cz) * placement.scale[1];
+    m.m[4] = (sx * sy * cz - cx * sz) * placement.scale[1];
+    m.m[5] = (sx * sy * sz + cx * cz) * placement.scale[1];
+    m.m[6] = (sx * cy) * placement.scale[1];
 
-    m.m[8] = (sy * cx) * placement.scale[2];
-    m.m[9] = -sx * placement.scale[2];
-    m.m[10] = (cy * cx) * placement.scale[2];
+    m.m[8] = (cx * sy * cz + sx * sz) * placement.scale[2];
+    m.m[9] = (cx * sy * sz - sx * cz) * placement.scale[2];
+    m.m[10] = (cx * cy) * placement.scale[2];
 
     m.m[12] = placement.translate[0];
     m.m[13] = placement.translate[1];
@@ -48,13 +64,6 @@ Mat4 placementTransform(const ffxi::Placement& placement)
     // the rest of the transform - the same conversion toWorld does per vertex,
     // see renderer/zonemesh.cpp.
     //
-    // This is the transform for everything the zone actually draws, and it is
-    // the one place the turn was easy to miss: the vertices go through
-    // untouched and the flip lives here, in a matrix, rather than next to the
-    // coordinates it applies to. With only the Y row negated the drawn world
-    // is a mirror of the world the character walks around in - so a position
-    // from the server is placed correctly against collision that is right,
-    // inside scenery that is backwards.
     // MOGHOUSE_PLACEMENT_LEGACY negates only the Y row, the way this did
     // before the world became a rotation rather than a reflection. Kept so the
     // two can be scored against collision - which agrees with the server - and
