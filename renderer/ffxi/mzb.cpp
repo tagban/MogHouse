@@ -1,5 +1,7 @@
 #include "mzb.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
@@ -9,10 +11,39 @@ namespace ffxi
 {
 namespace
 {
-constexpr size_t kPlacementSize = 0x64;
+/// Placement records come in two sizes. Which one a file uses is not stated,
+/// but it can be worked out: the header word at 20 holds where the table ends,
+/// so the size that lands exactly there is the right one.
+constexpr size_t kPlacementSizeLong = 0x64;
+constexpr size_t kPlacementSizeShort = 0x54;
 constexpr size_t kPlacementsOffset = 32;
 constexpr uint16_t kIndexMask = 0x3FFF;
 constexpr uint8_t kFirstEncryptedVersion = 0x1B;
+
+template <typename T> T read(const std::vector<uint8_t>& buffer, size_t offset);
+
+/// How wide a placement record is in this file.
+///
+/// The header word at 20 is where the placement table ends, so the stride that
+/// lands the last record exactly there is the one in use. Bastok Markets says
+/// 102232, and 32 + 1022 * 0x64 is 102232.
+///
+/// Guessed wrong, every field after the first record reads from the middle of
+/// its neighbour - which does not throw, it just produces a zone quietly built
+/// out of noise.
+inline size_t placementStride(const std::vector<uint8_t>& buffer, uint32_t count)
+{
+    if (buffer.size() >= 24 && count > 0)
+    {
+        uint32_t endsAt = 0;
+        std::memcpy(&endsAt, buffer.data() + 20, sizeof(endsAt));
+        if (kPlacementsOffset + static_cast<size_t>(count) * kPlacementSizeShort == endsAt)
+        {
+            return kPlacementSizeShort;
+        }
+    }
+    return kPlacementSizeLong;
+}
 
 template <typename T> T read(const std::vector<uint8_t>& buffer, size_t offset)
 {
@@ -60,6 +91,7 @@ void decrypt(std::vector<uint8_t>& buffer, const KeyTable& keys)
 
     // Model names get a second, separate pass.
     const uint32_t count = read<uint32_t>(buffer, 4) & 0x00FFFFFF;
+    const size_t kPlacementSize = placementStride(buffer, count);
     for (uint32_t i = 0; i < count; ++i)
     {
         const size_t base = kPlacementsOffset + i * kPlacementSize;
@@ -150,6 +182,25 @@ Zone parseMzb(const Chunk& chunk, const KeyTable& keys)
     zone.version = buffer.size() > 3 ? buffer[3] : 0;
 
     const uint32_t placementCount = read<uint32_t>(buffer, 4) & 0x00FFFFFF;
+    const size_t kPlacementSize = placementStride(buffer, placementCount);
+
+    // The header is 32 bytes and only two of its fields are used - the
+    // placement count at 4 and the mesh table at 8. Whatever else it points at
+    // is where the geometry this cannot find must be: the fountain's water
+    // model is in the DAT with no placement, and so are the sky sphere and the
+    // collision proxies.
+    if (std::getenv("MOGHOUSE_MZB_HEADER"))
+    {
+        std::printf("MZB header, as 32-bit words:\n");
+        for (size_t word = 0; word < 8; ++word)
+        {
+            const uint32_t value = read<uint32_t>(buffer, word * 4);
+            std::printf("  [%2zu] 0x%08X  %11u%s\n", word * 4, value, value,
+                        value != 0 && value < buffer.size() ? "   <- inside the chunk" : "");
+        }
+        std::printf("  chunk is %zu bytes; placements end at %zu\n", buffer.size(),
+                    kPlacementsOffset + static_cast<size_t>(placementCount) * kPlacementSize);
+    }
     zone.placements.reserve(placementCount);
     for (uint32_t i = 0; i < placementCount; ++i)
     {
