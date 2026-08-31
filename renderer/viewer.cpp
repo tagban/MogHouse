@@ -1608,6 +1608,10 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     /// How many entity bodies the instance buffer currently holds.
     int drawnBodies = 0;
 
+    /// The Vana'diel clock in seconds, when the server has supplied one. Also
+    /// gives the weekday, which is the same eight day cycle the game shows.
+    uint64_t vanaSeconds = 0;
+
     /// Where the character has been, sampled about twice a second.
     ///
     /// Collision can still trap someone - a sign post is thin enough that the
@@ -1940,9 +1944,28 @@ constexpr float kGravity = 26.0f;
             }
         }
 
-        // A Vana'diel day in a real minute when not pinned.
-        const int clockMinutes =
-            timeFixed ? fixedMinutes : static_cast<int>((SDL_GetTicksNS() / 1000000ull / 42ull) % 1440ull);
+        // The server's clock when it gave us one, our own otherwise.
+        //
+        // Vana'diel runs 25 times real time - a minute of it is 2.4 seconds -
+        // so the seed only has to arrive once and then be advanced. Without
+        // this the renderer invented a day at its own rate, and two clients
+        // side by side showed different hours and different light, which is
+        // precisely when you want them to agree.
+        int clockMinutes = 0;
+        if (timeFixed)
+        {
+            clockMinutes = fixedMinutes;
+        }
+        else if (options.serverClock)
+        {
+            const uint64_t elapsed = SDL_GetTicksNS() / 1000000000ull;
+            vanaSeconds = static_cast<uint64_t>(*options.serverClock) + elapsed * 25ull;
+            clockMinutes = static_cast<int>((vanaSeconds / 60ull) % 1440ull);
+        }
+        else
+        {
+            clockMinutes = static_cast<int>((SDL_GetTicksNS() / 1000000ull / 42ull) % 1440ull);
+        }
 
         const uint64_t nowTicks = SDL_GetTicksNS();
         const float delta = static_cast<float>(nowTicks - previousTicks) / 1e9f;
@@ -2393,7 +2416,10 @@ constexpr float kGravity = 26.0f;
                 std::memcpy(plate.viewProjection, viewProjection.m, sizeof(plate.viewProjection));
 
                 const float windowAspect = static_cast<float>(width) / static_cast<float>(height);
-                plate.counts[1] = 0.034f;      // one atlas cell, in NDC y
+                // One atlas cell, in NDC y. A cell is taller than the glyph
+                // inside it - the outline needs somewhere to go - so the text
+                // reads a good deal smaller than this number suggests.
+                plate.counts[1] = 0.060f;
                 plate.counts[2] = windowAspect;
                 plate.atlas[0] = static_cast<float>(textFont.columns);
                 plate.atlas[1] = static_cast<float>(textFont.cell);

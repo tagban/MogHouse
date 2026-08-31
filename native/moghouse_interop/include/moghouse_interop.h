@@ -63,6 +63,9 @@ typedef struct MhViewerOptions
     /// "race,face,head,body,hands,legs,feet", or null for no character.
     const char* look;
 
+    /// The server's Vana'diel clock in seconds, or 0 to run the renderer's own.
+    uint32_t server_clock;
+
     /// "x,y,z" to stand the character at, or null to pick somewhere.
     const char* character_at;
 

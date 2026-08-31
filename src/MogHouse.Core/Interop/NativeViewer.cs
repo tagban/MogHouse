@@ -63,6 +63,9 @@ public sealed record NativeViewerOptions
     /// <summary>"race,face,head,body,hands,legs,feet", or null for no character.</summary>
     public string? Look { get; init; }
 
+    /// <summary>The server's Vana'diel clock in seconds; 0 runs the renderer's own.</summary>
+    public uint ServerClock { get; init; }
+
     /// <summary>"x,y,z", or null to let the viewer pick somewhere standable.</summary>
     public string? CharacterAt { get; init; }
 
@@ -172,6 +175,7 @@ public sealed partial class NativeViewer : IDisposable
                 KeyTablePath = keys,
                 KeyTable2Path = keys2,
                 Look = look,
+                ServerClock = options.ServerClock,
                 CharacterAt = at,
                 CharacterFacing = facing,
                 ZoneName = zoneName,
@@ -274,6 +278,7 @@ public sealed partial class NativeViewer : IDisposable
         public IntPtr KeyTablePath;
         public IntPtr KeyTable2Path;
         public IntPtr Look;
+        public uint ServerClock;
         public IntPtr CharacterAt;
         public IntPtr CharacterFacing;
         public IntPtr ZoneName;

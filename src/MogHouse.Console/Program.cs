@@ -473,7 +473,8 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                     {
                         liveRadar = zoneState is null
                             ? null
-                            : LiveRadar.Open(selected.Zone, zoneState.X, zoneState.Vertical, zoneState.Depth);
+                            : LiveRadar.Open(selected.Zone, zoneState.X, zoneState.Vertical, zoneState.Depth,
+                                             zoneState.GameTime);
                     }
 
                     // The first sighting of each entity, raw. Which byte says
@@ -856,7 +857,7 @@ sealed class LiveRadar : IDisposable
     /// the server reported. Returns null, with a reason, if anything needed is
     /// missing - a radar is not worth failing a login over.
     /// </summary>
-    public static LiveRadar? Open(int zoneId, float x, float vertical, float depth)
+    public static LiveRadar? Open(int zoneId, float x, float vertical, float depth, uint serverClock = 0)
     {
         string keys = Environment.GetEnvironmentVariable("MOGHOUSE_FFXI_KEYTABLE") ?? "";
         string keys2 = Environment.GetEnvironmentVariable("MOGHOUSE_FFXI_KEYTABLE2") ?? "";
@@ -892,6 +893,9 @@ sealed class LiveRadar : IDisposable
             KeyTablePath = keys,
             KeyTable2Path = keys2,
             Look = Environment.GetEnvironmentVariable("MOGHOUSE_LOOK") ?? "1,0,0,1,1,1,1",
+            // The server's own clock, so this client and a retail one
+            // side by side show the same hour and the same light.
+            ServerClock = serverClock,
             // The renderer works in Y-up. Turning FFXI's Y-down frame the
             // right way up is a half turn about X, so the depth axis flips
             // along with the vertical - see renderer/zonemesh.cpp.

@@ -88,6 +88,15 @@ struct ViewerOptions
     /// Pins the Vana'diel clock to hhmm. Unset lets the day run.
     std::optional<int> timeOfDay;
 
+    /// The server's Vana'diel clock at zone-in, in Vana'diel seconds.
+    ///
+    /// Without it the renderer runs its own day at a made-up rate, and two
+    /// clients side by side show different light and different weather, which
+    /// is exactly when you most want them to agree. Vana'diel runs 25 times
+    /// real time - one of its minutes is 2.4 seconds - so this is seeded once
+    /// and advanced from there.
+    std::optional<uint32_t> serverClock;
+
     /// Writes a frame and quits. With `screenshotSequence` set, the path is
     /// treated as a printf format and one file is written per source frame.
     std::optional<std::string> screenshotPath;

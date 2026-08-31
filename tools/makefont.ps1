@@ -12,10 +12,10 @@
 # The alternative, baking white-on-black glyphs, fixes the colour at bake time
 # and makes every tint wrong at the edges.
 param(
-    [string]$Family = "Verdana",
-    [int]$Cell = 64,
-    [int]$Size = 40,
-    [single]$OutlineWidth = 5.0,   # centred on the path, so about half shows
+    [string]$Family = "Segoe UI",
+    [int]$Cell = 72,
+    [int]$Size = 44,
+    [single]$OutlineWidth = 6.0,   # centred on the path, so about half shows
     [string]$OutDir = ""
 )
 

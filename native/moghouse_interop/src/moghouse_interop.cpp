@@ -49,6 +49,10 @@ MhViewerHandle mh_viewer_create(const MhViewerOptions* options)
     viewer->options.keyTablePath = borrowOr(options->key_table_path, "");
     viewer->options.keyTable2Path = borrowOr(options->key_table2_path, "");
     viewer->options.look = borrow(options->look);
+    if (options->server_clock != 0)
+    {
+        viewer->options.serverClock = options->server_clock;
+    }
     viewer->options.characterAt = borrow(options->character_at);
     viewer->options.characterFacing = borrow(options->character_facing);
     viewer->options.zoneName = borrow(options->zone_name);
