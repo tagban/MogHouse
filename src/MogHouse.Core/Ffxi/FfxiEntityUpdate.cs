@@ -155,6 +155,17 @@ public sealed record FfxiEntityUpdate(
 
     /// <summary>Absolute 0x0A - sendflags_t, in the shared position block.</summary>
     private const int OffsetSendFlags = 0x0A;
+
+    /// What an update actually carries. The server truncates by update type and
+    /// says which parts it sent in the byte at 0x0A - base_entity.h's
+    /// updatemask. Length alone cannot tell you: a short update is long enough
+    /// to reach the status fields and holds zeros there, and reading those as
+    /// real values is what stripped a GM's level, a player's name and a
+    /// character's whole appearance on every step they took.
+    private const byte UpdatePosition = 0x01;
+    private const byte UpdateStatus = 0x02;
+    private const byte UpdateHealth = 0x04;
+    private const byte UpdateName = 0x08;
     private const int OffsetDirection = Body + 7;
     private const int OffsetX = Body + 8;
     private const int OffsetVertical = Body + 12; // engine Y - see FfxiPositionPacket
@@ -245,22 +256,29 @@ public sealed record FfxiEntityUpdate(
             battleFlags = subPacket[OffsetBattleFlags];
         }
 
-        if (id == PlayerPacketId && subPacket.Length >= OffsetFlags1 + 4)
+        if (id == PlayerPacketId && (subPacket[OffsetSendFlags] & UpdateStatus) != 0 &&
+            subPacket.Length >= OffsetFlags1 + 4)
         {
             uint flags1 = BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(OffsetFlags1, 4));
             rawFlags1 = flags1;
             rawFlags0 = BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(24, 4));
             modelSize = (byte)((flags1 >> GraphSizeBitOffset) & GraphSizeMask);
 
-            if (subPacket.Length >= OffsetName + 1)
+            if ((subPacket[OffsetSendFlags] & UpdateName) != 0 && subPacket.Length >= OffsetName + 1)
             {
                 int available = Math.Min(NameLength, subPacket.Length - OffsetName);
                 name = ReadFixedString(subPacket.Slice(OffsetName, available));
             }
         }
 
-        FfxiEntityLook? look = id == PlayerPacketId ? ReadPlayerLook(subPacket) : ReadLook(subPacket);
-        byte? nameVis = subPacket.Length > OffsetNameVis ? subPacket[OffsetNameVis] : null;
+        // The look rides with the status fields; a position-only update holds
+        // zeros where it would be.
+        FfxiEntityLook? look = (subPacket[OffsetSendFlags] & UpdateStatus) == 0 ? null
+            : id == PlayerPacketId                                             ? ReadPlayerLook(subPacket)
+                                                                               : ReadLook(subPacket);
+        byte? nameVis = (subPacket[OffsetSendFlags] & UpdateStatus) != 0 && subPacket.Length > OffsetNameVis
+            ? subPacket[OffsetNameVis]
+            : null;
 
         return new FfxiEntityUpdate(
             SendFlags: subPacket[OffsetSendFlags],
