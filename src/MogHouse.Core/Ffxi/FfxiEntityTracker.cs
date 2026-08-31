@@ -132,7 +132,11 @@ public sealed class FfxiEntityTracker
             UniqueNo: update.UniqueNo,
             ActIndex: update.ActIndex,
             Kind: kind,
-            Name: update.Name ?? known?.Name,
+            // Empty counts as absent. A partial update carries a name field
+            // of zeros rather than no name field, and "" is not null - so the
+            // sticky rule every other field here gets was skipped for this one,
+            // and a character who changed anything at all lost their name.
+            Name: string.IsNullOrEmpty(update.Name) ? known?.Name : update.Name,
             X: update.X,
             Vertical: update.Vertical,
             Depth: update.Depth,

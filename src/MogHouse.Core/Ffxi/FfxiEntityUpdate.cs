@@ -306,6 +306,14 @@ public sealed record FfxiEntityUpdate(
             return null;
         }
 
+        // Race zero is not a race. A partial update - a gear change, a flag
+        // toggled - carries this field as zeros rather than omitting it, and
+        // taking that as a look replaces a real character with nothing.
+        if (subPacket[OffsetPlayerLook + 1] == 0)
+        {
+            return null;
+        }
+
         ReadOnlySpan<byte> slots = subPacket.Slice(OffsetPlayerLook + 2, 16);
         return new FfxiEntityLook(FfxiLookKind.Equipped, 0,
                                   Race: subPacket[OffsetPlayerLook + 1],
@@ -342,6 +350,11 @@ public sealed record FfxiEntityUpdate(
         // and only then is the packet long enough to hold it.
         if (kind is FfxiLookKind.Equipped or FfxiLookKind.Chocobo && subPacket.Length >= OffsetLook + 20)
         {
+            if (subPacket[OffsetLook + 3] == 0)
+            {
+                return null;   // as above: an equipment look with no race is a blank field
+            }
+
             // Read one at a time rather than through a helper: a local
             // function cannot capture the span this all comes from.
             ReadOnlySpan<byte> slots = subPacket.Slice(OffsetLook + 4, 16);
