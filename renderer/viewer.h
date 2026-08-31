@@ -170,12 +170,22 @@ public:
     void setCharacter(float x, float y, float z, float heading);
     bool character(float& x, float& y, float& z, float& heading) const;
 
+    /// A jump the player asked for, consumed by whoever reads it.
+    ///
+    /// The renderer plays the animation locally the moment the key is pressed,
+    /// but only the client talks to the server, and a jump nobody else is told
+    /// about is a jump only we can see. FFXI has a packet of its own for this
+    /// - it is not an emote - so this is the signal that one is owed.
+    void requestJump();
+    bool takeJump();
+
 private:
     mutable std::mutex mutex_;
     std::vector<RadarEntity> entities_;
     std::atomic<bool> stop_{false};
     float character_[4]{};
     bool haveCharacter_{false};
+    std::atomic<bool> jump_{false};
     std::deque<std::string> chat_;
 };
 

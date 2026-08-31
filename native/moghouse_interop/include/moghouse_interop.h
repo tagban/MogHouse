@@ -111,6 +111,13 @@ MH_API void mh_viewer_push_chat(MhViewerHandle viewer, const char* line);
 /// asks for it. Y is up; FFXI's own vertical is the negation.
 MH_API int32_t mh_viewer_get_character(MhViewerHandle viewer, float* x, float* y, float* z, float* heading);
 
+/// Whether the player asked to jump since this was last called, clearing it.
+///
+/// The renderer animates the jump itself; this is how the client learns one
+/// happened so it can tell the server, which is the only way anyone else sees
+/// it.
+MH_API int32_t mh_viewer_take_jump(MhViewerHandle viewer);
+
 /// Asks a running viewer to close. mh_viewer_run returns shortly after.
 MH_API void mh_viewer_stop(MhViewerHandle viewer);
 

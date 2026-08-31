@@ -488,6 +488,13 @@ bool mh::ViewerLink::character(float& x, float& y, float& z, float& heading) con
     return true;
 }
 
+void mh::ViewerLink::requestJump() { jump_ = true; }
+
+/// Exchange rather than a read and a clear, so a jump is delivered exactly
+/// once even if the client polls from a different thread than the one that
+/// set it.
+bool mh::ViewerLink::takeJump() { return jump_.exchange(false); }
+
 void mh::ViewerLink::stop() { stop_ = true; }
 
 bool mh::ViewerLink::stopping() const { return stop_; }
@@ -1868,7 +1875,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 
     bool dragging = false;
 
-    std::printf("wasd to walk, mouse drag to look, space and ctrl for up and down,\n");
+    std::printf("wasd to walk, mouse drag to look, space to jump, wheel or numpad 9/3 to zoom,\n");
     std::printf("shift to run, tab to orbit, p to print position, c to place the character,\n");
     std::printf("u to back up the trail if collision traps you, n for no collision,\n");
     std::printf("numpad 8/2 to move and 4/6 to turn, numpad minus to walk, shift to invert it,\n");
@@ -1898,6 +1905,11 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     const ffxi::Animation* idleClip = nullptr;
     const ffxi::Animation* walkClip = nullptr;
     const ffxi::Animation* runClip = nullptr;
+    const ffxi::Animation* jumpClip = nullptr;
+    // When the jump finishes, on the same clock animationOffset is measured
+    // against. Idle, walk and run are chosen every frame from what the
+    // character is doing; a jump is not, so it needs an end to hold until.
+    float jumpUntil = 0.0f;
     std::function<const ffxi::Animation*(const ffxi::Animation*)> upperFor;
     // MOGHOUSE_ANIMATION pins one clip; without it, movement picks.
     const bool pinnedClip = options.animation ? options.animation->c_str() : nullptr != nullptr;
@@ -1913,6 +1925,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         idleClip = find("idl0");
         walkClip = find("wlk0");
         runClip = find("run0");
+        jumpClip = find("jmp0");
 
         // The clips ending 0 drive the root, hips and legs - sixteen bones of
         // ninety-four. Everything above the waist, the spine and torso and
@@ -2081,6 +2094,28 @@ constexpr float kGravity = 26.0f;
                 {
                     camera.orbiting = !camera.orbiting;
                 }
+                else if (event.key.key == SDLK_SPACE && driving && jumpClip)
+                {
+                    // Only while driving: flying the camera, space is still
+                    // up. Restarting mid-jump would reset the clip on every
+                    // repeat of a held key, so an unfinished one is left to
+                    // land first.
+                    const float now = static_cast<float>(SDL_GetTicksNS() / 1000000ull) / 1000.0f;
+                    if (jumpUntil <= now)
+                    {
+                        playing = jumpClip;
+                        animationOffset = now;
+                        jumpUntil = now + static_cast<float>(jumpClip->frames) * jumpClip->frameSeconds();
+
+                        // And tell the client, which is the only half of this
+                        // that talks to the server. Without it the jump is
+                        // ours alone and nobody else ever sees it.
+                        if (link)
+                        {
+                            link->requestJump();
+                        }
+                    }
+                }
                 else if (event.key.key == SDLK_KP_MINUS)
                 {
                     walkByDefault = !walkByDefault;
@@ -2151,8 +2186,15 @@ constexpr float kGravity = 26.0f;
             }
             else if (event.type == SDL_EVENT_MOUSE_WHEEL)
             {
-                camera.distance = std::clamp(camera.distance * (event.wheel.y > 0 ? 0.9f : 1.1f), radius * 0.05f,
-                                             radius * 12.0f);
+                // Driving a character, the camera lives in the same 1.5 to 25
+                // as the numpad keys. Flying, it is surveying a whole zone and
+                // wants the zone's own scale. Sharing one floor meant the
+                // wheel stopped a long way short of the character in a city,
+                // where a twentieth of the radius is still tens of units.
+                camera.distance = driving
+                    ? std::clamp(camera.distance * (event.wheel.y > 0 ? 0.9f : 1.1f), 1.5f, 25.0f)
+                    : std::clamp(camera.distance * (event.wheel.y > 0 ? 0.9f : 1.1f), radius * 0.05f,
+                                 radius * 12.0f);
             }
         }
 
@@ -2245,6 +2287,11 @@ constexpr float kGravity = 26.0f;
         const float ahead = (forward ? speed : 0.0f) - (backward ? speed : 0.0f);
         const float side = (held[SDL_SCANCODE_D] ? speed : 0.0f) - (held[SDL_SCANCODE_A] ? speed : 0.0f);
         const float lift = (held[SDL_SCANCODE_SPACE] ? speed : 0.0f) - (held[SDL_SCANCODE_LCTRL] ? speed : 0.0f);
+
+        // Numpad 9 and 3 pull the camera in and push it out, the way the real
+        // client does it. They used to be space and ctrl, which space now
+        // wants for the jump - and the mouse wheel does the same job.
+        const float zoom = (held[SDL_SCANCODE_KP_9] ? speed : 0.0f) - (held[SDL_SCANCODE_KP_3] ? speed : 0.0f);
 
         // Two ways to move: fly the camera around to look at the zone, or
         // drive the character and have the camera follow. A character in the
@@ -2390,15 +2437,17 @@ constexpr float kGravity = 26.0f;
             // The camera sits behind and above the character, at head height.
             camera.orbiting = true;
             camera.target = {characterAt.x, characterAt.y + 1.2f, characterAt.z};
-            camera.distance = std::clamp(camera.distance - lift * 0.6f, 1.5f, 25.0f);
+            camera.distance = std::clamp(camera.distance - zoom * 0.6f, 1.5f, 25.0f);
         }
         else
         {
             camera.walk(ahead, side, lift);
         }
 
-        // Idle, walk or run, chosen by what the character is actually doing.
-        if (!pinnedClip)
+        // Idle, walk or run, chosen by what the character is actually doing
+        // - unless a jump is still in the air, which plays to the end.
+        const float nowSeconds = static_cast<float>(SDL_GetTicksNS() / 1000000ull) / 1000.0f;
+        if (!pinnedClip && jumpUntil <= nowSeconds)
         {
             // The same walk/run decision the speed uses, so the legs and the
             // ground always agree.
@@ -2703,6 +2752,13 @@ constexpr float kGravity = 26.0f;
                 const float line = hud.counts[1];
                 const float gap = line * 0.18f;
                 const float above = radarCentreY + radarRadius;
+
+                // Every label's size in one place. The compass is set where it
+                // is drawn, because the letters also have to be centred on
+                // their points.
+                constexpr float kZoneScale = 0.4f;
+                constexpr float kPositionScale = 0.4f;
+                constexpr float kWeekdayScale = 0.4f;
                 const float below = radarCentreY - radarRadius;
 
                 // centred = the x given is the middle, otherwise it is the
@@ -2758,12 +2814,13 @@ constexpr float kGravity = 26.0f;
                                                    "Iceday",     "Lightningday", "Lightsday", "Darksday"};
                 char clock[32] = {};
                 std::snprintf(clock, sizeof(clock), "%02d:%02d", clockMinutes / 60, clockMinutes % 60);
-                label(clock, radarCentreX, above + gap * 2.0f + line * 1.5f, 0.85f, kHudBright, 0.55f);
+                const float clockBottom = above + gap * 2.0f + line * 1.5f;
+                label(clock, radarCentreX, clockBottom, 0.85f, kHudBright, 0.55f);
 
                 if (vanaSeconds > 0)
                 {
                     label(kWeekdays[(vanaSeconds / 86400ull) % 8ull], radarCentreX,
-                          above + gap * 2.0f + line * 0.45f, 0.19f, kHudDim, 0.55f);
+                          clockBottom - line * kWeekdayScale - gap * 0.5f, kWeekdayScale, kHudDim, 0.55f);
                 }
 
                 // Compass letters around the ring.
@@ -2777,15 +2834,20 @@ constexpr float kGravity = 26.0f;
                 {
                     const float ringX = radarRadius * 1.16f / windowAspect;
                     const float ringY = radarRadius * 1.16f;
-                    const float half = hud.counts[1] * 0.5f;
-                    label("N", radarCentreX, radarCentreY + ringY - half, 1.0f, kHudBright, 0.0f);
+                    const float compass = 0.5f;
+                    const float half = hud.counts[1] * compass * 0.5f;
+                    label("N", radarCentreX, radarCentreY + ringY - half, compass, kHudBright, 0.0f);
                     southY = radarCentreY - ringY - half;
-                    label("S", radarCentreX, southY, 1.0f, kHudDim, 0.0f);
-                    label("E", radarCentreX + ringX, radarCentreY - half, 1.0f, kHudDim, 0.0f);
-                    label("W", radarCentreX - ringX, radarCentreY - half, 1.0f, kHudDim, 0.0f);
+                    label("S", radarCentreX, southY, compass, kHudDim, 0.0f);
+                    label("E", radarCentreX + ringX, radarCentreY - half, compass, kHudDim, 0.0f);
+                    label("W", radarCentreX - ringX, radarCentreY - half, compass, kHudDim, 0.0f);
                 }
 
-                // The zone name, as a ribbon under the radar.
+                // The zone name, as a ribbon under the radar, with the position
+                // directly beneath it - the two are one block, and splitting
+                // them either side of the compass read as two unrelated
+                // things.
+                const float zoneNameBottom = southY + line * 1.15f;
                 if (options.zoneName)
                 {
                     // Underscores are how the zone tables spell a space, and
@@ -2798,7 +2860,7 @@ constexpr float kGravity = 26.0f;
                             letter = ' ';
                         }
                     }
-                    label(zone, radarCentreX, southY + line * 1.15f, 0.4f, kHudBright, 0.55f);
+                    label(zone, radarCentreX, zoneNameBottom, kZoneScale, kHudBright, 0.55f);
                 }
 
                 // And where we are. FFXI shows a lettered grid here; that
@@ -2809,7 +2871,8 @@ constexpr float kGravity = 26.0f;
                 {
                     char position[32] = {};
                     std::snprintf(position, sizeof(position), "%.0f  %.0f", characterAt.x, -characterAt.z);
-                    label(position, radarCentreX, southY - line * 1.15f, 0.2f, kHudDim, 0.55f);
+                    label(position, radarCentreX, zoneNameBottom - line * kPositionScale - gap * 0.5f,
+                          kPositionScale, kHudDim, 0.55f);
                 }
 
                 // Chat, bottom left, oldest at the top. Same atlas as

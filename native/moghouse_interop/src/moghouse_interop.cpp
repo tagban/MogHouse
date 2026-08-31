@@ -139,6 +139,11 @@ int32_t mh_viewer_get_character(MhViewerHandle viewer, float* x, float* y, float
     return viewer->link.character(*x, *y, *z, *heading) ? 1 : 0;
 }
 
+int32_t mh_viewer_take_jump(MhViewerHandle viewer)
+{
+    return viewer && viewer->link.takeJump() ? 1 : 0;
+}
+
 void mh_viewer_stop(MhViewerHandle viewer)
 {
     if (viewer)
