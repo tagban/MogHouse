@@ -27,6 +27,15 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     public FfxiCharacter? SelectedCharacter { get; set; }
 
+    /// <summary>Where the game's files are, once found or chosen.</summary>
+    public string? InstallPath { get; set; }
+
+    /// <summary>
+    /// The window's folder picker, for the one screen that needs one. Set by
+    /// MainWindow, because a view model has no window of its own.
+    /// </summary>
+    public Avalonia.Platform.Storage.IStorageProvider? StorageProvider { get; set; }
+
     /// <summary>
     /// Null when the FFXI compression tables aren't installed. The transport
     /// still works without them but nothing can be decoded, so the UI says so
@@ -55,7 +64,19 @@ public partial class MainViewModel : ViewModelBase
 
         Session.Status += message => Dispatcher.UIThread.Post(() => Status = message);
 
-        CurrentPage = new LoginViewModel(this);
+        // Without the game's files there is nothing this can do, so finding
+        // them comes before anything else rather than failing later with a
+        // missing DAT.
+        InstallPath = FfxiInstall.Find();
+        if (InstallPath is null)
+        {
+            CurrentPage = new InstallViewModel(this);
+        }
+        else
+        {
+            Environment.SetEnvironmentVariable("MOGHOUSE_FFXI_INSTALL", InstallPath);
+            CurrentPage = new LoginViewModel(this);
+        }
 
         if (Tables is null)
         {
