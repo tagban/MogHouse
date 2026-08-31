@@ -50,6 +50,9 @@ switch (args[0])
     case "view":
         return await ViewAsync(ParseFlags(args));
 
+    case "create-character":
+        return await CreateCharacterAsync(ParseFlags(args));
+
     case "text":
         return Text(ParseFlags(args));
 
@@ -1263,6 +1266,92 @@ static FfxiFileTable? OpenFileTable()
 /// </summary>
 /// <summary>One line on one console line: 0x07 is a break within an entry.</summary>
 static string Flat(string? line) => (line ?? "").Replace(((char)10).ToString(), " / ");
+/// <summary>
+/// Make a character on an account that already exists.
+///
+/// Two exchanges rather than one: the name is checked first and the server
+/// remembers it, so the second message says only what the character looks
+/// like. See FfxiCharacterCreation.
+/// </summary>
+static async Task<int> CreateCharacterAsync(Dictionary<string, string> flags)
+{
+    if (!flags.TryGetValue("name", out string? name))
+    {
+        Console.WriteLine("create-character --credentials-file <path> --name <name> " +
+                          "[--race TarutaruFemale] [--face 0] [--size Medium] [--job Warrior] [--nation Windurst]");
+        return 2;
+    }
+
+    if (FfxiCharacterCreation.WhyNameIsInvalid(name) is string wrong)
+    {
+        Console.WriteLine(wrong);
+        return 2;
+    }
+
+    if (!TryMergeCredentialsFile(flags))
+    {
+        return 1;
+    }
+
+    FfxiServerProfile? profile = null;
+    if (flags.TryGetValue("profile", out string? idOrName))
+    {
+        profile = FfxiServerProfileStore.Find(idOrName)
+            ?? FfxiServerProfileStore.Profiles.FirstOrDefault(
+                p => p.Name.Equals(idOrName, StringComparison.OrdinalIgnoreCase));
+    }
+    else if (flags.TryGetValue("host", out string? host) &&
+             flags.TryGetValue("username", out string? username) &&
+             flags.TryGetValue("password", out string? password))
+    {
+        profile = new FfxiServerProfile { Host = host, Username = username, Password = password };
+    }
+
+    if (profile is null)
+    {
+        Console.WriteLine("create-character needs --profile, or --host/--username/--password, or --credentials-file.");
+        return 1;
+    }
+
+    using var session = new FfxiGameSession();
+    session.Status += message => Console.WriteLine($"  {message}");
+
+    (FfxiLoginResponse login, IReadOnlyList<FfxiCharacter> characters) = await session.LoginAsync(profile);
+    if (login.Result != FfxiLoginResult.Success || login.SessionHash is null)
+    {
+        Console.WriteLine($"Login failed: {login.Result}");
+        return 1;
+    }
+
+    var wanted = new FfxiNewCharacter(
+        name,
+        Pick(flags, "race", FfxiRaceId.TarutaruFemale),
+        flags.TryGetValue("face", out string? f) && byte.TryParse(f, out byte face) ? face : (byte)0,
+        Pick(flags, "size", FfxiBodySize.Medium),
+        Pick(flags, "job", FfxiStartingJob.Warrior),
+        Pick(flags, "nation", FfxiNation.Windurst));
+
+    Console.WriteLine($"Creating {wanted.Name}: {wanted.Race}, face {wanted.Face}, " +
+                      $"{wanted.Size}, {wanted.Job}, {wanted.Nation}. " +
+                      $"{characters.Count} character(s) already on this account.");
+
+    // A refused name comes back as one code whatever the reason - taken, a
+    // banned word, a digit - so this cannot say more than the server did.
+    string? refused = await session.CreateCharacterAsync(wanted, login.SessionHash);
+    if (refused is not null)
+    {
+        Console.WriteLine($"The server refused it: {refused}");
+        return 1;
+    }
+
+    Console.WriteLine($"Created {wanted.Name}.");
+    return 0;
+}
+
+/// <summary>One enum flag, by name, falling back when it is absent or unknown.</summary>
+static T Pick<T>(Dictionary<string, string> flags, string key, T fallback) where T : struct, Enum =>
+    flags.TryGetValue(key, out string? text) && Enum.TryParse(text, true, out T picked) ? picked : fallback;
+
 static int Text(Dictionary<string, string> flags)
 {
     if (!flags.TryGetValue("zone", out string? zoneText) || !int.TryParse(zoneText, out int zone))
