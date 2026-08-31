@@ -166,6 +166,43 @@ int main(int argc, char** argv)
         {
         }
     }
+    // Which models own the meshes that name no texture. They render white -
+    // the fountain's concrete, its centre piece, its water - so the first
+    // question is whether they are a handful of odd models or spread evenly.
+    if (std::getenv("MOGHOUSE_BLANK_TEXTURES"))
+    {
+        size_t blank = 0;
+        size_t named = 0;
+        for (const auto& entry : models)
+        {
+            size_t here = 0;
+            for (const ffxi::ModelMesh& mesh : entry.second.meshes)
+            {
+                if (mesh.texture.empty())
+                {
+                    ++here;
+                    ++blank;
+                }
+                else
+                {
+                    ++named;
+                }
+            }
+            if (here > 0)
+            {
+                std::printf("  %-18s %zu of %zu meshes have no texture", entry.first.c_str(), here,
+                            entry.second.meshes.size());
+                for (const ffxi::ModelMesh& mesh : entry.second.meshes)
+                {
+                    std::printf("  [%s blend=0x%04X verts=%zu]", mesh.texture.empty() ? "-" : mesh.texture.c_str(),
+                                mesh.blending, mesh.vertices.size());
+                }
+                std::printf("\n");
+            }
+        }
+        std::printf("  %zu blank, %zu named\n", blank, named);
+    }
+
     std::printf("%zu models\n", models.size());
 
     const std::unordered_map<std::string, ffxi::Texture> noTextures;

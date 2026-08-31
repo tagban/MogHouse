@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 
 namespace ffxi
 {
@@ -182,6 +183,8 @@ Model parseMmb(const Chunk& chunk, const KeyTable& keys, const KeyTable& keys2)
             continue;
         }
 
+        // Carried across the meshes of one piece, not across pieces.
+        std::string lastTexture;
         for (int32_t i = 0; i < modelCount; ++i)
         {
             if (offset + 20 > buffer.size())
@@ -191,6 +194,22 @@ Model parseMmb(const Chunk& chunk, const KeyTable& keys, const KeyTable& keys2)
 
             ModelMesh mesh;
             mesh.texture = readName(buffer, offset, 16);
+
+            // A blank name means "keep the last one", not "no texture".
+            //
+            // FFXI sets the texture with a command that applies to every
+            // primitive after it until the next one, so a mesh that does not
+            // name its own inherits whatever was set before it. Read as an
+            // empty name it binds the white fallback instead, which is how a
+            // shop ends up with one blank white panel among its walls.
+            if (mesh.texture.empty())
+            {
+                mesh.texture = lastTexture;
+            }
+            else
+            {
+                lastTexture = mesh.texture;
+            }
             const uint16_t vertexCount = read<uint16_t>(buffer, offset + 16);
             mesh.blending = read<uint16_t>(buffer, offset + 18);
             offset += 20;
