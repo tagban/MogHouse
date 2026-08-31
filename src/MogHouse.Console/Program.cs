@@ -511,6 +511,7 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                     var equipmentLooks = new Dictionary<uint, string>();
                     var fixedModels = new HashSet<ushort>();
                     var entityTraits = new Dictionary<uint, string>();
+                    var lastFull = new Dictionary<uint, byte[]>();
 
                     // Built up across fragments, then split into lines once the
                     // last one lands.
@@ -680,6 +681,44 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                                         Console.WriteLine($"    FULL 0x00D charid {entity.UniqueNo} (self={isSelf}, {size} bytes):");
                                         Console.WriteLine($"      {Convert.ToHexString(reply.Plaintext.AsSpan(offset, size))}");
                                     }
+
+                                    // And then every byte that changes afterwards.
+                                    //
+                                    // A field nobody has identified is best found
+                                    // by changing one thing about a character and
+                                    // watching what moves - a GM flag toggled off
+                                    // and on, say. A first sighting cannot show
+                                    // that, because there is nothing to compare.
+                                    //
+                                    // 0x0A to 0x17 is skipped: update flags,
+                                    // rotation and the three position floats move
+                                    // constantly and would bury everything else.
+                                    if (entity.PacketId == FfxiEntityUpdate.PlayerPacketId && !isSelf)
+                                    {
+                                        byte[] now = reply.Plaintext.AsSpan(offset, size).ToArray();
+                                        if (lastFull.TryGetValue(entity.UniqueNo, out byte[]? previous) &&
+                                            previous.Length == now.Length)
+                                        {
+                                            var moved = new List<string>();
+                                            for (int at = 0; at < now.Length; at++)
+                                            {
+                                                if (at is >= 0x0A and <= 0x17 || previous[at] == now[at])
+                                                {
+                                                    continue;
+                                                }
+
+                                                moved.Add($"0x{at:X2}: {previous[at]:X2}->{now[at]:X2}");
+                                            }
+
+                                            if (moved.Count > 0)
+                                            {
+                                                Console.WriteLine(
+                                                    $"    CHANGED charid {entity.UniqueNo}: {string.Join("  ", moved)}");
+                                            }
+                                        }
+
+                                        lastFull[entity.UniqueNo] = now;
+                                    }
                                 }
 
                                 FfxiJobInfo? jobInfo = FfxiJobInfo.TryParse(reply.Plaintext.AsSpan(offset, size));
@@ -723,6 +762,17 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
 
                                         serverMessage.Clear();
                                     }
+                                }
+
+                                // What the server wants playing. One track per
+                                // slot: zoning, nightfall, combat and mounting
+                                // all arrive this way rather than being the
+                                // client's decision.
+                                FfxiMusicChange? music =
+                                    FfxiMusicChange.TryParse(reply.Plaintext.AsSpan(offset, size));
+                                if (music is not null)
+                                {
+                                    Console.WriteLine($"    MUSIC {music.Slot} -> track {music.Track} ({music.FileName})");
                                 }
 
                                 FfxiChatMessage? chat = FfxiChatMessage.TryParse(reply.Plaintext.AsSpan(offset, size));
@@ -1185,6 +1235,7 @@ sealed class LiveRadar : IDisposable
             };
             entity.SetName(visible[i].Name);
             entity.SetLook(visible[i].Look);
+            entity.GmLevel = visible[i].GmLevel;
             entities[i] = entity;
         }
         _viewer.SetEntities(entities);

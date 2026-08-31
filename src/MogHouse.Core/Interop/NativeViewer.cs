@@ -45,6 +45,9 @@ public struct NativeRadarEntity
     /// </summary>
     public unsafe fixed ushort Look[7];
 
+    /// <summary>GM level, 0 for an ordinary player.</summary>
+    public int GmLevel;
+
     /// <summary>Writes a look in, or leaves it zeroed.</summary>
     public unsafe void SetLook(Ffxi.FfxiEntityLook? look)
     {

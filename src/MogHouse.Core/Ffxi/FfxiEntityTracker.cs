@@ -24,6 +24,9 @@ public sealed record FfxiTrackedEntity(
     /// </summary>
     bool NameHidden,
 
+    /// <summary>GM level, 0 for an ordinary player. Drives the name's colour.</summary>
+    int GmLevel,
+
     /// <summary>
     /// What the server says this one looks like, kept so the renderer can
     /// build it. Sticky: position-only updates carry no look.
@@ -147,6 +150,9 @@ public sealed class FfxiEntityTracker
                 ? known?.NameHidden ?? false
                 : update.IsNameHidden || (update.Look?.IsScenery ?? false) || (known?.NameHidden ?? false),
             Look: update.Look ?? known?.Look,
+            // Sticky like the rest: an update with no flags word must not
+            // demote a GM back to an ordinary player.
+            GmLevel: update.RawFlags1 is null ? known?.GmLevel ?? 0 : update.GmLevel,
             HealthPercent: update.HealthPercent ?? known?.HealthPercent,
             LastSeen: now);
     }

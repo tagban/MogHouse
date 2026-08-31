@@ -59,6 +59,9 @@ struct RadarEntity
     /// zero means it does not, and the shared body stands in.
     uint16_t look[7]{};
 
+    /// GM level, 0 for an ordinary player.
+    int gmLevel{};
+
     /// Whether there is a look here worth building. Race zero is not a race.
     bool hasLook() const { return look[0] != 0; }
 };

@@ -74,6 +74,15 @@ public sealed record FfxiEntityUpdate(
     ///
     /// Two bits, both in the second flags word: hide at 1, invisible at 29.
     /// </summary>
+    /// <summary>
+    /// The sender's GM level, 0 for an ordinary player.
+    ///
+    /// Bits 24 to 26 of the second flags word. Confirmed by toggling the flag
+    /// on a live character and watching the word: 0x05008400 with it on,
+    /// 0x00008400 with it off, everything else unchanged.
+    /// </summary>
+    public int GmLevel => RawFlags1 is uint flags ? (int)((flags >> 24) & 7) : 0;
+
     public bool IsHidden =>
         RawFlags1 is uint flags && (((flags >> 1) & 1) != 0 || ((flags >> 29) & 1) != 0);
 

@@ -65,6 +65,9 @@ typedef struct MhRadarEntity
     /// the server did not describe it this way - a fixed model, a door - and
     /// the shared body stands in.
     uint16_t look[7];
+
+    /// GM level, 0 for an ordinary player. Only the name's colour uses it.
+    int32_t gmLevel;
 } MhRadarEntity;
 
 /// What to open. Every string is borrowed for the duration of the create call

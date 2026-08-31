@@ -108,6 +108,10 @@ inline constexpr float kNameNpc[3] = {0.60f, 0.98f, 0.60f};
 inline constexpr float kPlateClearance = 0.16f;
 inline constexpr float kNameMonster[3] = {0.98f, 0.86f, 0.30f};
 
+/// A GM. Darker than the red an aggressive monster gets, which is the
+/// distinction the real client draws.
+inline constexpr float kNameGm[3] = {0.80f, 0.14f, 0.14f};
+
 /// Matches HudUniforms in hud_shader.h.
 struct HudUniforms
 {
@@ -3265,7 +3269,13 @@ constexpr float kGravity = 26.0f;
                     // needs membership the client does not parse yet, so those
                     // stay white rather than being guessed at.
                     const float* tint = kNameWhite;
-                    if (entity.kind == 2)
+                    if (entity.gmLevel > 0)
+                    {
+                        // Ahead of everything else: a GM is a GM whatever else
+                        // they are, and the real client says so first too.
+                        tint = kNameGm;
+                    }
+                    else if (entity.kind == 2)
                     {
                         tint = kNameMonster;
                     }
