@@ -133,7 +133,13 @@ public sealed class FfxiEntityTracker
             Hidden: update.RawFlags1 is null ? known?.Hidden ?? false : update.IsHidden,
             // Sticky for the same reason: a position-only update carries no
             // namevis byte, and must not reveal a door's name.
-            NameHidden: update.NameVis is null ? known?.NameHidden ?? false : update.IsNameHidden,
+            // Two ways to earn this. The namevis bit is what the protocol
+            // has for it, but a server need not set it - this one leaves it
+            // zero on every entity, doors included. What it does say reliably
+            // is that a door is a door, and scenery is never labelled.
+            NameHidden: update.NameVis is null && update.Look is null
+                ? known?.NameHidden ?? false
+                : update.IsNameHidden || (update.Look?.IsScenery ?? false) || (known?.NameHidden ?? false),
             HealthPercent: update.HealthPercent ?? known?.HealthPercent,
             LastSeen: now);
     }

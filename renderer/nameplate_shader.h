@@ -68,9 +68,7 @@ fn vertexMain(@builtin(vertex_index) index : u32) -> VertexOut {
 @fragment
 fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
     let count = i32(plate.counts.x);
-    let textHeight = plate.counts.y;      // one cell, in NDC y
     let aspect = plate.counts.z;
-    let cellWide = textHeight / aspect;   // one cell, in NDC x
 
     let columns = plate.atlas.x;
     let cell = plate.atlas.y;
@@ -91,6 +89,17 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
         if (widthCells <= 0.0) {
             continue;
         }
+
+        // Names shrink with distance. Held at a constant size on screen they
+        // read as enormous the moment the thing they label is far enough away
+        // to be small - a name across a plaza was wider than the building
+        // behind it. Scaled off clip.w, which is the view depth, against a
+        // reference distance where the size is 1:1. Clamped at both ends so a
+        // name underfoot does not fill the screen and one across the zone does
+        // not vanish into a smear.
+        let near = clamp(6.0 / clip.w, 0.35, 1.15);
+        let textHeight = plate.counts.y * near;
+        let cellWide = (textHeight / aspect);
 
         let width = widthCells * cellWide;
         let left = screen.x - width * 0.5;

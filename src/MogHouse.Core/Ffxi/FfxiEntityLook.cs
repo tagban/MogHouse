@@ -52,12 +52,31 @@ public sealed record FfxiEntityLook(FfxiLookKind Kind, ushort ModelId, byte Race
     public bool IsEquipment => Kind is FfxiLookKind.Equipped or FfxiLookKind.Chocobo;
 
     /// <summary>
+    /// Scenery rather than a character: a door, a ship, an elevator. Named in
+    /// the zone's table and never labelled on screen - the game shows the name
+    /// in the target box when you click one, not floating over it.
+    /// </summary>
+    public bool IsScenery => Kind is FfxiLookKind.Door or FfxiLookKind.Elevator or FfxiLookKind.Ship;
+
+    /// <summary>
     /// Whether this names a single model rather than a set of pieces. The id
     /// alone is not enough to find the file - that mapping is its own problem.
     /// </summary>
     public bool IsFixedModel => Kind is FfxiLookKind.Standard or FfxiLookKind.Unknown5 or FfxiLookKind.Automaton;
 
+    /// <summary>
+    /// An equipment id with its slot tag removed.
+    ///
+    /// The server tags each id with the slot it belongs to in the high nibble -
+    /// 0x1000 head, 0x2000 body, 0x3000 hands, 0x4000 legs, 0x5000 feet - and
+    /// the model id is the low twelve bits. A real look reads
+    /// 4096,8194,12288,16407,20503, which is the same as 0,2,0,23,23 once the
+    /// tags come off, and only the second form means anything to the file
+    /// table.
+    /// </summary>
+    public static ushort ModelOf(ushort tagged) => (ushort)(tagged & 0x0FFF);
+
     /// <summary>The seven numbers the character loader takes, in its order.</summary>
     public string ToLookString() =>
-        $"{Race},{Face},{Head},{Body},{Hands},{Legs},{Feet}";
+        $"{Race},{Face},{ModelOf(Head)},{ModelOf(Body)},{ModelOf(Hands)},{ModelOf(Legs)},{ModelOf(Feet)}";
 }

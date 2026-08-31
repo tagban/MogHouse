@@ -444,7 +444,13 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                     // radar - so what the radar would show is what gets
                     // reported here, rather than a second count that could
                     // agree by accident.
-                    var tracker = new FfxiEntityTracker { SelfUniqueNo = handoff.ServerId };
+                    // Our own id comes from the zone login reply. The handoff has
+                    // a serverId field that reads zero on this server, and using
+                    // it meant every packet the server validates against the
+                    // sender - a jump among them - was built with a zero id and
+                    // silently refused before it left.
+                    uint selfId = zoneState?.UniqueNo is > 0 and uint fromZone ? fromZone : handoff.ServerId;
+                    var tracker = new FfxiEntityTracker { SelfUniqueNo = selfId };
 
                     // --view opens the renderer in this same process and lets
                     // the tracker drive its radar. The two halves have agreed
@@ -483,6 +489,11 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                     // real client shows above the login message.
                     liveRadar?.Say("", $"Welcome to {selected.WorldName}.");
 
+                    // A jump is refused without our own targid, and the guard
+                    // that skips it is silent. Say up front whether we have one.
+                    Console.WriteLine($"Our targid for jumps: 0x{zoneState.ActIndex:X3} " +
+                                      $"(uniqueNo {selfId}) - a zero here means jumps cannot be sent.");
+
                     // The first sighting of each entity, raw. Which byte says
                     // "this is a shopkeeper, not a crab" is not derivable from
                     // the struct - bitfield blocks and a misaligned uint8 sit
@@ -492,6 +503,7 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                     var looksSeen = new Dictionary<FfxiLookKind, int>();
                     var equipmentLooks = new Dictionary<uint, string>();
                     var fixedModels = new HashSet<ushort>();
+                    var entityTraits = new Dictionary<uint, string>();
 
                     // Built up across fragments, then split into lines once the
                     // last one lands.
@@ -556,7 +568,7 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                         // The renderer knows a jump happened; only this side can
                         // tell the server, which is what makes anyone else see it.
                         jumpRequested: liveRadar is null ? null : liveRadar.TakeJump,
-                        selfUniqueNo: handoff.ServerId,
+                        selfUniqueNo: selfId,
                         // From the zone login reply, which is where the server
                         // tells us our own targid. It never sends us the entity
                         // update it sends for everyone else, so the tracker only
@@ -586,6 +598,18 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                                     int count = entitiesSeen.GetValueOrDefault(entity.UniqueNo).Count + 1;
                                     entitiesSeen[entity.UniqueNo] = (entity.PacketId, isSelf, count);
                                     int before = tracker.Count;
+                                    // What actually separates a door from a
+                                    // shopkeeper. Printed rather than guessed: the
+                                    // namevis bit alone did not account for the
+                                    // entities that should stay unlabelled.
+                                    if (entity.NameVis is not null && !entityTraits.ContainsKey(entity.UniqueNo))
+                                    {
+                                        entityTraits[entity.UniqueNo] =
+                                            $"namevis=0x{entity.NameVis:X2} flags0=0x{entity.RawFlags0 ?? 0:X8} " +
+                                            $"flags1=0x{entity.RawFlags1 ?? 0:X8} look={entity.Look?.Kind} " +
+                                            $"model={entity.Look?.ModelId}";
+                                    }
+
                                     if (entity.Look is FfxiEntityLook seen)
                                     {
                                         looksSeen[seen.Kind] = looksSeen.GetValueOrDefault(seen.Kind) + 1;
@@ -779,6 +803,16 @@ static async Task<int> LoginAsync(Dictionary<string, string> flags)
                         if (fixedModels.Count > 0)
                         {
                             Console.WriteLine($"Fixed model ids: {string.Join(", ", fixedModels.Order().Take(20))}");
+                        }
+                    }
+
+                    if (entityTraits.Count > 0)
+                    {
+                        Console.WriteLine();
+                        Console.WriteLine("Entity traits (first sighting):");
+                        foreach ((uint id, string traits) in entityTraits.OrderBy(kv => kv.Key).Take(30))
+                        {
+                            Console.WriteLine($"  {id,-10} {traits}");
                         }
                     }
 
