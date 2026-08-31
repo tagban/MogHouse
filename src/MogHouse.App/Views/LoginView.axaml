@@ -58,6 +58,13 @@
       <Button Grid.Column="1" Content="Save profile" Command="{Binding SaveProfileCommand}" Margin="6,0,0,0"/>
     </Grid>
 
+    <Button Content="Create an account on this server"
+            Command="{Binding CreateAccountCommand}"
+            HorizontalAlignment="Center"
+            Background="Transparent"
+            BorderThickness="0"
+            Opacity="0.7"/>
+
     <TextBlock Text="{Binding Error}"
                Foreground="#EF5350"
                TextWrapping="Wrap"

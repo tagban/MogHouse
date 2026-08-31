@@ -1,0 +1,40 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:MogHouse.App.ViewModels"
+             x:Class="MogHouse.App.Views.CreateAccountView"
+             x:DataType="vm:CreateAccountViewModel">
+  <StackPanel Width="360" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
+    <TextBlock Text="New account" FontSize="28" FontWeight="Light" HorizontalAlignment="Center"/>
+    <TextBlock Text="On a server that allows it" Opacity="0.6" HorizontalAlignment="Center" Margin="0,0,0,6"/>
+
+    <TextBlock Text="Server"/>
+    <Grid ColumnDefinitions="*,Auto">
+      <TextBox Grid.Column="0" Text="{Binding Host}" Watermark="host or address"/>
+      <TextBox Grid.Column="1" Text="{Binding AuthPort}" Width="80" Margin="6,0,0,0"/>
+    </Grid>
+
+    <TextBlock Text="Username"/>
+    <TextBox Text="{Binding Username}" Watermark="up to 16 characters"/>
+
+    <TextBlock Text="Password"/>
+    <TextBox Text="{Binding Password}" PasswordChar="*"/>
+
+    <TextBlock Text="Password again"/>
+    <TextBox Text="{Binding Confirm}" PasswordChar="*"/>
+
+    <Grid ColumnDefinitions="*,Auto" Margin="0,8,0,0">
+      <Button Grid.Column="0"
+              Content="Create account"
+              Command="{Binding CreateCommand}"
+              IsEnabled="{Binding !IsBusy}"
+              HorizontalAlignment="Stretch"
+              HorizontalContentAlignment="Center"/>
+      <Button Grid.Column="1" Content="Back" Command="{Binding BackCommand}" Margin="6,0,0,0"/>
+    </Grid>
+
+    <TextBlock Text="{Binding Error}"
+               Foreground="#EF5350"
+               TextWrapping="Wrap"
+               IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+  </StackPanel>
+</UserControl>

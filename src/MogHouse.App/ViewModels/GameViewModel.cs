@@ -70,6 +70,9 @@ public partial class GameViewModel : ViewModelBase
         OpenWorld();
     }
 
+    [ObservableProperty]
+    public partial string WorldStatus { get; set; } = "Opening...";
+
     private LiveRadar? _world;
     private readonly FfxiEntityTracker _tracker = new();
     private CancellationTokenSource? _feeding;
@@ -99,9 +102,12 @@ public partial class GameViewModel : ViewModelBase
                                 session.ZoneState.GameTime, CharacterName, look);
         if (_world is null)
         {
-            _shell.Status = "Could not open the world window - check MOGHOUSE_FFXI_KEYTABLE.";
+            WorldStatus = "Could not open the world window. Check MOGHOUSE_FFXI_KEYTABLE and that the game files are where the client expects.";
+            _shell.Status = WorldStatus;
             return;
         }
+
+        WorldStatus = $"Open, in zone {session.ZoneState.ZoneNo}.";
 
         // The renderer owns movement and reports where it ended up; the session
         // owns everything the server has to be told about it.
@@ -124,7 +130,42 @@ public partial class GameViewModel : ViewModelBase
                 _world?.Publish(_tracker);
                 await Task.Delay(50, token).ConfigureAwait(false);
             }
+
+            // Closing the world window is leaving, not a glitch to recover
+            // from - say so rather than looking like nothing happened.
+            if (!token.IsCancellationRequested)
+            {
+                Dispatcher.UIThread.Post(() => WorldStatus = "Closed. Reopen it, or leave.");
+            }
         }, token);
+    }
+
+    /// <summary>Opens it again after it has been closed.</summary>
+    [RelayCommand]
+    private void ReopenWorld()
+    {
+        if (_world is { Closed: false })
+        {
+            return;
+        }
+
+        _feeding?.Cancel();
+        _world?.Dispose();
+        _world = null;
+        WorldStatus = "Opening...";
+        OpenWorld();
+    }
+
+    /// <summary>Closes the world and goes back to the character list.</summary>
+    [RelayCommand]
+    private async Task LeaveAsync()
+    {
+        _feeding?.Cancel();
+        _world?.Dispose();
+        _world = null;
+
+        await _shell.Session.LogoutAsync();
+        _shell.Status = "Left the world.";
     }
 
     private void OnChat(FfxiChatLine line) => Dispatcher.UIThread.Post(() =>

@@ -125,6 +125,13 @@ public partial class LoginViewModel : ViewModelBase
         _shell.Status = $"Deleted profile '{name}'.";
     }
 
+    /// <summary>
+    /// Off to make one. The host and port travel with it, since that is the
+    /// server the account will exist on.
+    /// </summary>
+    [RelayCommand]
+    private void CreateAccount() => _shell.Navigate(new CreateAccountViewModel(_shell, Host, AuthPort));
+
     [RelayCommand]
     private async Task LoginAsync()
     {
