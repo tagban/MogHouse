@@ -1,10 +1,15 @@
 <UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:app="clr-namespace:MogHouse.App"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:MogHouse.App.ViewModels"
              xmlns:ffxi="using:MogHouse.Core.Ffxi"
              xmlns:controls="using:MogHouse.App.Controls"
              x:Class="MogHouse.App.Views.GameView"
              x:DataType="vm:GameViewModel">
+  <UserControl.Resources>
+    <app:FirstLinkConverter x:Key="FirstLink"/>
+  </UserControl.Resources>
+
   <Grid ColumnDefinitions="*,320" Margin="10">
 
     <!-- Chat -->
@@ -22,7 +27,9 @@
                 <!-- Plain TextBlocks rather than Runs: Avalonia's Run does not
                      support every property through a binding, and failures are
                      silent, which is how the chat box ended up empty. -->
-                <StackPanel Orientation="Horizontal" Spacing="5" Margin="0,1">
+                <StackPanel Orientation="Horizontal" Spacing="5" Margin="0,1"
+                            Background="Transparent" Tapped="OnChatLineTapped"
+                            ToolTip.Tip="{Binding Text, Converter={StaticResource FirstLink}}">
                   <TextBlock Text="{Binding Kind}" Foreground="#7E9CD8" FontSize="12" VerticalAlignment="Center"/>
                   <TextBlock Text="{Binding Sender}" FontWeight="SemiBold"/>
                   <TextBlock Text="{Binding Text}" TextWrapping="Wrap"/>
@@ -68,6 +75,18 @@
 
       <Button Content="Leave the world" Command="{Binding LeaveCommand}"
               HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,10,0,0"/>
+
+      <Border BorderBrush="#333" BorderThickness="0,1,0,0" Margin="0,10,0,0" Padding="0,8,0,0">
+        <StackPanel Spacing="4">
+          <TextBlock Text="Found something wrong?" Opacity="0.55" FontSize="11"/>
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Button Content="Report a bug" Click="OnReportBug" FontSize="12" Padding="8,3"/>
+            <Button Content="Discord" Click="OnOpenDiscord" FontSize="12" Padding="8,3"/>
+          </StackPanel>
+          <TextBlock Opacity="0.4" FontSize="11" TextWrapping="Wrap"
+                     Text="Bugs go to GitHub Issues. The Discord is where the work happens - say what you were doing and what the window showed, and a screenshot beats a description."/>
+        </StackPanel>
+      </Border>
     </StackPanel>
   </Grid>
 </UserControl>

@@ -595,6 +595,13 @@ public sealed class FfxiGameSession : IDisposable
         if (!transition.IsZoneChange)
         {
             Status?.Invoke($"Server ended the session: {transition.State}.");
+
+            // This is the answer LogoutAsync is waiting for. The server decides
+            // how long leaving takes - LandSandBoat runs a Leavegame effect
+            // first, and cuts it short for a GM - so waiting for it to say so
+            // beats guessing a duration.
+            _loggedOut?.TrySetResult(transition.State);
+
             _holdCts?.Cancel();
             return;
         }
@@ -613,6 +620,9 @@ public sealed class FfxiGameSession : IDisposable
     }
 
     private IPEndPoint? _pendingZone;
+
+    /// <summary>Completed when the server confirms we have actually left.</summary>
+    private TaskCompletionSource<FfxiLogoutState>? _loggedOut;
 
     /// <summary>
     /// Set from the moment a zone change is asked for until the renderer has
@@ -1116,20 +1126,40 @@ public sealed class FfxiGameSession : IDisposable
         {
             try
             {
-                await _zone.SendLogoutAsync(_zoneEndpoint, kind);
-                Status?.Invoke("Logout requested.");
+                _loggedOut = new TaskCompletionSource<FfxiLogoutState>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
 
-                // Give the server time to act on it before the socket
-                // stops answering.
+                await _zone.SendLogoutAsync(_zoneEndpoint, kind);
+                Status?.Invoke("Logout requested. Waiting for the server...");
+
+                // Wait for the server to say it is done, rather than for a
+                // number we picked.
                 //
-                // REQLOGOUT is a request, not a goodbye: LandSandBoat runs
-                // a five second Leavegame effect and only then clears the
-                // session. Cancelling the hold loop immediately means
-                // nothing is left to answer the server, the logout never
-                // completes, and the session sits there until it is reaped
-                // about a minute later - so the next login fails on 201
-                // and blames itself for a logout that was never finished.
-                await Task.Delay(TimeSpan.FromSeconds(6));
+                // REQLOGOUT is a request, not a goodbye: LandSandBoat starts a
+                // Leavegame effect and clears the session when it expires,
+                // which is seconds for a GM and the best part of half a minute
+                // for anyone else. A fixed wait is wrong in both directions -
+                // too short and the logout never completes, so the character
+                // sits on the server until it is reaped about a minute later
+                // and the next login fails on 201; too long and leaving always
+                // feels broken.
+                //
+                // The cap is a backstop for a server that never answers, not
+                // the expected path.
+                using var giveUp = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+                try
+                {
+                    FfxiLogoutState state = await _loggedOut.Task.WaitAsync(giveUp.Token);
+                    Status?.Invoke($"Logged out: {state}.");
+                }
+                catch (OperationCanceledException)
+                {
+                    Status?.Invoke("The server never confirmed the logout; leaving anyway.");
+                }
+                finally
+                {
+                    _loggedOut = null;
+                }
             }
             catch (Exception ex)
             {

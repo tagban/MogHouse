@@ -51,6 +51,7 @@ public sealed record FfxiEntityUpdate(
     float X,
     float Vertical,
     float Depth,
+    byte[]? Raw = null,
     uint EntityFlags = 0,
     string? Name = null,
     byte? ModelSize = null,
@@ -379,6 +380,7 @@ public sealed record FfxiEntityUpdate(
             : null;
 
         return new FfxiEntityUpdate(
+            Raw: subPacket.Length >= 32 ? subPacket[..32].ToArray() : subPacket.ToArray(),
             SendFlags: subPacket[OffsetSendFlags],
             PacketId: id,
             UniqueNo: BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(OffsetUniqueNo, 4)),

@@ -52,6 +52,10 @@ public sealed class FfxiEntityTracker
     private readonly Dictionary<uint, FfxiTrackedEntity> _entities = [];
     private readonly TimeSpan _forgetAfter;
 
+    /// <summary>Whether an update carries no position at all.</summary>
+    private static bool IsUnset(FfxiEntityUpdate update) =>
+        update.X == 0.0f && update.Vertical == 0.0f && update.Depth == 0.0f;
+
     /// <summary>What MOGHOUSE_TRACE_ENTITY asked to watch, if anything.</summary>
     private static readonly string? Trace = Environment.GetEnvironmentVariable("MOGHOUSE_TRACE_ENTITY");
 
@@ -124,7 +128,8 @@ public sealed class FfxiEntityTracker
                 $"  TRACE {update.UniqueNo:X8} id=0x{update.PacketId:X3} send=0x{update.SendFlags:X2} " +
                 $"flags1={(update.RawFlags1 is uint f1 ? $"0x{f1:X8}" : "-")} " +
                 $"despawn={update.IsDespawn} hidden={update.IsHidden} look={update.Look?.Kind.ToString() ?? "-"} " +
-                $"name={update.Name ?? "-"} at {update.X:F1},{update.Depth:F1}");
+                $"name={update.Name ?? "-"} at {update.X:F1},{update.Depth:F1}" +
+                (update.Raw is byte[] raw ? "  raw " + Convert.ToHexString(raw) : ""));
         }
 
         // A despawn is the real answer to "is it still there", and the only
@@ -161,9 +166,24 @@ public sealed class FfxiEntityTracker
             // sticky rule every other field here gets was skipped for this one,
             // and a character who changed anything at all lost their name.
             Name: string.IsNullOrEmpty(update.Name) ? known?.Name : update.Name,
-            X: update.X,
-            Vertical: update.Vertical,
-            Depth: update.Depth,
+            // An update that carries no position reads as the origin, and
+            // moving something there is worse than leaving it alone.
+            //
+            // LandSandBoat writes x, y and z only under SendFlg.Position, so a
+            // packet without it leaves them zero - and a standing player gets
+            // a run of those. Trusted, they put whoever stopped moving at
+            // (0, 0, 0), hundreds of units away and off the edge of the world,
+            // which reads exactly like them blinking out of existence a couple
+            // of seconds after they stand still. It was reported as a player
+            // going invisible, and every flag in the packet was innocent.
+            //
+            // The first sighting has nothing to fall back on, so it is taken
+            // as it comes. After that, a position of exactly zero is treated
+            // as silence: a real entity is never precisely at the origin, and
+            // skipping one update of a thing that has not moved costs nothing.
+            X: known is not null && IsUnset(update) ? known.X : update.X,
+            Vertical: known is not null && IsUnset(update) ? known.Vertical : update.Vertical,
+            Depth: known is not null && IsUnset(update) ? known.Depth : update.Depth,
             Direction: update.Direction,
             // Sticky the way the name is: a later update that carries no flags
             // must not turn an invisible thing visible.
