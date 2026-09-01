@@ -351,8 +351,15 @@ public partial class GameViewModel : ViewModelBase
     /// <summary>Which zone the open window was built for.</summary>
     private uint _openZone;
 
-    /// <summary>How long a loading screen stays up however fast the zone reads.</summary>
-    private static readonly TimeSpan MinimumLoadingScreen = TimeSpan.FromSeconds(3);
+    /// <summary>
+    /// How long a loading screen stays up however fast the zone reads.
+    ///
+    /// Long enough to register as a deliberate screen rather than a flash of
+    /// something wrong, short enough not to be the slowest part of zoning -
+    /// swapping the zone inside the live window turned out to be quick enough
+    /// that the wait was the only thing left making it feel slow.
+    /// </summary>
+    private static readonly TimeSpan MinimumLoadingScreen = TimeSpan.FromMilliseconds(600);
 
     /// <summary>Waits for the zone to land, and for the floor to pass.</summary>
     private async Task HoldLoadingScreen()

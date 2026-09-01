@@ -1345,15 +1345,6 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             indexCount = static_cast<uint32_t>(zone->indices.size());
             std::printf("buffers created\n");
 
-            wgpu::BufferDescriptor uniformDescriptor{.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
-                                                     .size = sizeof(Uniforms)};
-            uniformBuffer = device.CreateBuffer(&uniformDescriptor);
-
-            wgpu::ShaderSourceWGSL wgsl;
-            wgsl.code = mh::kZoneShader;
-            wgpu::ShaderModuleDescriptor moduleDescriptor{.nextInChain = &wgsl};
-            wgpu::ShaderModule module = device.CreateShaderModule(&moduleDescriptor);
-
             // Location 7, not 3: the instance matrix already holds 3 through 6, and
             // the two buffers share one location space.
             wgpu::VertexAttribute attributes[4] = {
@@ -1379,87 +1370,107 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                                                     .attributes = instanceAttributes};
             wgpu::VertexBufferLayout bufferLayouts[2] = {vertexLayout, instanceLayout};
 
-            // An explicit layout shared by both pipelines. Letting each derive its
-            // own default layout makes bind groups built for one incompatible with
-            // the other, which fails at draw time rather than at creation.
-            wgpu::BindGroupLayoutEntry layoutEntries[3] = {};
-            layoutEntries[0].binding = 0;
-            layoutEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
-            layoutEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
-            layoutEntries[1].binding = 1;
-            layoutEntries[1].visibility = wgpu::ShaderStage::Fragment;
-            layoutEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
-            layoutEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
-            layoutEntries[2].binding = 2;
-            layoutEntries[2].visibility = wgpu::ShaderStage::Fragment;
-            layoutEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
+            // Created once for the life of the window rather than once per zone.
+            // A bind group is only valid against the exact layout object it was
+            // built from, and the character's are built at startup - so minting a
+            // fresh layout on every zone change left every skinned model, the
+            // player included, holding bind groups the new pipeline rejects. The
+            // same goes for the uniform buffer they bind: a new one each zone is a
+            // buffer nothing writes to any more. Nothing here depends on the zone.
+            if (!pipeline)
+            {
+                wgpu::BufferDescriptor uniformDescriptor{.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
+                                                         .size = sizeof(Uniforms)};
+                uniformBuffer = device.CreateBuffer(&uniformDescriptor);
 
-            wgpu::BindGroupLayoutDescriptor bindGroupLayoutDescriptor{.entryCount = 3, .entries = layoutEntries};
-            zoneBindGroupLayout = device.CreateBindGroupLayout(&bindGroupLayoutDescriptor);
+                wgpu::ShaderSourceWGSL wgsl;
+                wgsl.code = mh::kZoneShader;
+                wgpu::ShaderModuleDescriptor moduleDescriptor{.nextInChain = &wgsl};
+                wgpu::ShaderModule module = device.CreateShaderModule(&moduleDescriptor);
 
-            wgpu::PipelineLayoutDescriptor pipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
-                                                                    .bindGroupLayouts = &zoneBindGroupLayout};
-            wgpu::PipelineLayout sharedLayout = device.CreatePipelineLayout(&pipelineLayoutDescriptor);
 
-            wgpu::ColorTargetState colorTarget{.format = surfaceFormat};
-            wgpu::FragmentState fragment{.module = module, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &colorTarget};
-            wgpu::DepthStencilState depthStencil{.format = kDepthFormat,
-                                                 .depthWriteEnabled = wgpu::OptionalBool::True,
-                                                 .depthCompare = wgpu::CompareFunction::Less};
+                // An explicit layout shared by both pipelines. Letting each derive its
+                // own default layout makes bind groups built for one incompatible with
+                // the other, which fails at draw time rather than at creation.
+                wgpu::BindGroupLayoutEntry layoutEntries[3] = {};
+                layoutEntries[0].binding = 0;
+                layoutEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+                layoutEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
+                layoutEntries[1].binding = 1;
+                layoutEntries[1].visibility = wgpu::ShaderStage::Fragment;
+                layoutEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
+                layoutEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+                layoutEntries[2].binding = 2;
+                layoutEntries[2].visibility = wgpu::ShaderStage::Fragment;
+                layoutEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
 
-            wgpu::RenderPipelineDescriptor pipelineDescriptor{
-                .layout = sharedLayout,
-                .vertex = {.module = module, .entryPoint = "vertexMain", .bufferCount = 2, .buffers = bufferLayouts},
-                .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
-                .depthStencil = &depthStencil,
-                .fragment = &fragment};
-            pipeline = device.CreateRenderPipeline(&pipelineDescriptor);
+                wgpu::BindGroupLayoutDescriptor bindGroupLayoutDescriptor{.entryCount = 3, .entries = layoutEntries};
+                zoneBindGroupLayout = device.CreateBindGroupLayout(&bindGroupLayoutDescriptor);
 
-            // Same pipeline, alpha-cutout fragment shader. Which one a batch uses
-            // comes from its mesh header rather than from one global choice.
-            wgpu::FragmentState cutoutFragment{
-                .module = module, .entryPoint = "fragmentCutout", .targetCount = 1, .targets = &colorTarget};
-            wgpu::RenderPipelineDescriptor cutoutDescriptor = pipelineDescriptor;
-            cutoutDescriptor.fragment = &cutoutFragment;
-            cutoutPipeline = device.CreateRenderPipeline(&cutoutDescriptor);
+                wgpu::PipelineLayoutDescriptor pipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
+                                                                        .bindGroupLayouts = &zoneBindGroupLayout};
+                wgpu::PipelineLayout sharedLayout = device.CreatePipelineLayout(&pipelineLayoutDescriptor);
 
-            // And once more for water: the same shader, blended, and not writing
-            // depth so a surface does not hide the one behind it. Bastok Markets
-            // has two water meshes stacked - a darker body with a lighter sheet
-            // over it - and with depth writes on, whichever drew first won.
-            wgpu::BlendState surfaceBlend{
-                .color = {.operation = wgpu::BlendOperation::Add,
-                          .srcFactor = wgpu::BlendFactor::SrcAlpha,
-                          .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
-                .alpha = {.operation = wgpu::BlendOperation::Add,
-                          .srcFactor = wgpu::BlendFactor::One,
-                          .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha}};
-            wgpu::ColorTargetState surfaceTarget{.format = surfaceFormat, .blend = &surfaceBlend};
-            wgpu::FragmentState surfaceFragment{
-                .module = module, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &surfaceTarget};
-            wgpu::DepthStencilState surfaceDepth{.format = kDepthFormat,
-                                                 .depthWriteEnabled = wgpu::OptionalBool::False,
-                                                 .depthCompare = wgpu::CompareFunction::Less};
-            wgpu::RenderPipelineDescriptor surfaceDescriptor = pipelineDescriptor;
-            surfaceDescriptor.fragment = &surfaceFragment;
-            surfaceDescriptor.depthStencil = &surfaceDepth;
-            translucentPipeline = device.CreateRenderPipeline(&surfaceDescriptor);
+                wgpu::ColorTargetState colorTarget{.format = surfaceFormat};
+                wgpu::FragmentState fragment{.module = module, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &colorTarget};
+                wgpu::DepthStencilState depthStencil{.format = kDepthFormat,
+                                                     .depthWriteEnabled = wgpu::OptionalBool::True,
+                                                     .depthCompare = wgpu::CompareFunction::Less};
 
-            // WebGPU has no bindless arrays, so each texture needs its own bind
-            // group and its own draw. Fine at a zone's few dozen textures; this is
-            // the thing that will need atlasing or caching at a larger scale.
-            wgpu::SamplerDescriptor samplerDescriptor{};
-            samplerDescriptor.addressModeU = wgpu::AddressMode::Repeat;
-            samplerDescriptor.addressModeV = wgpu::AddressMode::Repeat;
-            samplerDescriptor.magFilter = wgpu::FilterMode::Linear;
-            samplerDescriptor.minFilter = wgpu::FilterMode::Linear;
-            sampler = device.CreateSampler(&samplerDescriptor);
+                wgpu::RenderPipelineDescriptor pipelineDescriptor{
+                    .layout = sharedLayout,
+                    .vertex = {.module = module, .entryPoint = "vertexMain", .bufferCount = 2, .buffers = bufferLayouts},
+                    .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
+                    .depthStencil = &depthStencil,
+                    .fragment = &fragment};
+                pipeline = device.CreateRenderPipeline(&pipelineDescriptor);
 
-            whiteTexture = mh::createWhiteTexture(device);
-            // Dark. Bastok's water is nearly black at night and a deep slate by
-            // day, and a cheerful mid-blue placeholder reads as a mistake in a
-            // city built out of grey stone.
-            waterFallbackTexture = mh::createSolidTexture(device, 26, 46, 54, 190);
+                // Same pipeline, alpha-cutout fragment shader. Which one a batch uses
+                // comes from its mesh header rather than from one global choice.
+                wgpu::FragmentState cutoutFragment{
+                    .module = module, .entryPoint = "fragmentCutout", .targetCount = 1, .targets = &colorTarget};
+                wgpu::RenderPipelineDescriptor cutoutDescriptor = pipelineDescriptor;
+                cutoutDescriptor.fragment = &cutoutFragment;
+                cutoutPipeline = device.CreateRenderPipeline(&cutoutDescriptor);
+
+                // And once more for water: the same shader, blended, and not writing
+                // depth so a surface does not hide the one behind it. Bastok Markets
+                // has two water meshes stacked - a darker body with a lighter sheet
+                // over it - and with depth writes on, whichever drew first won.
+                wgpu::BlendState surfaceBlend{
+                    .color = {.operation = wgpu::BlendOperation::Add,
+                              .srcFactor = wgpu::BlendFactor::SrcAlpha,
+                              .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
+                    .alpha = {.operation = wgpu::BlendOperation::Add,
+                              .srcFactor = wgpu::BlendFactor::One,
+                              .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha}};
+                wgpu::ColorTargetState surfaceTarget{.format = surfaceFormat, .blend = &surfaceBlend};
+                wgpu::FragmentState surfaceFragment{
+                    .module = module, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &surfaceTarget};
+                wgpu::DepthStencilState surfaceDepth{.format = kDepthFormat,
+                                                     .depthWriteEnabled = wgpu::OptionalBool::False,
+                                                     .depthCompare = wgpu::CompareFunction::Less};
+                wgpu::RenderPipelineDescriptor surfaceDescriptor = pipelineDescriptor;
+                surfaceDescriptor.fragment = &surfaceFragment;
+                surfaceDescriptor.depthStencil = &surfaceDepth;
+                translucentPipeline = device.CreateRenderPipeline(&surfaceDescriptor);
+
+                // WebGPU has no bindless arrays, so each texture needs its own bind
+                // group and its own draw. Fine at a zone's few dozen textures; this is
+                // the thing that will need atlasing or caching at a larger scale.
+                wgpu::SamplerDescriptor samplerDescriptor{};
+                samplerDescriptor.addressModeU = wgpu::AddressMode::Repeat;
+                samplerDescriptor.addressModeV = wgpu::AddressMode::Repeat;
+                samplerDescriptor.magFilter = wgpu::FilterMode::Linear;
+                samplerDescriptor.minFilter = wgpu::FilterMode::Linear;
+                sampler = device.CreateSampler(&samplerDescriptor);
+
+                whiteTexture = mh::createWhiteTexture(device);
+                // Dark. Bastok's water is nearly black at night and a deep slate by
+                // day, and a cheerful mid-blue placeholder reads as a mistake in a
+                // city built out of grey stone.
+                waterFallbackTexture = mh::createSolidTexture(device, 26, 46, 54, 190);
+            }
             const wgpu::TextureView whiteView = whiteTexture.CreateView();
             const wgpu::TextureView waterFallbackView = waterFallbackTexture.CreateView();
 
