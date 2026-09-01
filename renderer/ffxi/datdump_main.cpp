@@ -105,6 +105,13 @@ int main(int argc, char** argv)
                     }
                     ++models;
                     modelNames.insert(m.name);
+                    // Per-model geometry, for finding a model that parses but comes out empty.
+                    if (std::getenv("MOGHOUSE_MODEL_STATS"))
+                    {
+                        std::printf("  model %-18s %2zu meshes %6zu verts %6zu tris  tex %s\n",
+                                    m.name.c_str(), m.meshes.size(), m.vertexCount(), m.triangleCount(),
+                                    m.meshes.empty() ? "-" : m.meshes.front().texture.c_str());
+                    }
                     meshes += m.meshes.size();
                     verts += m.vertexCount();
                     tris += m.triangleCount();
