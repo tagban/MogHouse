@@ -116,6 +116,57 @@ def water_triangles(data):
             yield corners
 
 
+# How wide a cell is when grouping water into pools, and how far up the sorted
+# bed heights the waterline is taken from. A percentile rather than the very
+# highest point, so one stray triangle on a bank does not raise a whole canal.
+POOL_CELL = 4.0
+WATERLINE_PERCENTILE = 0.05
+
+
+def waterlines(triangles):
+    """A surface height for each connected body of water.
+
+    The MZB's per-cell height is the obvious source and is not usable: Windurst
+    Waters writes 0.0010 into every water cell, which is a flag rather than a
+    height, and lifting to it drags surfaces below their own bed. The shape
+    answers instead. Water pools into connected regions, and a pool's surface
+    is where its bed meets the bank - the highest ground in it.
+
+    DAT space has y increasing downward, so the highest ground is the smallest
+    y, and a pool's waterline is near the bottom of its sorted heights.
+    """
+    cells = collections.defaultdict(list)
+    owner = {}
+    for index, corners in enumerate(triangles):
+        cx = int(sum(c[0] for c in corners) / 3 // POOL_CELL)
+        cz = int(sum(c[2] for c in corners) / 3 // POOL_CELL)
+        cells[(cx, cz)].append(min(c[1] for c in corners))
+        owner[index] = (cx, cz)
+
+    seen = set()
+    height = {}
+    for start in cells:
+        if start in seen:
+            continue
+        stack, pool = [start], []
+        seen.add(start)
+        while stack:
+            cx, cz = stack.pop()
+            pool.append((cx, cz))
+            for dx in (-1, 0, 1):
+                for dz in (-1, 0, 1):
+                    near = (cx + dx, cz + dz)
+                    if near in cells and near not in seen:
+                        seen.add(near)
+                        stack.append(near)
+        tops = sorted(y for cell in pool for y in cells[cell])
+        line = tops[min(len(tops) - 1, int(len(tops) * WATERLINE_PERCENTILE))]
+        for cell in pool:
+            height[cell] = line
+
+    return [height[owner[i]] for i in range(len(triangles))]
+
+
 def emit(zone, data, path):
     """Write the water as a flat float32 list the renderer can read straight in.
 
@@ -124,12 +175,15 @@ def emit(zone, data, path):
     side has a file it can upload rather than a format to understand.
     """
     triangles = list(water_triangles(data))
+    surfaces = waterlines(triangles)
     with open(path, "wb") as out:
         out.write(b"MHWA")
         out.write(struct.pack("<I", len(triangles)))
-        for corners in triangles:
-            for x, y, z in corners:
-                out.write(struct.pack("<3f", x, -y, -z))
+        for corners, surface in zip(triangles, surfaces):
+            # Flat, at its pool's waterline. These triangles are the bed, and a
+            # water surface is level where a bed is not.
+            for x, _, z in corners:
+                out.write(struct.pack("<3f", x, -surface, -z))
     return len(triangles)
 
 
