@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using MogHouse.Core.Ffxi;
@@ -62,8 +63,8 @@ public partial class MainViewModel : ViewModelBase
         Tables = FfxiHuffmanTables.TryLoadDefault();
         // Navmeshes come from the same place as the compression tables by
         // default, since both are server-side data the project does not ship.
-        NavMeshDirectory = Environment.GetEnvironmentVariable("MOGHOUSE_FFXI_NAVMESHES");
-        ZoneDataDirectory = Environment.GetEnvironmentVariable("MOGHOUSE_FFXI_ZONEDATA");
+        NavMeshDirectory = ServerData("MOGHOUSE_FFXI_NAVMESHES", "navmeshes");
+        ZoneDataDirectory = ServerData("MOGHOUSE_FFXI_ZONEDATA", "zones");
 
         Session = new FfxiGameSession(
             Tables is null ? null : new FfxiHuffman(Tables),
@@ -120,6 +121,26 @@ public partial class MainViewModel : ViewModelBase
         Console.WriteLine($"startup: game files at {InstallPath ?? "(not found - asking)"}");
         Console.WriteLine($"startup: navmeshes {(NavMeshDirectory ?? "(none - the flat map will be empty)")}");
         Console.WriteLine($"startup: zone data {(ZoneDataDirectory ?? "(none - no zone lines)")}");
+    }
+
+    /// <summary>
+    /// Server-side data: what the environment says, or a folder beside the
+    /// executable, or nothing.
+    ///
+    /// Both of these are optional and the client says what it loses without
+    /// them, but a packaged build that ships a folder nobody looks in is worse
+    /// than one that ships nothing - which is exactly what happened the first
+    /// time: 836 files of zone data in the zip, and "no zone lines" in the log.
+    /// </summary>
+    private static string? ServerData(string variable, string folder)
+    {
+        if (Environment.GetEnvironmentVariable(variable) is { Length: > 0 } configured)
+        {
+            return configured;
+        }
+
+        string beside = Path.Combine(AppContext.BaseDirectory, folder);
+        return Directory.Exists(beside) ? beside : null;
     }
 
     public void Navigate(ViewModelBase page) => CurrentPage = page;
