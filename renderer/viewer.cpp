@@ -439,6 +439,79 @@ std::vector<std::filesystem::path> subroomsFor(const std::filesystem::path& zone
     return found;
 }
 
+/// The zone's water surfaces, precomputed by tools/ximesh.py.
+///
+/// Water is a material on each collision triangle - ShallowWater and DeepWater
+/// in the server's own TerrainType - rather than a model with a recognisable
+/// name or a height on the MZB's cells. Both of those were tried and both were
+/// wrong. The server ships the decoded meshes, so the triangles are lifted out
+/// of those and written world-space ahead of time; reading them here would mean
+/// linking zlib to parse a file that never changes.
+size_t loadWater(const std::string& zoneName, mh::Scene& scene)
+{
+    std::filesystem::path path = std::filesystem::path{"assets"} / "water" / (zoneName + ".water");
+    if (const char* nativeDir = std::getenv("MOGHOUSE_NATIVE_DIR"))
+    {
+        const std::filesystem::path beside =
+            std::filesystem::path{nativeDir} / "assets" / "water" / (zoneName + ".water");
+        if (std::filesystem::exists(beside))
+        {
+            path = beside;
+        }
+    }
+    if (const char* fontDir = std::getenv("MOGHOUSE_FONT"))
+    {
+        const std::filesystem::path beside = std::filesystem::path{fontDir} / "water" / (zoneName + ".water");
+        if (std::filesystem::exists(beside))
+        {
+            path = beside;
+        }
+    }
+
+    std::ifstream file{path, std::ios::binary};
+    if (!file)
+    {
+        return 0;
+    }
+
+    char magic[4] = {};
+    uint32_t count = 0;
+    file.read(magic, 4);
+    file.read(reinterpret_cast<char*>(&count), sizeof(count));
+    if (std::string(magic, 4) != "MHWA" || count == 0 || count > 4000000)
+    {
+        return 0;
+    }
+
+    std::vector<float> corners(static_cast<size_t>(count) * 9);
+    file.read(reinterpret_cast<char*>(corners.data()),
+              static_cast<std::streamsize>(corners.size() * sizeof(float)));
+    if (!file)
+    {
+        return 0;
+    }
+
+    for (uint32_t triangle = 0; triangle < count; ++triangle)
+    {
+        for (int corner = 0; corner < 3; ++corner)
+        {
+            const float* p = corners.data() + (static_cast<size_t>(triangle) * 9 + corner * 3);
+            mh::Vertex vertex{};
+            vertex.position[0] = p[0];
+            vertex.position[1] = p[1];
+            vertex.position[2] = p[2];
+            vertex.normal[1] = 1.0f;
+            // World-space UVs, so the surface is continuous across the seams
+            // between one collision block and the next.
+            vertex.uv[0] = p[0] * 0.06f;
+            vertex.uv[1] = p[2] * 0.06f;
+            scene.waterIndices.push_back(static_cast<uint32_t>(scene.waterVertices.size()));
+            scene.waterVertices.push_back(vertex);
+        }
+    }
+    return count;
+}
+
 std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, const char* key2Path, std::string& zoneId,
                                      std::unordered_map<std::string, ffxi::Texture>& textures, ffxi::Lighting& lighting,
                                      mh::Collision& collision, std::vector<mh::InteriorLighting>& interiors)
@@ -921,6 +994,14 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         // The character is loaded after the zone so it can share the texture
         // map: a PC in a town wears textures the zone never mentions, and a
         // zone texture the character happens to name should not be read twice.
+        if (options.zoneName)
+        {
+            const size_t water = loadWater(*options.zoneName, *zone);
+            if (water)
+            {
+                std::printf("water: %zu triangles\n", water);
+            }
+        }
         std::printf("collision: %zu triangles, %zu walls\n", collision.triangleCount(), collision.wallCount());
         std::printf("zone %s: %zu triangles\n", zoneId.c_str(), zone->indices.size() / 3);
         std::printf("  bounds x %.1f..%.1f  y %.1f..%.1f  z %.1f..%.1f\n", zone->boundsMin.x, zone->boundsMax.x,
@@ -3624,6 +3705,26 @@ constexpr float kGravity = 26.0f;
                     characterAt.y = next <= *ground ? *ground : next;
                     if (next <= *ground)
                     {
+                        fallSpeed = 0.0f;
+                    }
+                }
+                else
+                {
+                    // Nothing underneath at all, which means through the floor
+                    // rather than falling: groundAt only looks a step down and
+                    // a fall's worth below, so a character who has ended up
+                    // under the world finds nothing and simply hangs there,
+                    // for ever, watching the zone from below. It happens - a
+                    // teleport into a spot with no floor, or a step that got
+                    // past the walls - and there was no way back short of
+                    // pressing C.
+                    //
+                    // closestGroundAt looks in both directions and however
+                    // far, which is the question this actually wants.
+                    if (const std::optional<float> rescue =
+                            collision.closestGroundAt(characterAt.x, characterAt.z, characterAt.y))
+                    {
+                        characterAt.y = *rescue;
                         fallSpeed = 0.0f;
                     }
                 }

@@ -66,15 +66,90 @@ def load(zone, root):
     return zlib.decompress(open(path, "rb").read())
 
 
+def cells(data):
+    """Every (block, placement) pair the grid references, each once.
+
+    A block is geometry in its own space; a placement is where that geometry
+    sits. The same pair is named by every cell it overlaps, so they are drawn
+    once and remembered.
+    """
+    grid_w, grid_h, _, _, _, _, _ = struct.unpack_from("<HHIIHHI", data, 0)
+    seen = set()
+    for index in range(grid_w * grid_h):
+        offset = struct.unpack_from("<I", data, 20 + index * 4)[0]
+        if not offset:
+            continue
+        _, entry_count = struct.unpack_from("<IH", data, offset)
+        for entry in range(entry_count):
+            pair = struct.unpack_from("<II", data, offset + 6 + entry * 8)
+            if pair not in seen:
+                seen.add(pair)
+                yield pair
+
+
+def one_block(data, offset):
+    vertex_count, triangle_count, _, _ = struct.unpack_from("<HHHH", data, offset)
+    at = offset + 8
+    vertices = struct.unpack_from("<%df" % (vertex_count * 3), data, at)
+    at += vertex_count * 12
+    indices = struct.unpack_from("<%dH" % (triangle_count * 3), data, at)
+    at += triangle_count * 6
+    at = (at + 3) & ~3
+    return vertices, indices, data[at:at + triangle_count]
+
+
+def water_triangles(data):
+    """Every water triangle, in world space."""
+    for block_offset, placement_offset in cells(data):
+        vertices, indices, materials = one_block(data, block_offset)
+        m = struct.unpack_from("<12f", data, placement_offset + 4)
+        for triangle in range(len(materials)):
+            if (materials[triangle] & 0x0F) not in (SHALLOW_WATER, DEEP_WATER):
+                continue
+            corners = []
+            for corner in range(3):
+                v = indices[triangle * 3 + corner]
+                x, y, z = vertices[v * 3], vertices[v * 3 + 1], vertices[v * 3 + 2]
+                corners.append((m[0] * x + m[3] * y + m[6] * z + m[9],
+                                m[1] * x + m[4] * y + m[7] * z + m[10],
+                                m[2] * x + m[5] * y + m[8] * z + m[11]))
+            yield corners
+
+
+def emit(zone, data, path):
+    """Write the water as a flat float32 list the renderer can read straight in.
+
+    Nine floats a triangle, already in the renderer's own frame - the world is
+    (x, -y, -z) relative to the DATs, and doing the turn here means the C++
+    side has a file it can upload rather than a format to understand.
+    """
+    triangles = list(water_triangles(data))
+    with open(path, "wb") as out:
+        out.write(b"MHWA")
+        out.write(struct.pack("<I", len(triangles)))
+        for corners in triangles:
+            for x, y, z in corners:
+                out.write(struct.pack("<3f", x, -y, -z))
+    return len(triangles)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("zone", help="zone name as the file is called, e.g. Windurst_Waters")
     ap.add_argument("--water", action="store_true", help="list the water triangles' extent")
+    ap.add_argument("--emit", metavar="DIR", help="write <zone>.water for the renderer")
     ap.add_argument("--root", default=os.environ.get("MOGHOUSE_FFXI_XIMESHES", DEFAULT_ROOT))
     args = ap.parse_args()
 
     data = load(args.zone, args.root)
+
+    if args.emit:
+        os.makedirs(args.emit, exist_ok=True)
+        out = os.path.join(args.emit, args.zone + ".water")
+        print("%s: %d water triangles -> %s" % (args.zone, emit(args.zone, data, out), out))
+        return
+
     tally = collections.Counter()
     water_points = []
     for vertices, indices, materials, _ in blocks(data):
