@@ -441,7 +441,7 @@ std::vector<std::filesystem::path> subroomsFor(const std::filesystem::path& zone
 
 std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, const char* key2Path, std::string& zoneId,
                                      std::unordered_map<std::string, ffxi::Texture>& textures, ffxi::Lighting& lighting,
-                                     mh::Collision& collision)
+                                     mh::Collision& collision, std::vector<mh::InteriorLighting>& interiors)
 {
     auto keys = ffxi::KeyTable::load(keyPath);
     if (!keys)
@@ -576,6 +576,15 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
                     }
                 }
 
+                // A room's own times of day, kept apart from the zone's rather
+                // than merged into them - they describe the inside of one
+                // building, not the world.
+                ffxi::Lighting inner;
+                for (const ffxi::Chunk& chunk : room.chunksOfType(ffxi::kChunkLighting))
+                {
+                    inner.add(chunk);
+                }
+
                 for (const ffxi::Chunk& chunk : room.chunksOfType(ffxi::kChunkMzb))
                 {
                     ffxi::Zone inside = ffxi::parseMzb(chunk, *keys);
@@ -584,6 +593,16 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
                     mh::Scene scene = mh::buildScene(inside, roomModels, textures, resolved, missing);
                     if (!scene.vertices.empty())
                     {
+                        if (!inner.empty())
+                        {
+                            // Grown a little, so standing in a doorway does not
+                            // flicker between the two sets frame to frame.
+                            constexpr float kMargin = 2.0f;
+                            interiors.push_back(mh::InteriorLighting{
+                                inner,
+                                {scene.boundsMin.x - kMargin, scene.boundsMin.y - kMargin, scene.boundsMin.z - kMargin},
+                                {scene.boundsMax.x + kMargin, scene.boundsMax.y + kMargin, scene.boundsMax.z + kMargin}});
+                        }
                         mh::append(*best, scene);
                         added += resolved;
                         ++rooms;
@@ -597,7 +616,8 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
         }
         if (rooms)
         {
-            std::printf("  %zu building interiors, %zu placements\n", rooms, added);
+            std::printf("  %zu building interiors, %zu placements, %zu with their own lighting\n", rooms, added,
+                        interiors.size());
         }
     }
     return best;
@@ -846,6 +866,9 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     mh::Collision collision;
     std::unordered_map<std::string, ffxi::Texture> textures;
     ffxi::Lighting lighting;
+
+    // Each building interior lights its own inside; see InteriorLighting.
+    std::vector<mh::InteriorLighting> interiors;
     if (!options.zonePath.empty())
     {
         const char* keyPath = options.keyTablePath.empty() ? nullptr : options.keyTablePath.c_str();
@@ -856,7 +879,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         }
         zone = loadZone(options.zonePath.c_str(), keyPath,
                         options.keyTable2Path.empty() ? nullptr : options.keyTable2Path.c_str(), zoneId, textures,
-                        lighting, collision);
+                        lighting, collision, interiors);
         if (!zone)
         {
             return 1;
@@ -3305,6 +3328,18 @@ constexpr float kGravity = 26.0f;
             clockMinutes = static_cast<int>((SDL_GetTicksNS() / 1000000ull / 42ull) % 1440ull);
         }
 
+        // Which lighting the frame is under. Indoors the room's own set wins;
+        // outdoors, and in any room that did not ship one, this is the zone's.
+        const ffxi::Lighting* active = &lighting;
+        for (const mh::InteriorLighting& room : interiors)
+        {
+            if (room.contains(camera.eye()))
+            {
+                active = &room.lighting;
+                break;
+            }
+        }
+
         const uint64_t nowTicks = SDL_GetTicksNS();
         const float delta = static_cast<float>(nowTicks - previousTicks) / 1e9f;
 
@@ -3884,7 +3919,7 @@ constexpr float kGravity = 26.0f;
             skyUniforms.up[1] = u.y * tanHalfFov;
             skyUniforms.up[2] = u.z * tanHalfFov;
 
-            const ffxi::LightingSet skySet = lighting.at(clockMinutes);
+            const ffxi::LightingSet skySet = active->at(clockMinutes);
             for (size_t i = 0; i < 8; ++i)
             {
                 skyUniforms.skyColours[i][0] = skySet.skyColours[i].r;
@@ -3923,7 +3958,7 @@ constexpr float kGravity = 26.0f;
             uniforms.lightDirection[1] = light.y;
             uniforms.lightDirection[2] = light.z;
 
-            const ffxi::LightingSet set = lighting.at(clockMinutes);
+            const ffxi::LightingSet set = active->at(clockMinutes);
             uniforms.ambient[0] = set.landscapeAmbient.r * 0.5f;
             uniforms.ambient[1] = set.landscapeAmbient.g * 0.5f;
             uniforms.ambient[2] = set.landscapeAmbient.b * 0.5f;

@@ -11,6 +11,9 @@
 // this - it is how the renderer gets exercised without the client, which is
 // worth keeping.
 
+#include "ffxi/lighting.h"
+#include "linalg.h"
+
 #include <atomic>
 #include <cstdint>
 #include <deque>
@@ -34,6 +37,26 @@ namespace mh
 /// Y is up here as everywhere past the DAT readers, and the radius is the
 /// larger half-extent of the box the server keeps: being generous costs an
 /// early zone rather than a missed one.
+/// One building interior's own lighting, and where it applies.
+///
+/// A room carries its own times of day, and they are not the zone's: Windurst
+/// Waters at noon is 1.48/1.49/1.50, near white, while the shop inside it is
+/// 1.13/1.23/0.93 - dimmer, and with the blue pulled down so it reads warm.
+/// Lit by the zone's set instead, an interior looks like a room with the roof
+/// off, which is exactly what ours looked like.
+struct InteriorLighting
+{
+    ffxi::Lighting lighting;
+    Vec3 boundsMin{};
+    Vec3 boundsMax{};
+
+    bool contains(const Vec3& point) const
+    {
+        return point.x >= boundsMin.x && point.x <= boundsMax.x && point.y >= boundsMin.y &&
+               point.y <= boundsMax.y && point.z >= boundsMin.z && point.z <= boundsMax.z;
+    }
+};
+
 struct ZoneLineMarker
 {
     float x{};
