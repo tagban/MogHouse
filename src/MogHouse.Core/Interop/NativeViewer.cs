@@ -63,10 +63,25 @@ public struct NativeRadarEntity
     public int GmLevel;
 
     /// <summary>Writes a look in, or leaves it zeroed.</summary>
+    /// <summary>
+    /// A creature's own model, when the server describes it as one fixed
+    /// model rather than as a race wearing equipment. Zero when it has none.
+    /// </summary>
+    public uint ModelId;
+
     public unsafe void SetLook(Ffxi.FfxiEntityLook? look)
     {
-        if (look is null || !look.IsEquipment)
+        if (look is null)
         {
+            return;
+        }
+
+        // look_t is a union. A fixed model is not a race wearing anything,
+        // so there is nothing to fill the seven slots with - it is one id
+        // pointing at one file, and the renderer loads it whole.
+        if (!look.IsEquipment)
+        {
+            ModelId = look.ModelId;
             return;
         }
 

@@ -68,6 +68,11 @@ typedef struct MhRadarEntity
 
     /// GM level, 0 for an ordinary player. Only the name's colour uses it.
     int32_t gmLevel;
+
+    /// A creature's model, when the server describes it as one fixed model
+    /// rather than as a race wearing things: a rabbit, a crab, a goblin.
+    /// Zero when it has none. See mh::creatureFileId.
+    uint32_t modelId;
 } MhRadarEntity;
 
 /// What to open. Every string is borrowed for the duration of the create call

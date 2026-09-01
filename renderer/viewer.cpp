@@ -2097,6 +2097,52 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         return inserted->second ? &*inserted->second : nullptr;
     };
 
+    /// A creature's model, cached by the id the server sent.
+    ///
+    /// Nothing to assemble: one file holds the skeleton, the mesh and the
+    /// animations, and the clips are named the way a player's are, so the same
+    /// idl0/wlk0/run0 the rest of the renderer looks for is a rabbit sitting,
+    /// hopping and running without any special case.
+    const auto creatureFor = [&](uint16_t modelId) -> const DrawableCharacter* {
+        const uint64_t key = 0x8000000000000000ull | modelId;
+        auto found = npcModels.find(key);
+        if (found != npcModels.end())
+        {
+            return found->second ? &*found->second : nullptr;
+        }
+
+        std::optional<DrawableCharacter> built;
+        try
+        {
+            const ffxi::FileTable table{ffxi::defaultInstallRoot()};
+            if (auto path = table.path(mh::creatureFileId(modelId)))
+            {
+                if (auto loaded = loadCharacter({path->string()}, textures))
+                {
+                    built = buildDrawable(std::move(*loaded));
+                }
+            }
+        }
+        catch (const std::exception& e)
+        {
+            std::printf("could not build creature %u: %s\n", modelId, e.what());
+        }
+
+        std::printf("creature model %s: id %u -> file %zu\n", built ? "built" : "failed", modelId,
+                    mh::creatureFileId(modelId));
+        auto inserted = npcModels.emplace(key, std::move(built)).first;
+        return inserted->second ? &*inserted->second : nullptr;
+    };
+
+    /// Whichever way this entity is described.
+    const auto modelForEntity = [&](const mh::RadarEntity& entity) -> const DrawableCharacter* {
+        if (entity.hasModel())
+        {
+            return creatureFor(entity.modelId);
+        }
+        return entity.hasLook() ? modelFor(entity.look) : nullptr;
+    };
+
     auto writeCharacterInstance = [&]() {
         if (!characterInstanceBuffer)
         {
@@ -2982,12 +3028,12 @@ constexpr float kGravity = 26.0f;
         // walk.
         for (const mh::RadarEntity& entity : radarEntities)
         {
-            if (!entity.hasLook())
+            if (!entity.hasLook() && !entity.hasModel())
             {
                 continue;
             }
 
-            const DrawableCharacter* model = modelFor(entity.look);
+            const DrawableCharacter* model = modelForEntity(entity);
             if (!model || model->loaded.animations.empty())
             {
                 continue;
@@ -3261,12 +3307,13 @@ constexpr float kGravity = 26.0f;
                 for (int body = 0; body < drawnBodies; ++body)
                 {
                     const size_t index = static_cast<size_t>(body);
-                    if (index >= radarEntities.size() || !radarEntities[index].hasLook())
+                    if (index >= radarEntities.size() ||
+                        (!radarEntities[index].hasLook() && !radarEntities[index].hasModel()))
                     {
                         continue;
                     }
 
-                    const DrawableCharacter* model = modelFor(radarEntities[index].look);
+                    const DrawableCharacter* model = modelForEntity(radarEntities[index]);
                     if (!model)
                     {
                         continue;
@@ -3699,7 +3746,7 @@ constexpr float kGravity = 26.0f;
                     // A galka and a tarutaru standing together want quite
                     // different numbers, and the shared body is the fallback
                     // for anyone we could not build.
-                    const DrawableCharacter* plateModel = entity.hasLook() ? modelFor(entity.look) : nullptr;
+                    const DrawableCharacter* plateModel = modelForEntity(entity);
                     const float bodyHeight = plateModel ? plateModel->loaded.geometry.height()
                                                         : (character ? character->geometry.height() : 1.8f);
 

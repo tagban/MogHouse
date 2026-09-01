@@ -80,9 +80,34 @@ struct RadarEntity
     /// GM level, 0 for an ordinary player.
     int gmLevel{};
 
+    /// A creature's own model, when the server describes it as one fixed
+    /// model rather than as a race wearing equipment.
+    ///
+    /// look_t is a union: a size of 1 means face, race and equipment, which
+    /// the character loader already builds; a size of 0 means a single model
+    /// id, which is every monster and most creature NPCs in the game. They
+    /// were drawn as nothing at all until this existed - a name floating over
+    /// empty ground where a rabbit should be.
+    uint16_t modelId{};
+
     /// Whether there is a look here worth building. Race zero is not a race.
     bool hasLook() const { return look[0] != 0; }
+
+    /// Whether this is a creature with a model of its own.
+    bool hasModel() const { return modelId != 0; }
 };
+
+/// Where a creature's model lives, from the id the server sends.
+///
+/// One file each, holding the skeleton, the mesh and its animations together -
+/// no equipment to assemble and no motion set to find alongside. Confirmed by
+/// the skeletons' own names: model 269 is `usa` (usagi, a rabbit) and is what
+/// a Savanna Rarab is, 356 is `kani` (a crab), 340 is `shee`, 484 is `gob_`
+/// and 580 is `yagu`. 1300 is also exactly where the first skeleton-bearing
+/// file in the archive sits.
+inline constexpr size_t kCreatureModelBase = 1300;
+
+inline size_t creatureFileId(uint16_t modelId) { return kCreatureModelBase + modelId; }
 
 /// How many tracked entities get drawn as bodies. Beyond this they stay dots -
 /// they all share one skinned mesh, so the cost is per instance and small, but
