@@ -252,8 +252,22 @@ public sealed record FfxiEntityUpdate(
         if (id == NpcPacketId && subPacket.Length > OffsetAllegiance)
         {
             allegiance = subPacket[OffsetAllegiance];
-            healthPercent = subPacket[OffsetHealthPercent];
-            battleFlags = subPacket[OffsetBattleFlags];
+
+            // Health and the mob flag are written only under UPDATE_HP.
+            //
+            // entity_update.cpp puts every one of them inside
+            // `if (updatemask & UPDATE_HP)`, so on an update without that
+            // bit those bytes are whatever the packet happened to contain -
+            // usually zero. Reading them anyway makes a living mob look like
+            // an NPC that merely has no hit points, which is exactly what an
+            // NPC is, so a Carrion Crow came out the same colour as a
+            // shopkeeper. Long enough to hold the byte is not the same
+            // question as the server having written it.
+            if ((subPacket[OffsetSendFlags] & UpdateHealth) != 0)
+            {
+                healthPercent = subPacket[OffsetHealthPercent];
+                battleFlags = subPacket[OffsetBattleFlags];
+            }
         }
 
         if (id == PlayerPacketId && (subPacket[OffsetSendFlags] & UpdateStatus) != 0 &&

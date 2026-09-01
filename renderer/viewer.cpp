@@ -3285,12 +3285,16 @@ constexpr float kGravity = 26.0f;
                     for (int body = 0; body < drawnBodies && entityVertexBuffer; ++body)
                     {
                         const size_t index = static_cast<size_t>(body);
-                        // Only skipped if the look actually built into
-                        // something. A Chocobo's look names a race the player
-                        // race table has no entry for, and dropping it would
-                        // leave nothing standing there at all.
-                        if (index < radarEntities.size() && radarEntities[index].hasLook() &&
-                            modelFor(radarEntities[index].look))
+                        // Only skipped if something actually built. A
+                        // Chocobo's look names a race the player race table has
+                        // no entry for, and dropping it would leave nothing
+                        // standing there at all.
+                        //
+                        // This has to ask the same question the model loop
+                        // asks, creatures included: testing only the equipment
+                        // form drew the shared body underneath every monster,
+                        // so a rabbit came with a Tarutaru standing inside it.
+                        if (index < radarEntities.size() && modelForEntity(radarEntities[index]))
                         {
                             continue;   // has its own model, drawn below
                         }
