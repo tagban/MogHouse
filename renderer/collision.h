@@ -119,6 +119,14 @@ public:
     /// looked up a slope.
     std::optional<float> firstWallAlong(const Vec3& from, const Vec3& to) const;
 
+    /// As above, but stopped by floors and ceilings too.
+    ///
+    /// The camera wants walls only - a floor between the eye and the character
+    /// is usually the slope they are standing on. A nameplate wants everything:
+    /// a name seen through the ceiling from the floor above is exactly as wrong
+    /// as one seen through a wall, and only this tells them apart.
+    std::optional<float> firstSolidAlong(const Vec3& from, const Vec3& to) const;
+
     Vec3 boundsMin() const { return boundsMin_; }
     Vec3 boundsMax() const { return boundsMax_; }
 
@@ -139,6 +147,8 @@ private:
 
     /// Every triangle whose x/z footprint touches this cell.
     const std::vector<uint32_t>& cell(int gx, int gz) const;
+    std::optional<float> firstAlong(const Vec3& from, const Vec3& to, bool wallsOnly) const;
+
     void forEachNear(float minX, float minZ, float maxX, float maxZ,
                      const std::vector<uint32_t>*& single, std::vector<uint32_t>& scratch) const;
 

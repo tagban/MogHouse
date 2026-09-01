@@ -262,6 +262,16 @@ std::optional<float> Collision::groundAt(float x, float z, float near, float max
 
 std::optional<float> Collision::firstWallAlong(const Vec3& from, const Vec3& to) const
 {
+    return firstAlong(from, to, true);
+}
+
+std::optional<float> Collision::firstSolidAlong(const Vec3& from, const Vec3& to) const
+{
+    return firstAlong(from, to, false);
+}
+
+std::optional<float> Collision::firstAlong(const Vec3& from, const Vec3& to, bool wallsOnly) const
+{
     const Vec3 along{to.x - from.x, to.y - from.y, to.z - from.z};
 
     // Moller-Trumbore, against every wall whose footprint the line crosses.
@@ -278,7 +288,7 @@ std::optional<float> Collision::firstWallAlong(const Vec3& from, const Vec3& to)
     for (uint32_t index : candidates)
     {
         const Triangle& triangle = triangles_[index];
-        if (triangle.walkable)
+        if (wallsOnly && triangle.walkable)
         {
             continue;   // a floor is not what puts the camera outside
         }

@@ -2698,11 +2698,20 @@ constexpr float kGravity = 26.0f;
         float bestDepth = 0.0f;
         for (const mh::RadarEntity& entity : radarEntities)
         {
-            // Only what the server will accept a trigger on. An auction
-            // counter is a real entity standing in a real place that answers
-            // nothing, and letting the cursor find it is how a click appears
-            // to do nothing at all.
-            if (!entity.triggerable)
+            // Anything with a body, whether or not the server flagged it.
+            //
+            // 0x28 bit 0x40 looked like the answer and is not, at least on
+            // LandSandBoat: setTriggerable(true) is called from one place, on
+            // the path that builds an NPC from a Lua table, and only when an
+            // onTrigger is passed there. NPCs loaded from a zone's dataset
+            // never get it however many scripts they have - Windurst Waters
+            // reported 0 of 28 - while mobs do. Filtering on it made monsters
+            // clickable and shopkeepers not, which is backwards.
+            //
+            // The flag is still read and carried; it is just not a gate. What
+            // makes something worth clicking is having a body and not being
+            // hidden, and the server's own reply settles the rest.
+            if (!entity.hasLook() && !entity.hasModel())
             {
                 continue;
             }
@@ -4391,7 +4400,7 @@ constexpr float kGravity = 26.0f;
                     // there is. The same wall raycast the camera uses to avoid
                     // orbiting through a house answers it directly instead, and
                     // a handful of entities is a handful of rays.
-                    if (collision.firstWallAlong(camera.eye(), mh::Vec3{entity.x, headY, entity.z}))
+                    if (collision.firstSolidAlong(camera.eye(), mh::Vec3{entity.x, headY, entity.z}))
                     {
                         continue;
                     }

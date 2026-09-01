@@ -1071,9 +1071,26 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
         {
             // The zone server not answering is the same situation wearing a
             // different exception: the session is still being torn down and
-            // the handover lands in the gap. Worth the same patience.
-            Console.WriteLine("  the zone server did not answer; waiting and trying again...");
+            // the handover lands in the gap.
+            //
+            // Unlike a 201 this one cannot be waited out on its own. A
+            // failed handover leaves the session hash spent, so retrying the
+            // handover with the same hash fails the same way for ever - which
+            // it did, fifteen times in a row, while the server sat there
+            // perfectly healthy. The login has to be done again.
+            Console.WriteLine("  the zone server did not answer; logging in again...");
             await Task.Delay(TimeSpan.FromSeconds(10));
+
+            (login, IReadOnlyList<FfxiCharacter> again) = await session.LoginAsync(profile);
+            if (login.Result != FfxiLoginResult.Success || login.SessionHash is null)
+            {
+                Console.WriteLine($"Login failed: {login.Result}");
+                return 1;
+            }
+
+            selected = again.FirstOrDefault(
+                          c => c.Name.Equals(wanted, StringComparison.OrdinalIgnoreCase))
+                      ?? selected;
         }
         catch (FfxiLoginErrorException e) when (e.Code == 201 && attempt < 15)
         {
@@ -1114,6 +1131,9 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
             int hidden = seen.Count(e => e.NameHidden);
             Console.WriteLine($"  entities {seen.Count}: {named} named by the server, " +
                               $"{hidden} name-hidden, {seen.Count - named} needing the zone table");
+            Console.WriteLine($"  triggerable: {seen.Count(e => e.Triggerable)} of {seen.Count}, " +
+                              $"npcs {seen.Count(e => e.Kind == FfxiEntityKind.Npc)}, " +
+                              $"enemies {seen.Count(e => e.Kind == FfxiEntityKind.Enemy)}");
         }
     };
 
