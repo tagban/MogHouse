@@ -87,7 +87,30 @@ public partial class GameViewModel : ViewModelBase
         shell.Session.RaiseOfferChanged += OnRaiseOfferChanged;
 
         OpenWorld();
+
+        // A watchdog, because there is one state this client must never reach:
+        // no window on screen at all.
+        //
+        // The launcher hides itself while the world window is up, so anything
+        // that loses the world without saying so - a zone change that fails to
+        // reopen, a renderer that dies, a path nobody has thought of - leaves a
+        // running, logged-in, invisible client. That has happened twice and
+        // both times it read as the client closing.
+        //
+        // This does not fix whatever went wrong. It makes sure you can see that
+        // something did.
+        _watchdog = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _watchdog.Tick += (_, _) =>
+        {
+            if (!IsZoning && _world is null or { Closed: true })
+            {
+                WorldVisibilityChanged?.Invoke(false);
+            }
+        };
+        _watchdog.Start();
     }
+
+    private DispatcherTimer? _watchdog;
 
     [ObservableProperty]
     public partial string WorldStatus { get; set; } = "Opening...";
@@ -299,6 +322,7 @@ public partial class GameViewModel : ViewModelBase
         _shell.Status = "Leaving...";
         await _shell.Session.LogoutAsync();
 
+        _watchdog?.Stop();
         _feeding?.Cancel();
         _world?.Dispose();
         _world = null;
