@@ -81,6 +81,18 @@ public partial class GameViewModel : ViewModelBase
     public partial string WorldStatus { get; set; } = "Opening...";
 
     private LiveRadar? _world;
+
+    /// <summary>
+    /// Raised when the world window opens and again when it closes.
+    ///
+    /// The world is a native window of its own, beside the launcher rather
+    /// than inside it. Left alone that means two windows from character select
+    /// onwards - the world in front and the launcher behind it, holding the
+    /// chat log the player actually wants. So the launcher steps aside while
+    /// the world is up and comes back when it closes, and the chat goes with
+    /// it. What the player sees is one window that becomes the game.
+    /// </summary>
+    public event Action<bool>? WorldVisibilityChanged;
     private readonly FfxiEntityTracker _tracker = new();
     private CancellationTokenSource? _feeding;
 
@@ -117,6 +129,14 @@ public partial class GameViewModel : ViewModelBase
         }
 
         WorldStatus = $"Open, in zone {session.ZoneState.ZoneNo}.";
+
+        // Everything already said goes across, so the log does not restart at
+        // whatever happens to arrive next.
+        foreach (FfxiChatLine earlier in ChatLines)
+        {
+            _world.Say(earlier.Sender, earlier.Text);
+        }
+        WorldVisibilityChanged?.Invoke(true);
 
         // A window opened over a corpse. The health packet arrives in the
         // burst the server sends at zone-in, long before this window existed,
@@ -187,6 +207,7 @@ public partial class GameViewModel : ViewModelBase
         _feeding?.Cancel();
         _world?.Dispose();
         _world = null;
+        WorldVisibilityChanged?.Invoke(false);
         WorldStatus = "Opening...";
         OpenWorld();
     }
@@ -198,6 +219,7 @@ public partial class GameViewModel : ViewModelBase
         _feeding?.Cancel();
         _world?.Dispose();
         _world = null;
+        WorldVisibilityChanged?.Invoke(false);
 
         await _shell.Session.LogoutAsync();
         _shell.Status = "Left the world.";
@@ -218,6 +240,11 @@ public partial class GameViewModel : ViewModelBase
     private void OnChat(FfxiChatLine line) => Dispatcher.UIThread.Post(() =>
     {
         ChatLines.Add(line);
+
+        // The world window keeps its own log and draws it in front of the
+        // player. Without this the launcher has the conversation and the
+        // window the player is looking at has none.
+        _world?.Say(line.Sender, line.Text);
 
         // Keep the log bounded; a busy zone would otherwise grow it forever.
         while (ChatLines.Count > 500)
