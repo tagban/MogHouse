@@ -6,6 +6,42 @@ The client reads the retail install's own DAT files directly - zones, models,
 skeletons, animations, textures, entity names - and speaks the FFXI protocol to
 a private server. Nothing here ships game assets.
 
+## Start to finish
+
+Four screens: find the game, pick a server, pick a character, stand in the
+world. There is no installer and nothing is written outside the folder.
+
+### Find the game
+
+![Finding the game](docs/screenshots/01-find-the-game.png)
+
+Shown on first run even when the game was found, because a guess is worth
+seeing before it is relied on. On Windows there is a registry key to read; on
+macOS and Linux there is not, and the game usually lives inside a Wine or
+CrossOver prefix - so `Choose the folder...` is the path that matters there.
+Pointing at `ROM`, or at one of the numbered folders inside it, works too.
+
+### Pick a server
+
+![Connecting to a server](docs/screenshots/02-connect-to-a-server.png)
+
+Any LandSandBoat server, by address. Profiles are remembered beside the
+executable, so a copied folder carries them with it.
+
+### Pick a character
+
+![Selecting a character](docs/screenshots/03-select-a-character.png)
+
+Race, job, last zone, and the face and hair the server has for them.
+
+### Stand in the world
+
+![In the world](docs/screenshots/04-in-the-world.png)
+
+Bastok Markets, from the game's own files: zone geometry, building interiors,
+the character wearing what the server says they are wearing, the server's
+clock and its weather, a minimap baked from the zone, and the zone's own music.
+
 ## Building
 
 `build-renderer.bat` on Windows, `build-renderer.sh` elsewhere, then
@@ -18,6 +54,21 @@ about the file formats so far.
 
 opens a zone with a character standing in it, no server needed. To play against
 a LandSandBoat server, `MogHouse.Console login --help` lists what it takes.
+
+## Making a build for somebody else
+
+    pwsh tools/package-windows.ps1 -Version 0.1.3 -ZoneData path/to/LandSandBoat/data/zones
+
+Produces a zip that unpacks and runs with nothing installed and no environment
+set: the client and the .NET runtime, the renderer, the glyph atlas, the water,
+the key tables and the protocol's compression tables. Around 90MB. The game's
+own files are never included - the client finds an existing installation.
+
+`-NoWater` drops about 50MB of water surfaces, at the cost of every canal and
+sea being dry. Leaving `-ZoneData` off drops 34MB, at the cost of zone lines:
+you then change zones with a command rather than by walking into one.
+
+For macOS, see [docs/macos-handoff.md](docs/macos-handoff.md).
 
 ## Tests
 
