@@ -1556,16 +1556,22 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         Uniforms mapUniforms{};
         // Straight down, with +z up the screen and +x to the right.
         //
-        // The left and right of the projection are swapped on purpose, and it
-        // is not about the world's frame - it is about this camera. Looking
-        // down with up = +z makes cross(forward, up) = -x, so a plain
-        // projection puts +x on the *left* of the image. rasteriseWalkable
-        // numbers its columns from minimum x upward, and the radar's dots are
-        // placed the same way, so the bake has to match them rather than the
-        // other way round.
+        // The left and right of this projection used to be swapped, to make the
+        // bake agree with rasteriseWalkable - 99.8% of walkable area covered
+        // against 52.6% without it. That score was the problem: it compared the
+        // bake against a mask nothing draws, rasteriseWalkable is referenced
+        // from no live code path at all, and two mirrored things agree with
+        // each other perfectly. The map came out reversed, so walking left slid
+        // it the wrong way, which is a hard thing to name and an easy thing to
+        // blame on yourself.
         //
-        // Removing this swap costs 47 points on the alignment score: 52.6% of
-        // walkable area with terrain drawn on it against 99.8% with it.
+        // mapUv reads u increasing with world x and the dots are found by
+        // comparing world positions, so an unswapped bake is what both of them
+        // already expect. The dots do not move either way - they never touch
+        // the map's sampling.
+        //
+        // Same lesson as the world frame's own half turn: validate against
+        // something you did not produce.
         const mh::Mat4 mapView = mh::lookAt({middle.x, hi.y + 100.0f, middle.z}, middle, {0.0f, 0.0f, 1.0f});
         const mh::Mat4 mapProjection = mh::orthographic(half, -half, -half, half, 1.0f, (hi.y - lo.y) + 400.0f);
         const mh::Mat4 mapViewProjection = mapProjection * mapView;
