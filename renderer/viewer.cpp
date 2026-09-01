@@ -4709,7 +4709,12 @@ constexpr float kGravity = 26.0f;
                               compass, tint, 0.0f);
                     };
 
-                    onRing("N", 0.0f, 1.0f, kHudBright);
+                    // North in red, the way the game does it. With the map
+                    // turning, north is somewhere different every time you look
+                    // at it, and one letter that stands out is faster to find
+                    // than four that read the same.
+                    static constexpr float kNorthRed[3] = {1.00f, 0.32f, 0.28f};
+                    onRing("N", 0.0f, 1.0f, kNorthRed);
                     onRing("S", 0.0f, -1.0f, kHudDim);
                     onRing("E", 1.0f, 0.0f, kHudDim);
                     onRing("W", -1.0f, 0.0f, kHudDim);
