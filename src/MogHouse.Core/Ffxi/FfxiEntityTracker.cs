@@ -33,6 +33,7 @@ public sealed record FfxiTrackedEntity(
     /// </summary>
     FfxiEntityLook? Look,
     byte? HealthPercent,
+    bool Triggerable,
     DateTimeOffset LastSeen);
 
 /// <summary>
@@ -132,6 +133,10 @@ public sealed class FfxiEntityTracker
             UniqueNo: update.UniqueNo,
             ActIndex: update.ActIndex,
             Kind: kind,
+            // Only present on an update carrying health, so remembered like
+            // everything else in that block. A shopkeeper does not stop being
+            // clickable because they turned round.
+            Triggerable: update.RenderFlags is null ? known?.Triggerable ?? false : update.IsTriggerable,
             // Empty counts as absent. A partial update carries a name field
             // of zeros rather than no name field, and "" is not null - so the
             // sticky rule every other field here gets was skipped for this one,

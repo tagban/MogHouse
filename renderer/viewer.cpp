@@ -2433,6 +2433,10 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 
     bool dragging = false;
 
+    /// Whether the pointer moved between press and release. A drag turns the
+    /// camera; a click picks a target, and they start out identical.
+    bool dragMoved = false;
+
     std::printf("wasd to walk, mouse drag to look, space to jump, wheel or numpad 9/3 to zoom,\n");
     std::printf("shift to run, tab to orbit, p to print position, c to place the character,\n");
     std::printf("u to back up the trail if collision traps you, n for no collision,\n");
@@ -2653,6 +2657,77 @@ constexpr float kGravity = 26.0f;
     // are not the same number on a high density display - so this divides by
     // the window rather than by the frame. What the two share is the aspect,
     // and the aspect is all normalised device coordinates need.
+    /// The last frame's view projection, for turning a click into a target.
+    ///
+    /// Picking needs to know where things were on screen, and the only place
+    /// that knows is the draw. Keeping the matrix rather than recomputing it
+    /// means the cursor is tested against exactly the frame that was shown.
+    mh::Mat4 pickProjection{};
+    bool havePickProjection = false;
+
+    /// Who is under the cursor, or 0.
+    ///
+    /// Entities are projected to the screen rather than the cursor being
+    /// unprojected into a ray: the bodies are already drawn from a position
+    /// and a height, so a point and a radius describes them as well as a
+    /// volume would, and it needs no matrix inversion. Nearest to the camera
+    /// wins among those the cursor is over, which is what makes clicking a
+    /// shopkeeper standing in front of a wall pick the shopkeeper.
+    const auto pickAt = [&](float ndcX, float ndcY) -> uint32_t {
+        if (!havePickProjection)
+        {
+            return 0;
+        }
+
+        uint32_t best = 0;
+        float bestDepth = 0.0f;
+        for (const mh::RadarEntity& entity : radarEntities)
+        {
+            // Only what the server will accept a trigger on. An auction
+            // counter is a real entity standing in a real place that answers
+            // nothing, and letting the cursor find it is how a click appears
+            // to do nothing at all.
+            if (!entity.triggerable)
+            {
+                continue;
+            }
+
+            const DrawableCharacter* model = modelForEntity(entity);
+            const float height = model ? model->loaded.geometry.height() : 1.8f;
+
+            const float world[4] = {entity.x, entity.y + height * 0.5f, entity.z, 1.0f};
+            const float* m = pickProjection.m;
+            const float clipX = m[0] * world[0] + m[4] * world[1] + m[8] * world[2] + m[12];
+            const float clipY = m[1] * world[0] + m[5] * world[1] + m[9] * world[2] + m[13];
+            const float clipW = m[3] * world[0] + m[7] * world[1] + m[11] * world[2] + m[15];
+            if (clipW <= 0.01f)
+            {
+                continue;   // behind the camera
+            }
+
+            const float screenX = clipX / clipW;
+            const float screenY = clipY / clipW;
+
+            // How big the body is on screen, so a distant NPC is a small
+            // target and a near one is a generous one - the same way it looks.
+            const float onScreen = std::max(height / clipW, 0.02f);
+            const float dx = screenX - ndcX;
+            const float dy = (screenY - ndcY) * 0.5f;   // NDC y is not square with x
+            if (dx * dx + dy * dy > onScreen * onScreen)
+            {
+                continue;
+            }
+
+            if (best == 0 || clipW < bestDepth)
+            {
+                best = entity.id;
+                bestDepth = clipW;
+            }
+        }
+
+        return best;
+    };
+
     const auto pointerNdc = [window](float x, float y, float& ndcX, float& ndcY)
     {
         int pointsAcross = 0;
@@ -2954,7 +3029,22 @@ constexpr float kGravity = 26.0f;
             }
             else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP)
             {
+                // A press and release without much movement is a click; with
+                // movement it was the camera being turned. Without that
+                // distinction every look-around ends by talking to whoever the
+                // cursor happened to land on.
+                float upX = 0.0f;
+                float upY = 0.0f;
+                if (dragging && !dragMoved && link && pointerNdc(event.button.x, event.button.y, upX, upY))
+                {
+                    if (uint32_t clicked = pickAt(upX, upY))
+                    {
+                        link->requestTalk(clicked);
+                    }
+                }
+
                 dragging = false;
+                dragMoved = false;
 
                 // Pressed and released on the same button. Sliding off one
                 // before letting go is how a mis-click is taken back, which
@@ -2971,6 +3061,14 @@ constexpr float kGravity = 26.0f;
             }
             else if (event.type == SDL_EVENT_MOUSE_MOTION && dragging)
             {
+                // A few pixels of slack, because a hand on a mouse is never
+                // perfectly still and a click that turns the camera a hair
+                // should still count as a click.
+                if (std::fabs(event.motion.xrel) + std::fabs(event.motion.yrel) > 3.0f)
+                {
+                    dragMoved = true;
+                }
+
                 camera.look(-event.motion.xrel * 0.005f, -event.motion.yrel * 0.005f);
             }
             else if (event.type == SDL_EVENT_MOUSE_WHEEL)
@@ -3631,6 +3729,8 @@ constexpr float kGravity = 26.0f;
 
             Uniforms uniforms{};
             const mh::Mat4 viewProjection = projection * view;
+            pickProjection = viewProjection;
+            havePickProjection = true;
             std::memcpy(uniforms.viewProjection, viewProjection.m, sizeof(uniforms.viewProjection));
             const mh::Vec3 light = mh::normalise(mh::Vec3{0.4f, 0.8f, 0.45f});
             uniforms.lightDirection[0] = light.x;

@@ -58,6 +58,7 @@ public sealed record FfxiEntityUpdate(
     byte? Allegiance = null,
     byte? HealthPercent = null,
     byte? BattleFlags = null,
+    byte? RenderFlags = null,
     FfxiEntityLook? Look = null,
     byte? NameVis = null,
     byte SendFlags = 0)
@@ -143,6 +144,16 @@ public sealed record FfxiEntityUpdate(
     /// <summary>The bit the server assigns for a living mob. See IsLivingMob for why it is not tested alone.</summary>
     public const byte MobAliveFlag = 0x08;
 
+    /// <summary>Set when the server will accept a trigger on this entity.</summary>
+    public const byte TriggerableFlag = 0x40;
+
+    /// <summary>
+    /// Whether clicking this does anything. A signpost, a door and a
+    /// shopkeeper are triggerable; the auction counter beside them is not,
+    /// and neither is a mob that is already dead.
+    /// </summary>
+    public bool IsTriggerable => RenderFlags is byte flags && (flags & TriggerableFlag) != 0;
+
     /// <summary>
     /// This update says the entity has gone - killed, walked out of range,
     /// logged out.
@@ -199,6 +210,17 @@ public sealed record FfxiEntityUpdate(
 
     /// <summary>Absolute 0x25 - see <see cref="IsLivingMob"/>.</summary>
     private const int OffsetBattleFlags = 0x25;
+
+    /// <summary>
+    /// Presentation flags, of which one is worth having: 0x40 says the
+    /// entity can be clicked. entity_update.cpp sets it for an NPC whose
+    /// `triggerable()` is true, for a mob that is spawned and in a normal
+    /// state, and for trusts.
+    ///
+    /// The rest of the byte is presentation this client does not do yet -
+    /// terror, a death animation, a render priority hack for Pso'Xja.
+    /// </summary>
+    private const int OffsetRenderFlags = 0x28;
 
     /// <summary>Minimum bytes needed for the head this parses.</summary>
     public const int MinimumSize = Body + 20;
@@ -263,6 +285,7 @@ public sealed record FfxiEntityUpdate(
         byte? allegiance = null;
         byte? healthPercent = null;
         byte? battleFlags = null;
+        byte? renderFlags = null;
 
         if (id == NpcPacketId && subPacket.Length > OffsetAllegiance)
         {
@@ -282,6 +305,7 @@ public sealed record FfxiEntityUpdate(
             {
                 healthPercent = subPacket[OffsetHealthPercent];
                 battleFlags = subPacket[OffsetBattleFlags];
+                renderFlags = subPacket.Length > OffsetRenderFlags ? subPacket[OffsetRenderFlags] : null;
             }
         }
 
@@ -325,6 +349,7 @@ public sealed record FfxiEntityUpdate(
             Allegiance: allegiance,
             HealthPercent: healthPercent,
             BattleFlags: battleFlags,
+            RenderFlags: renderFlags,
             Look: look,
             NameVis: nameVis);
     }

@@ -72,6 +72,9 @@ public struct NativeRadarEntity
     /// <summary>Health 0-100, or -1 when the server has not said.</summary>
     public int HealthPercent;
 
+    /// <summary>Non-zero when the server will accept a trigger on this.</summary>
+    public int Triggerable;
+
     public unsafe void SetLook(Ffxi.FfxiEntityLook? look)
     {
         if (look is null)

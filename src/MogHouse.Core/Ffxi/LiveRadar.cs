@@ -267,6 +267,7 @@ public sealed class LiveRadar : IDisposable
             entity.SetLook(visible[i].Look);
             entity.GmLevel = visible[i].GmLevel;
             entity.HealthPercent = visible[i].HealthPercent ?? -1;
+            entity.Triggerable = visible[i].Triggerable ? 1 : 0;
             entities[i] = entity;
         }
         _viewer.SetEntities(entities);

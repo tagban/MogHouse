@@ -95,6 +95,11 @@ struct RadarEntity
     /// worth fighting.
     int healthPercent{-1};
 
+    /// Whether the server will accept a trigger on this one. Only these are
+    /// worth picking with a cursor: an auction counter is a real entity with a
+    /// real position that answers nothing.
+    bool triggerable{};
+
     /// Whether there is a look here worth building. Race zero is not a race.
     bool hasLook() const { return look[0] != 0; }
 

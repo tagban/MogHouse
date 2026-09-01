@@ -77,6 +77,10 @@ typedef struct MhRadarEntity
     /// Health, 0 to 100. A mob at zero is a corpse: still an entity, still
     /// named, and not something to attack. -1 when the server has not said.
     int32_t healthPercent;
+
+    /// Non-zero when the server will accept a trigger on this entity, which is
+    /// what makes it worth putting a cursor over.
+    int32_t triggerable;
 } MhRadarEntity;
 
 /// What to open. Every string is borrowed for the duration of the create call

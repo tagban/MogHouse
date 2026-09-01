@@ -123,6 +123,7 @@ void mh_viewer_set_entities(MhViewerHandle viewer, const MhRadarEntity* entities
             entity.gmLevel = entities[i].gmLevel;
             entity.modelId = static_cast<uint16_t>(entities[i].modelId);
             entity.healthPercent = entities[i].healthPercent;
+            entity.triggerable = entities[i].triggerable != 0;
             copied.push_back(std::move(entity));
         }
     }
