@@ -247,12 +247,20 @@ public partial class GameViewModel : ViewModelBase
     [RelayCommand]
     private async Task LeaveAsync()
     {
+        // Ask first, tear down after. REQLOGOUT is a request: LandSandBoat
+        // runs a five second Leavegame effect and only then clears the
+        // session, and LogoutAsync waits that out. Stopping the loop that
+        // answers the server before asking meant nothing was left to finish
+        // the handshake, so the logout never completed and the character sat
+        // on the server until it was reaped about a minute later - which from
+        // the outside is being unable to log back in.
+        _shell.Status = "Leaving...";
+        await _shell.Session.LogoutAsync();
+
         _feeding?.Cancel();
         _world?.Dispose();
         _world = null;
         WorldVisibilityChanged?.Invoke(false);
-
-        await _shell.Session.LogoutAsync();
         _shell.Status = "Left the world.";
     }
 
