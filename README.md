@@ -6,6 +6,19 @@ The client reads the retail install's own DAT files directly - zones, models,
 skeletons, animations, textures, entity names - and speaks the FFXI protocol to
 a private server. Nothing here ships game assets.
 
+## Which version of the game
+
+**This needs a Final Fantasy XI installation updated to the August 2026 patch,
+and it talks to servers running that same version.**
+
+It is not backwards compatible. An older install, or an older server, will not
+work - and the failure will not necessarily be obvious, because the parts that
+changed are the ones that go wrong quietly: file ids move, so the wrong model
+loads, and packet layouts shift, so fields are read from the wrong offsets.
+
+If something is strange in a way nothing here explains, check the version
+before anything else.
+
 ## Start to finish
 
 Four screens: find the game, pick a server, pick a character, stand in the

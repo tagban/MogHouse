@@ -97,6 +97,24 @@ Worth doing properly with the textures side by side rather than guessed at.
 
 ## Protocol
 
+### Server version compatibility
+
+Today this client assumes one version: a Final Fantasy XI install on the
+August 2026 patch, talking to a server of that same version. It is not
+backwards compatible, and the failures are quiet - file ids move between
+versions so the wrong model loads, packet layouts shift so fields are read
+from the wrong offsets.
+
+Worth doing eventually: negotiate rather than assume. **xiloader** is the
+reference for what actually differs - its GitHub source shows the login
+handshake varying between server versions, which is the first thing that has
+to match before anything else can be tried. Detecting the server's version at
+login and adapting the handshake to it is the shape of the work; carrying
+several DAT layouts is a much larger question and probably a separate one.
+
+Not urgent while there is one server being tested against, and worth doing
+before anyone else's server is.
+
 - **`HIDE_MODEL` and `UNTARGETABLE`** are parsed and not acted on. Wiring them
   into what gets drawn means widening the interop struct, which is worth doing
   deliberately rather than folded into something else.

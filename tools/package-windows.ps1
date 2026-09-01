@@ -204,10 +204,17 @@ far rather than the parts you would miss least.
 What you need
 -------------
 
-  * A Final Fantasy XI installation. The client finds it and reads the game's
-    own files - models, textures, zones, music. Nothing here replaces them and
-    no game data is included.
-  * A private server to connect to, and an account on it.
+  * A Final Fantasy XI installation, updated to the AUGUST 2026 patch. The
+    client finds it and reads the game's own files - models, textures, zones,
+    music. Nothing here replaces them and no game data is included.
+  * A private server to connect to, running that same version, and an account
+    on it.
+
+This is not backwards compatible. An older install, or an older server, will
+not work, and it will not always fail in an obvious way: file ids move between
+versions, so the wrong model loads, and packet layouts shift, so fields are
+read from the wrong place. If something is odd in a way this README does not
+explain, check the version first.
 
 Running it
 ----------

@@ -9,6 +9,15 @@ The user's day-to-day machine is the Mac, so this is not a port of a Windows
 project to a second platform. It is the other way round: Windows is the
 machine that happened to be free tonight.
 
+## Version, before anything else
+
+The client requires a Final Fantasy XI installation on the **August 2026**
+patch, and speaks to servers of that same version. It is not backwards
+compatible, and the failures are quiet rather than loud: file ids move between
+versions, so the wrong model loads; packet layouts shift, so fields are read
+from the wrong offsets. A Mac install obtained by copying an older Windows
+installation is the likely trap here.
+
 ## What is already cross-platform
 
 The client is .NET 10 and Avalonia, and the renderer is Dawn/WebGPU and SDL3.
@@ -73,16 +82,28 @@ numbers so they are safe; the asset names (`font.bin`, `subrooms.txt`,
 ### 4. The app bundle
 
 There is no `.app` bundle yet. `tools/package-windows.ps1` is the Windows
-equivalent and is worth reading for what has to travel with the client — the
-list is short and the same on both platforms:
+equivalent and is worth reading for what has to travel with the client. The
+shape it settled on, which a bundle should match:
 
-    MogHouse.App + the .NET runtime      self-contained, so no install step
-    libmoghouse_interop.dylib            the renderer
-    libSDL3.dylib                        unless statically linked
-    assets/font.*, assets/subrooms.txt   the glyph atlas, the interior table
-    assets/water/*.water                 optional, ~50MB, see below
-    keys/*.bin                           required; nothing decrypts without them
-    res/compress.dat, decompress.dat     required; no server connection without them
+    MogHouse XI.exe        one file: the .NET runtime and every managed
+                           assembly are published inside it
+    README.txt
+    data/                  everything else, hidden by the client on first run
+      libmoghouse_interop.dylib    the renderer
+      libSDL3.dylib                unless statically linked
+      assets/font.*, assets/subrooms.txt
+      assets/water/*.water         ~50MB
+      keys/*.bin                   required; nothing decrypts without them
+      res/compress.dat, decompress.dat
+                                   required; no server connection without them
+      zones/                       optional; zone lines
+
+The two native libraries cannot go inside the single file: the renderer looks
+for its assets beside whichever directory the library was loaded from, so they
+and the assets have to be real files in the same place. On macOS a bundle
+already has the right shape for this — `Contents/MacOS` for the executable and
+`Contents/Resources` for the rest — so the hidden-folder trick is a Windows
+answer to a problem a bundle does not have.
 
 The game's own DATs are never shipped. `FfxiInstall.Find()` locates an
 existing installation — **it is Windows-registry-and-Program-Files shaped, and
@@ -98,13 +119,13 @@ runs with nothing set. Environment variables override, and are what
 
 | Variable | Falls back to | Needed? |
 |---|---|---|
-| `MOGHOUSE_FFXI_RES` | `<exe>/res` | **Yes** — no server connection without it |
-| `MOGHOUSE_FFXI_KEYTABLE` | `<exe>/keys/mzb_key_table.bin` | **Yes** — no zone decrypts |
-| `MOGHOUSE_FFXI_KEYTABLE2` | `<exe>/keys/mmb_key_table2.bin` | **Yes** |
-| `MOGHOUSE_FONT` | beside the loaded library | Yes — no HUD or nameplates |
-| `MOGHOUSE_SUBROOMS` | `<exe>/assets/subrooms.txt` | No — buildings become empty shells |
-| `MOGHOUSE_FFXI_ZONEDATA` | none | No — no zone lines, use `!zone` |
-| `MOGHOUSE_FFXI_NAVMESHES` | none | No — only feeds the launcher's flat map |
+| `MOGHOUSE_FFXI_RES` | `<exe>/res`, then `<exe>/data/res` | **Yes** — no server connection without it |
+| `MOGHOUSE_FFXI_KEYTABLE` | `<exe>/keys/`, then `<exe>/data/keys/` | **Yes** — no zone decrypts |
+| `MOGHOUSE_FFXI_KEYTABLE2` | as above | **Yes** |
+| `MOGHOUSE_FONT` | `assets/` beside the loaded library | Yes — no HUD or nameplates |
+| `MOGHOUSE_SUBROOMS` | `assets/subrooms.txt` beside the library | No — buildings become empty shells |
+| `MOGHOUSE_FFXI_ZONEDATA` | `<exe>/zones`, then `<exe>/data/zones` | No — no zone lines, use `!zone` |
+| `MOGHOUSE_FFXI_NAVMESHES` | `<exe>/navmeshes`, then `<exe>/data/navmeshes` | No — only feeds the launcher's flat map |
 | `MOGHOUSE_LOG` | none | Strongly recommended, see below |
 | `MOGHOUSE_BODY_DISTANCE` | unset = no limit | No — how far away bodies are drawn |
 
@@ -138,8 +159,9 @@ which needs the server's `ximeshes` directory (`MOGHOUSE_FFXI_XIMESHES`, or
 edit `DEFAULT_ROOT` in `tools/ximesh.py`). Takes about a minute. Without these
 files every canal and sea is dry.
 
-Whether they may be *packaged* is an open question the user has raised and not
-settled — they are derived from game data.
+They do ship in the 0.1.2 Windows release. They are derived from game data, so
+whether that stays true is the user's call rather than an assumption to carry
+forward.
 
 ## Where things stand
 
