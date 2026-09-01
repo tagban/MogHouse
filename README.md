@@ -60,9 +60,16 @@ a LandSandBoat server, `MogHouse.Console login --help` lists what it takes.
     pwsh tools/package-windows.ps1 -Version 0.1.2 -ZoneData path/to/LandSandBoat/data/zones
 
 Produces a zip that unpacks and runs with nothing installed and no environment
-set: the client and the .NET runtime, the renderer, the glyph atlas, the water,
-the key tables and the protocol's compression tables. Around 90MB. The game's
-own files are never included - the client finds an existing installation.
+set. About 60MB, and what a player sees when they open it is:
+
+    MogHouse XI.exe
+    README.txt
+    data\                       hidden by the client on first run
+
+The client publishes as a single file, so the .NET runtime and every managed
+assembly are inside the executable; the renderer and the files it reads live
+in `data\`. The game's own files are never included - the client finds an
+existing installation.
 
 `-NoWater` drops about 50MB of water surfaces, at the cost of every canal and
 sea being dry. Leaving `-ZoneData` off drops 34MB, at the cost of zone lines:
