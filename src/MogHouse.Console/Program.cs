@@ -1130,26 +1130,43 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
     // raise them, and a client that does not offer it leaves them on the
     // floor with no way up - which is the whole game stopped, not a
     // cosmetic gap.
-    void SayDeathPrompt()
+    //
+    // The offering is the renderer's now: a box in the middle of the window
+    // with the two answers on it. This used to be three lines of chat telling
+    // the player to type /homepoint, which put the one decision the game
+    // insists on in the same place as everything else scrolling past.
+    void ShowDeathPrompt()
     {
-        // Also to the terminal: dying is the one state where the client
-        // going quiet is indistinguishable from the client being broken.
-        Console.WriteLine($"  {selected.Name} is dead - /homepoint to return, or wait for a raise.");
-        radar?.Say("", "You fall to the ground.");
-        radar?.Say("", "Type /homepoint to return to your home point,");
-        radar?.Say("", "or wait here for someone to raise you.");
+        // The terminal still hears about it. Dying is the one state where the
+        // client going quiet is indistinguishable from the client being broken.
+        Console.WriteLine($"  {selected.Name} is dead - the window is asking what to do about it.");
+        radar?.ShowDeath(true, session.HasRaiseOffer);
     }
 
     session.DeathChanged += dead =>
     {
         if (dead)
         {
-            SayDeathPrompt();
+            radar?.Say("", "You fall to the ground.");
+            ShowDeathPrompt();
         }
         else
         {
             radar?.Say("", "You are back on your feet.");
+            radar?.ShowDeath(false, false);
         }
+    };
+
+    // A raise, which nothing about the corpse announces - it arrives as a
+    // packet of its own, and it is what lights the box's second button.
+    session.RaiseOfferChanged += offered =>
+    {
+        if (offered)
+        {
+            Console.WriteLine("  A raise has been offered.");
+            radar?.Say("", "Someone has offered you a raise.");
+        }
+        radar?.ShowDeath(session.IsDead, offered);
     };
     radar.ShowZoneLines(session.ZoneLines);
 
@@ -1179,6 +1196,12 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
         {
             radar.Say("", $"Now in zone {zone}.");
             radar.ShowZoneLines(session.ZoneLines);
+
+            // A new window knows nothing. Dying and then being dragged
+            // across a zone line - which is what Tractor does - would
+            // otherwise put a live character's corpse in a zone with no box
+            // over it and no way to ask for one.
+            radar.ShowDeath(session.IsDead, session.HasRaiseOffer);
         }
     };
 
@@ -1190,7 +1213,7 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
     // to be told there is a way up.
     if (session.IsDead)
     {
-        SayDeathPrompt();
+        ShowDeathPrompt();
     }
 
     Console.WriteLine($"Playing as {selected.Name} in zone {currentZone}. Close the window to stop.");
@@ -1281,6 +1304,21 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
             {
                 await session.TalkToAsync(facing.UniqueNo, facing.ActIndex);
             }
+        }
+
+        // And whichever button a dead character pressed. The renderer drew
+        // the choice; only this half has a socket to say it down.
+        switch (radar?.TakeDeathChoice())
+        {
+            case NativeDeathChoice.HomePoint:
+                radar?.Say("", "Returning to your home point...");
+                await session.ReturnToHomePointAsync();
+                break;
+
+            case NativeDeathChoice.AcceptRaise:
+                radar?.Say("", "Accepting the raise...");
+                await session.AcceptRaiseAsync();
+                break;
         }
 
         radar?.Publish(tracker);

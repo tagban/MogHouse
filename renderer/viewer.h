@@ -114,10 +114,18 @@ inline constexpr size_t kCreatureModelBase = 1300;
 
 inline size_t creatureFileId(uint16_t modelId) { return kCreatureModelBase + modelId; }
 
-/// How many tracked entities get drawn as bodies. Beyond this they stay dots -
-/// they all share one skinned mesh, so the cost is per instance and small, but
-/// a crowded city zone should not be able to grow the buffer without limit.
-inline constexpr int kMaxDrawnBodies = 48;
+/// How many tracked entities get drawn as bodies. Beyond this they stay dots.
+///
+/// The instance buffer is allocated once at this size and never grown, so this
+/// is a real ceiling rather than a hint. It is not protecting us from the
+/// protocol: LandSandBoat allows 511 dynamic entities in a zone and its static
+/// range is larger still, so the limit here is only about how many bodies are
+/// worth drawing around you. Fifty turned out to be too few - a field of
+/// monsters can pass it - so it is seventy-five.
+///
+/// Whoever misses out should be whoever is furthest away, which is a matter of
+/// the order slots are handed out in rather than of this number.
+inline constexpr int kMaxDrawnBodies = 75;
 
 /// Everything the viewer needs to start. Fields that were environment
 /// variables keep their meaning; an unset optional means the variable was
@@ -185,6 +193,14 @@ struct ViewerOptions
     /// framed and checked without a server session.
     std::vector<std::string> testChat;
 
+    /// The death box, for a run with no client attached: 0 alive, 1 dead,
+    /// 2 dead with a raise offered.
+    ///
+    /// The one thing on screen a player cannot ask for. Without this it can
+    /// only be looked at by finding a server, finding something that kills
+    /// you, and then finding someone willing to cast Raise.
+    int testDeath{};
+
     /// How many frames to let pass before taking a screenshot. The default
     /// is just enough to let the first frames settle; a caller feeding the
     /// viewer from outside wants longer, because a shot taken before anything
@@ -199,6 +215,18 @@ struct ViewerOptions
 
     /// 0 draws colour with no alpha discard, 2 draws alpha as greyscale.
     float shaderMode{};
+};
+
+/// What a dead player picked out of the box the renderer draws them.
+///
+/// The two answers FFXI allows a corpse. Both leave here as a request rather
+/// than as an act: the renderer has no socket, so pressing a button is the
+/// player saying what they want and the client saying it to the server.
+enum class DeathChoice
+{
+    None = 0,
+    HomePoint = 1,
+    AcceptRaise = 2,
 };
 
 /// The live half of a running viewer: what a caller on another thread can
@@ -288,6 +316,22 @@ public:
     void placeCharacter(float x, float y, float z, float heading);
     bool takePlacement(float& x, float& y, float& z, float& heading);
 
+    /// Whether the character is down, and whether a raise has been offered.
+    ///
+    /// The renderer cannot work either out for itself: it knows where the body
+    /// is and nothing about the state of it. Hit points arrive in a packet and
+    /// so does the raise, so both are the client's answer - and together they
+    /// are the whole of what the death box draws itself from.
+    void setDeath(bool dead, bool raiseOffered);
+    bool dead(bool& raiseOffered) const;
+
+    /// What the player pressed in that box, taken once.
+    ///
+    /// Both answers are packets only the client can send, the same way a jump
+    /// is. The renderer draws the choice and reports it.
+    void chooseDeath(DeathChoice choice);
+    DeathChoice takeDeathChoice();
+
 private:
     mutable std::mutex mutex_;
     std::vector<RadarEntity> entities_;
@@ -301,6 +345,13 @@ private:
     float placement_[4]{};
     bool havePlacement_{false};
     std::deque<std::string> chat_;
+
+    // Two flags rather than one guarded pair: a raise only means anything
+    // while the character is down, so the two being read a moment apart says
+    // nothing the box would draw differently.
+    std::atomic<bool> dead_{false};
+    std::atomic<bool> raiseOffered_{false};
+    std::atomic<int> deathChoice_{0};
 };
 
 /// Reads the options the standalone viewer has always taken: the zone from

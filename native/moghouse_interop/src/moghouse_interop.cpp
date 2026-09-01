@@ -148,6 +148,19 @@ void mh_viewer_set_zone_lines(MhViewerHandle viewer, const MhZoneLine* lines, in
     viewer->link.setZoneLines(std::move(copied));
 }
 
+void mh_viewer_set_death(MhViewerHandle viewer, int32_t dead, int32_t raise_offered)
+{
+    if (viewer)
+    {
+        viewer->link.setDeath(dead != 0, raise_offered != 0);
+    }
+}
+
+int32_t mh_viewer_take_death_choice(MhViewerHandle viewer)
+{
+    return viewer ? static_cast<int32_t>(viewer->link.takeDeathChoice()) : MH_DEATH_NONE;
+}
+
 uint32_t mh_viewer_take_talk(MhViewerHandle viewer)
 {
     if (!viewer)

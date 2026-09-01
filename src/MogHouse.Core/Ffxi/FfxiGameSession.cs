@@ -68,6 +68,30 @@ public sealed class FfxiGameSession : IDisposable
     /// <summary>Raised when the character dies, and again when they get up.</summary>
     public event Action<bool>? DeathChanged;
 
+    /// <summary>
+    /// Whether somebody has offered a raise, which is the only condition under
+    /// which the server will accept one.
+    ///
+    /// It arrives as a packet of its own - see <see cref="FfxiRaiseOffer"/> -
+    /// because nothing else changes when a raise is cast over a corpse. Held
+    /// until the character is on their feet again.
+    /// </summary>
+    public bool HasRaiseOffer { get; private set; }
+
+    /// <summary>Raised when a raise is offered, and again when it lapses.</summary>
+    public event Action<bool>? RaiseOfferChanged;
+
+    private void SetRaiseOffer(bool offered)
+    {
+        if (HasRaiseOffer == offered)
+        {
+            return;
+        }
+
+        HasRaiseOffer = offered;
+        RaiseOfferChanged?.Invoke(offered);
+    }
+
     /// <summary>Raised for every chat message received.</summary>
     public event Action<FfxiChatLine>? ChatReceived;
 
@@ -853,8 +877,26 @@ public sealed class FfxiGameSession : IDisposable
                 Health = health;
                 if (wasDead != health.IsDead)
                 {
+                    // Standing up is the end of any offer, taken or not. The
+                    // server does not withdraw one - it simply stops honouring
+                    // it - so a client that kept the flag would go on showing a
+                    // live Accept Raise button to somebody already on their
+                    // feet.
+                    if (!health.IsDead)
+                    {
+                        SetRaiseOffer(false);
+                    }
+
                     DeathChanged?.Invoke(health.IsDead);
                 }
+            }
+
+            // Somebody has cast Raise. Nothing about the corpse says so.
+            FfxiRaiseOffer? offer = FfxiRaiseOffer.TryParse(reply.Plaintext.AsSpan(offset, size));
+            if (offer is not null && offer.UniqueNo == (ZoneState?.UniqueNo ?? 0) &&
+                offer.Kind == FfxiResurrectionKind.Raise)
+            {
+                SetRaiseOffer(true);
             }
 
             // What an NPC said, which arrives as a line id to look up.
@@ -931,6 +973,24 @@ public sealed class FfxiGameSession : IDisposable
 
         await _zone.SendActionAsync(_zoneEndpoint, ZoneState.UniqueNo, ZoneState.ActIndex,
                                     FfxiActionPacket.ActionHomePointMenu);
+    }
+
+    /// <summary>
+    /// Takes the raise somebody has offered, which is the other way up.
+    ///
+    /// The server drops this unless it has already sent the offer, so it is
+    /// guarded on having seen one rather than sent hopefully: an unanswered
+    /// action packet looks exactly like a working one from here.
+    /// </summary>
+    public async Task AcceptRaiseAsync()
+    {
+        if (_zone is null || _zoneEndpoint is null || ZoneState is null || !HasRaiseOffer)
+        {
+            return;
+        }
+
+        await _zone.SendActionAsync(_zoneEndpoint, ZoneState.UniqueNo, ZoneState.ActIndex,
+                                    FfxiActionPacket.ActionRaiseMenu);
     }
 
     public async Task SayAsync(string message, FfxiChatKind kind = FfxiChatKind.Say)

@@ -125,6 +125,15 @@ public struct NativeRadarEntity
     }
 }
 
+/// <summary>What a dead player pressed in the box the renderer draws them.</summary>
+/// <remarks>Matches MH_DEATH_* in moghouse_interop.h and mh::DeathChoice.</remarks>
+public enum NativeDeathChoice
+{
+    None = 0,
+    HomePoint = 1,
+    AcceptRaise = 2,
+}
+
 /// <summary>What to open the viewer on.</summary>
 public sealed record NativeViewerOptions
 {
@@ -346,6 +355,27 @@ public sealed partial class NativeViewer : IDisposable
     public uint TakeTalk() => _disposed || _handle == IntPtr.Zero ? 0 : mh_viewer_take_talk(_handle);
 
     /// <summary>
+    /// Whether the character is down, and whether a raise has been offered.
+    /// The renderer draws its death box from these two and nothing else.
+    /// </summary>
+    public void SetDeath(bool dead, bool raiseOffered)
+    {
+        if (!_disposed && _handle != IntPtr.Zero)
+        {
+            mh_viewer_set_death(_handle, dead ? 1 : 0, raiseOffered ? 1 : 0);
+        }
+    }
+
+    /// <summary>
+    /// What the player pressed in that box. Consumed, so each press is acted
+    /// on once.
+    /// </summary>
+    public NativeDeathChoice TakeDeathChoice() =>
+        _disposed || _handle == IntPtr.Zero
+            ? NativeDeathChoice.None
+            : (NativeDeathChoice)mh_viewer_take_death_choice(_handle);
+
+    /// <summary>
     /// The next line the player typed, or null if they have not pressed return
     /// since this was last called.
     /// </summary>
@@ -446,6 +476,12 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static partial uint mh_viewer_take_talk(IntPtr viewer);
+
+    [LibraryImport(LibraryName)]
+    private static partial void mh_viewer_set_death(IntPtr viewer, int dead, int raiseOffered);
+
+    [LibraryImport(LibraryName)]
+    private static partial int mh_viewer_take_death_choice(IntPtr viewer);
 
     [LibraryImport(LibraryName)]
     private static unsafe partial int mh_viewer_take_chat(IntPtr viewer, byte* buffer, int capacity);

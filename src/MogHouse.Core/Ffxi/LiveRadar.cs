@@ -191,6 +191,29 @@ public sealed class LiveRadar : IDisposable
     /// <summary>Who the player asked to talk to this frame, or 0.</summary>
     public uint TakeTalk() => _viewer.TakeTalk();
 
+    /// <summary>
+    /// Puts the death box up, or takes it down, and says whether its second
+    /// button can be pressed.
+    ///
+    /// Both facts are the session's: hit points arrive in one packet and the
+    /// raise offer in another, and the renderer sees neither. Pushed rather
+    /// than polled, because there is nothing here for the renderer to poll.
+    /// </summary>
+    public void ShowDeath(bool dead, bool raiseOffered)
+    {
+        if (_closed)
+        {
+            return;
+        }
+        _viewer.SetDeath(dead, raiseOffered);
+    }
+
+    /// <summary>
+    /// What the player pressed in that box, or None. Consumed, so a press
+    /// reaches the server once.
+    /// </summary>
+    public NativeDeathChoice TakeDeathChoice() => _closed ? NativeDeathChoice.None : _viewer.TakeDeathChoice();
+
     public void Say(string? sender, string? text)
     {
         if (_closed)

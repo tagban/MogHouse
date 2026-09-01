@@ -27,6 +27,7 @@
 #include "coverage.h"
 #include "linalg.h"
 #include "chat_shader.h"
+#include "dialog_shader.h"
 #include "hud_shader.h"
 #include "nameplate_shader.h"
 #include "zoneline_shader.h"
@@ -144,6 +145,57 @@ struct ChatUniforms
     float placement[4];
     float counts[4];
     float glyphs[mh::kChatLines * mh::kChatColumns][4];
+};
+
+/// Matches DialogUniforms in dialog_shader.h.
+struct DialogUniforms
+{
+    float counts[4];
+    float atlas[4];
+    float panel[4];
+    float rects[mh::kDialogRows][4];
+    float fills[mh::kDialogRows][4];
+    float boxes[mh::kDialogRows][4];
+    float colours[mh::kDialogRows][4];
+    float glyphs[mh::kDialogRows * mh::kDialogChars][4];
+};
+
+/// The death box. Amber for the heading, because that is the colour the game
+/// itself uses to say something has happened to you.
+inline constexpr float kDialogTitle[3] = {1.00f, 0.84f, 0.48f};
+inline constexpr float kDialogText[3] = {0.86f, 0.89f, 0.96f};
+
+/// A button's own label: bright when it can be pressed, and near enough to
+/// the panel to disappear into it when it cannot.
+inline constexpr float kDialogLabel[3] = {0.98f, 0.98f, 1.00f};
+inline constexpr float kDialogLabelOff[3] = {0.42f, 0.44f, 0.50f};
+
+/// And the button behind it. Greyed is not a lighter blue: a disabled button
+/// that still looks like a button is one people press and then wonder about,
+/// so it loses the colour entirely and keeps only the outline.
+inline constexpr float kDialogButton[3] = {0.15f, 0.24f, 0.42f};
+inline constexpr float kDialogButtonHot[3] = {0.27f, 0.42f, 0.68f};
+inline constexpr float kDialogButtonOff[3] = {0.11f, 0.12f, 0.15f};
+
+/// Where the box put a button last frame, so a click can be tested against
+/// what the player is actually looking at.
+///
+/// Laid out as it is drawn and remembered rather than computed twice: the
+/// text is proportional and the box is sized to fit it, so working out where
+/// a button is means most of the work of drawing one.
+struct DialogButton
+{
+    float left{};
+    float bottom{};
+    float width{};
+    float height{};
+    bool enabled{};
+    mh::DeathChoice choice{mh::DeathChoice::None};
+
+    bool holds(float x, float y) const
+    {
+        return width > 0.0f && x >= left && x < left + width && y >= bottom && y < bottom + height;
+    }
 };
 
 struct RadarUniforms
@@ -586,6 +638,28 @@ bool mh::ViewerLink::takeTalk(uint32_t& entityId)
     return entityId != 0;
 }
 
+void mh::ViewerLink::setDeath(bool dead, bool raiseOffered)
+{
+    dead_ = dead;
+    raiseOffered_ = raiseOffered;
+}
+
+bool mh::ViewerLink::dead(bool& raiseOffered) const
+{
+    raiseOffered = raiseOffered_;
+    return dead_;
+}
+
+void mh::ViewerLink::chooseDeath(DeathChoice choice) { deathChoice_ = static_cast<int>(choice); }
+
+/// Exchange rather than a read and a clear, for the same reason takeJump is.
+/// A press read twice is two home point requests for one button, and the
+/// second arrives at a character the server has already moved.
+mh::DeathChoice mh::ViewerLink::takeDeathChoice()
+{
+    return static_cast<DeathChoice>(deathChoice_.exchange(static_cast<int>(DeathChoice::None)));
+}
+
 void mh::ViewerLink::stop() { stop_ = true; }
 
 bool mh::ViewerLink::stopping() const { return stop_; }
@@ -627,7 +701,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         // The character is loaded after the zone so it can share the texture
         // map: a PC in a town wears textures the zone never mentions, and a
         // zone texture the character happens to name should not be read twice.
-        std::printf("collision: %zu triangles\n", collision.triangleCount());
+        std::printf("collision: %zu triangles, %zu walls\n", collision.triangleCount(), collision.wallCount());
         std::printf("zone %s: %zu triangles\n", zoneId.c_str(), zone->indices.size() / 3);
         std::printf("  bounds x %.1f..%.1f  y %.1f..%.1f  z %.1f..%.1f\n", zone->boundsMin.x, zone->boundsMax.x,
                     zone->boundsMin.y, zone->boundsMax.y, zone->boundsMin.z, zone->boundsMax.z);
@@ -1606,6 +1680,80 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             .layout = chatBindGroupLayout, .entryCount = 1, .entries = &chatEntry};
         chatBindGroup = device.CreateBindGroup(&chatBindGroupDescriptor);
     }
+
+    // The death box. Same atlas, same one-triangle-and-discard, and the same
+    // three bindings the HUD needs - a uniform block, the glyphs and a
+    // sampler for them.
+    wgpu::Buffer dialogUniformBuffer;
+    wgpu::RenderPipeline dialogPipeline;
+    wgpu::BindGroup dialogBindGroup;
+    if (fontTexture)
+    {
+        wgpu::BufferDescriptor dialogBufferDescriptor{
+            .usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst, .size = sizeof(DialogUniforms)};
+        dialogUniformBuffer = device.CreateBuffer(&dialogBufferDescriptor);
+
+        wgpu::ShaderSourceWGSL dialogWgsl;
+        dialogWgsl.code = mh::kDialogShader;
+        wgpu::ShaderModuleDescriptor dialogModuleDescriptor{.nextInChain = &dialogWgsl};
+        wgpu::ShaderModule dialogModule = device.CreateShaderModule(&dialogModuleDescriptor);
+
+        wgpu::BindGroupLayoutEntry dialogLayoutEntries[3] = {};
+        dialogLayoutEntries[0].binding = 0;
+        dialogLayoutEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+        dialogLayoutEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
+        dialogLayoutEntries[1].binding = 1;
+        dialogLayoutEntries[1].visibility = wgpu::ShaderStage::Fragment;
+        dialogLayoutEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
+        dialogLayoutEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+        dialogLayoutEntries[2].binding = 2;
+        dialogLayoutEntries[2].visibility = wgpu::ShaderStage::Fragment;
+        dialogLayoutEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
+
+        wgpu::BindGroupLayoutDescriptor dialogLayoutDescriptor{.entryCount = 3, .entries = dialogLayoutEntries};
+        wgpu::BindGroupLayout dialogBindGroupLayout = device.CreateBindGroupLayout(&dialogLayoutDescriptor);
+        wgpu::PipelineLayoutDescriptor dialogPipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
+                                                                      .bindGroupLayouts = &dialogBindGroupLayout};
+        wgpu::PipelineLayout dialogPipelineLayout = device.CreatePipelineLayout(&dialogPipelineLayoutDescriptor);
+
+        wgpu::BlendState dialogBlend{
+            .color = {.operation = wgpu::BlendOperation::Add,
+                      .srcFactor = wgpu::BlendFactor::SrcAlpha,
+                      .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
+            .alpha = {.operation = wgpu::BlendOperation::Add,
+                      .srcFactor = wgpu::BlendFactor::One,
+                      .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha}};
+        wgpu::ColorTargetState dialogTarget{.format = surfaceFormat, .blend = &dialogBlend};
+        wgpu::FragmentState dialogFragment{
+            .module = dialogModule, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &dialogTarget};
+
+        // Over everything, including the water and the names. A modal box that
+        // a tree can stand in front of is not modal.
+        wgpu::DepthStencilState dialogDepth{.format = kDepthFormat,
+                                            .depthWriteEnabled = wgpu::OptionalBool::False,
+                                            .depthCompare = wgpu::CompareFunction::Always};
+
+        wgpu::RenderPipelineDescriptor dialogPipelineDescriptor{
+            .layout = dialogPipelineLayout,
+            .vertex = {.module = dialogModule, .entryPoint = "vertexMain"},
+            .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
+            .depthStencil = &dialogDepth,
+            .fragment = &dialogFragment};
+        dialogPipeline = device.CreateRenderPipeline(&dialogPipelineDescriptor);
+
+        wgpu::BindGroupEntry dialogEntries[3] = {};
+        dialogEntries[0].binding = 0;
+        dialogEntries[0].buffer = dialogUniformBuffer;
+        dialogEntries[0].size = sizeof(DialogUniforms);
+        dialogEntries[1].binding = 1;
+        dialogEntries[1].textureView = fontTexture.CreateView();
+        dialogEntries[2].binding = 2;
+        dialogEntries[2].sampler = fontSampler;
+        wgpu::BindGroupDescriptor dialogBindGroupDescriptor{
+            .layout = dialogBindGroupLayout, .entryCount = 3, .entries = dialogEntries};
+        dialogBindGroup = device.CreateBindGroup(&dialogBindGroupDescriptor);
+    }
+
     float mapCentreX = 0.0f;
     float mapCentreZ = 0.0f;
     float mapHalf = 1.0f;
@@ -1917,6 +2065,10 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 
     /// How many entity bodies the instance buffer currently holds.
     int drawnBodies = 0;
+
+    int plateShown = 0;
+    int plateHidden = 0;
+    int plateReport = -1;
 
     /// The Vana'diel clock in seconds, when the server has supplied one. Also
     /// gives the weekday, which is the same eight day cycle the game shows.
@@ -2458,6 +2610,40 @@ constexpr float kGravity = 26.0f;
     // so a moment of walking does not need a mode change and back.
     bool walkByDefault = false;
 
+    // The death box, as the last frame left it.
+    //
+    // Immediate mode: the box is laid out while it is drawn and the rectangles
+    // are kept, so a click is tested against the frame the player was looking
+    // at when they pressed. A frame's lag on a box that only appears when a
+    // character has stopped moving is not something anyone can aim past.
+    bool deathBoxShown = false;
+    float deathPanel[4]{};
+    DialogButton deathButtons[mh::kDialogButtons]{};
+
+    // Which button the mouse went down on, so releasing somewhere else is a
+    // change of mind rather than a press. -1 is none.
+    int deathPressed = -1;
+
+    // A pointer position in the coordinates the box is laid out in.
+    //
+    // SDL reports window points and the surface is measured in pixels, which
+    // are not the same number on a high density display - so this divides by
+    // the window rather than by the frame. What the two share is the aspect,
+    // and the aspect is all normalised device coordinates need.
+    const auto pointerNdc = [window](float x, float y, float& ndcX, float& ndcY)
+    {
+        int pointsAcross = 0;
+        int pointsDown = 0;
+        SDL_GetWindowSize(window, &pointsAcross, &pointsDown);
+        if (pointsAcross <= 0 || pointsDown <= 0)
+        {
+            return false;
+        }
+        ndcX = x / static_cast<float>(pointsAcross) * 2.0f - 1.0f;
+        ndcY = 1.0f - y / static_cast<float>(pointsDown) * 2.0f;
+        return true;
+    };
+
     uint64_t previousTicks = SDL_GetTicksNS();
     bool running = true;
     while (running)
@@ -2647,11 +2833,46 @@ constexpr float kGravity = 26.0f;
             }
             else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
             {
-                dragging = true;
+                float ndcX = 0.0f;
+                float ndcY = 0.0f;
+                const bool onBox = deathBoxShown && pointerNdc(event.button.x, event.button.y, ndcX, ndcY) &&
+                                   ndcX >= deathPanel[0] && ndcX < deathPanel[0] + deathPanel[2] &&
+                                   ndcY >= deathPanel[1] && ndcY < deathPanel[1] + deathPanel[3];
+
+                deathPressed = -1;
+                if (onBox)
+                {
+                    for (int i = 0; i < mh::kDialogButtons; ++i)
+                    {
+                        if (deathButtons[i].enabled && deathButtons[i].holds(ndcX, ndcY))
+                        {
+                            deathPressed = i;
+                        }
+                    }
+                }
+
+                // A press on the box belongs to the box. Otherwise the same
+                // press also grabs the camera, and answering the one question
+                // a dead character is allowed to answer swings the view round
+                // while you do it.
+                dragging = !onBox;
             }
             else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP)
             {
                 dragging = false;
+
+                // Pressed and released on the same button. Sliding off one
+                // before letting go is how a mis-click is taken back, which
+                // every other program on the machine already agrees about.
+                float ndcX = 0.0f;
+                float ndcY = 0.0f;
+                if (deathPressed >= 0 && deathBoxShown && link &&
+                    pointerNdc(event.button.x, event.button.y, ndcX, ndcY) &&
+                    deathButtons[deathPressed].enabled && deathButtons[deathPressed].holds(ndcX, ndcY))
+                {
+                    link->chooseDeath(deathButtons[deathPressed].choice);
+                }
+                deathPressed = -1;
             }
             else if (event.type == SDL_EVENT_MOUSE_MOTION && dragging)
             {
@@ -3046,12 +3267,23 @@ constexpr float kGravity = 26.0f;
         // arrive a few times a second and a raw per-frame delta is zero on
         // every frame between them, which reads as a stutter rather than a
         // walk.
+        int posedCount = 0;
         for (const mh::RadarEntity& entity : radarEntities)
         {
+            // Only the ones that will actually be drawn. Skinning is the
+            // expensive half - a mesh reposed on the CPU and uploaded every
+            // frame - and doing it for a body past the instance cap is work
+            // whose result is never submitted.
+            if (posedCount >= mh::kMaxDrawnBodies)
+            {
+                break;
+            }
+
             if (!entity.hasLook() && !entity.hasModel())
             {
                 continue;
             }
+            ++posedCount;
 
             const DrawableCharacter* model = modelForEntity(entity);
             if (!model || model->loaded.animations.empty())
@@ -3802,8 +4034,10 @@ constexpr float kGravity = 26.0f;
                     // a handful of entities is a handful of rays.
                     if (collision.firstWallAlong(camera.eye(), mh::Vec3{entity.x, headY, entity.z}))
                     {
+                        ++plateHidden;
                         continue;
                     }
+                    ++plateShown;
 
                     plate.positions[named][0] = entity.x;
                     plate.positions[named][1] = headY;
@@ -3839,6 +4073,15 @@ constexpr float kGravity = 26.0f;
                     named = layOutPlate(plate, named, shown);
                 }
 
+                if (plateReport != plateHidden * 1000 + plateShown)
+                {
+                    plateReport = plateHidden * 1000 + plateShown;
+                    std::printf("plates: %d shown, %d hidden by walls, eye %.1f %.1f %.1f\n",
+                                plateShown, plateHidden, camera.eye().x, camera.eye().y, camera.eye().z);
+                }
+                plateShown = 0;
+                plateHidden = 0;
+
                 if (named > 0)
                 {
                     plate.counts[0] = static_cast<float>(named);
@@ -3857,6 +4100,232 @@ constexpr float kGravity = 26.0f;
                 pass.SetIndexBuffer(waterIndexBuffer, wgpu::IndexFormat::Uint32);
                 pass.DrawIndexed(waterIndexCount);
             }
+        }
+
+        // The box a dead character gets, drawn over everything else.
+        //
+        // Outside the geometry check above on purpose: whether the zone drew
+        // has nothing to do with whether the player is lying on the floor of
+        // it, and a box that appeared only in zones we could read would go
+        // missing exactly where the client is already least useful.
+        bool raiseOffered = options.testDeath > 1;
+        const bool dead = link ? link->dead(raiseOffered) : options.testDeath > 0;
+
+        deathBoxShown = false;
+        for (DialogButton& button : deathButtons)
+        {
+            button = DialogButton{};
+        }
+
+        if (dead && dialogPipeline && dialogBindGroup && !textFont.empty())
+        {
+            DialogUniforms box{};
+            const float windowAspect = static_cast<float>(width) / static_cast<float>(height);
+
+            // 1:1 with the atlas, as the HUD is - see there for why the size
+            // is derived from the window rather than chosen.
+            box.counts[1] = static_cast<float>(textFont.cell) * 2.0f / static_cast<float>(height);
+            box.counts[2] = windowAspect;
+            box.counts[3] = 0.42f;
+            box.atlas[0] = static_cast<float>(textFont.columns);
+            box.atlas[1] = static_cast<float>(textFont.cell);
+            box.atlas[2] = static_cast<float>(textFont.width);
+            box.atlas[3] = static_cast<float>(textFont.height);
+
+            const float line = box.counts[1];
+
+            // One row's glyphs, and how wide they came to in cells. The same
+            // shape as layOutPlate above and there for the same reason: the
+            // font is proportional, so only the CPU knows where a letter
+            // starts.
+            const auto layOutRow = [&textFont](DialogUniforms& into, int row, const std::string& text)
+            {
+                const float cell = static_cast<float>(textFont.cell);
+                float pen = 0.0f;
+                int written = 0;
+                for (char raw : text)
+                {
+                    if (written >= mh::kDialogChars)
+                    {
+                        break;
+                    }
+                    const float advance = textFont.advanceOf(raw) / cell;
+                    float* glyph = into.glyphs[row * mh::kDialogChars + written];
+                    glyph[0] = static_cast<float>(textFont.indexOf(raw));
+                    glyph[1] = pen;
+                    glyph[2] = advance;
+                    pen += advance;
+                    ++written;
+                }
+                into.boxes[row][2] = pen;   // total width, in cells
+                return pen;
+            };
+
+            // What it says. The middle line changes the moment a raise is
+            // offered, because that is the whole of why anyone waits.
+            const char* said[3] = {
+                "You have fallen.",
+                raiseOffered ? "Someone has offered you a raise." : "Wait here for a raise, or return",
+                raiseOffered ? "" : "to your home point.",
+            };
+
+            constexpr float kTitleScale = 0.55f;
+            constexpr float kBodyScale = 0.40f;
+            constexpr float kLabelScale = 0.44f;
+
+            int rows = 0;
+            float widest = 0.0f;   // the widest row, in NDC x
+
+            for (int i = 0; i < 3; ++i)
+            {
+                if (said[i][0] == '\0')
+                {
+                    continue;
+                }
+
+                const float scale = i == 0 ? kTitleScale : kBodyScale;
+                const float cells = layOutRow(box, rows, said[i]);
+                const float* tint = i == 0 ? kDialogTitle : kDialogText;
+                box.colours[rows][0] = tint[0];
+                box.colours[rows][1] = tint[1];
+                box.colours[rows][2] = tint[2];
+                box.colours[rows][3] = scale;
+                widest = std::max(widest, cells * line * scale / windowAspect);
+                ++rows;
+            }
+
+            // The two answers. "Accept Raise" is drawn whether or not one has
+            // been offered: a button that appears out of nowhere is a button
+            // nobody was watching for, and a dead player wants to know that
+            // waiting is a thing that can end.
+            const int firstButton = rows;
+            const char* labels[mh::kDialogButtons] = {"Return to Home Point", "Accept Raise"};
+            const mh::DeathChoice choices[mh::kDialogButtons] = {mh::DeathChoice::HomePoint,
+                                                                 mh::DeathChoice::AcceptRaise};
+            const bool live[mh::kDialogButtons] = {true, raiseOffered};
+
+            float labelWidest = 0.0f;
+            for (int i = 0; i < mh::kDialogButtons && rows < mh::kDialogRows; ++i)
+            {
+                const float cells = layOutRow(box, rows, labels[i]);
+                const float* tint = live[i] ? kDialogLabel : kDialogLabelOff;
+                box.colours[rows][0] = tint[0];
+                box.colours[rows][1] = tint[1];
+                box.colours[rows][2] = tint[2];
+                box.colours[rows][3] = kLabelScale;
+                labelWidest = std::max(labelWidest, cells * line * kLabelScale / windowAspect);
+                ++rows;
+            }
+
+            // Sized to what it has to say rather than to a number picked once.
+            // The lines change with the state and the font is proportional, so
+            // a fixed box would either clip a sentence or stand half empty.
+            const float padX = line * 0.85f / windowAspect;
+            const float padY = line * 0.45f;
+            const float titleGap = line * 0.42f;
+            const float bodyGap = line * 0.16f;
+            const float buttonsGap = line * 0.60f;
+
+            const float buttonHigh = line * kLabelScale * 2.0f;
+            const float buttonWide = labelWidest + padX * 1.3f;
+            const float buttonGap = line * 0.45f / windowAspect;
+            const float buttonsWide =
+                buttonWide * mh::kDialogButtons + buttonGap * (mh::kDialogButtons - 1);
+
+            // How much room to leave under each text row. The last one before
+            // the buttons gets the wider gap, which is what separates what the
+            // box says from what it is asking.
+            const auto gapAfter = [&](int row)
+            { return row == firstButton - 1 ? buttonsGap : (row == 0 ? titleGap : bodyGap); };
+
+            float contentHigh = buttonHigh;
+            for (int row = 0; row < firstButton; ++row)
+            {
+                contentHigh += line * box.colours[row][3] + gapAfter(row);
+            }
+
+            const float panelWide = std::max(widest, buttonsWide) + padX * 2.0f;
+            const float panelHigh = contentHigh + padY * 2.0f;
+            const float panelLeft = -panelWide * 0.5f;
+            const float panelBottom = -panelHigh * 0.5f;
+
+            box.panel[0] = panelLeft;
+            box.panel[1] = panelBottom;
+            box.panel[2] = panelWide;
+            box.panel[3] = panelHigh;
+
+            // Where the pointer is, so whatever it is over can light up. Read
+            // here rather than tracked through motion events: it is one call,
+            // and it cannot fall out of step with the box it is tested against.
+            float pointerX = -2.0f;
+            float pointerY = -2.0f;
+            {
+                float mouseX = 0.0f;
+                float mouseY = 0.0f;
+                SDL_GetMouseState(&mouseX, &mouseY);
+                if (!pointerNdc(mouseX, mouseY, pointerX, pointerY))
+                {
+                    pointerX = -2.0f;   // off the window, so nothing is under it
+                    pointerY = -2.0f;
+                }
+            }
+
+            float cursorY = panelBottom + panelHigh - padY;
+            for (int row = 0; row < firstButton; ++row)
+            {
+                const float high = line * box.colours[row][3];
+                cursorY -= high;
+                const float wide = box.boxes[row][2] * high / windowAspect;
+                box.boxes[row][0] = -wide * 0.5f;   // centred, as the panel is
+                box.boxes[row][1] = cursorY;
+                cursorY -= gapAfter(row);
+            }
+
+            cursorY -= buttonHigh;
+            for (int i = 0; i < mh::kDialogButtons; ++i)
+            {
+                const int row = firstButton + i;
+                if (row >= mh::kDialogRows)
+                {
+                    break;
+                }
+
+                const float left = -buttonsWide * 0.5f + (buttonWide + buttonGap) * static_cast<float>(i);
+                const bool under = live[i] && pointerX >= left && pointerX < left + buttonWide &&
+                                   pointerY >= cursorY && pointerY < cursorY + buttonHigh;
+                const float* fill = !live[i]                       ? kDialogButtonOff
+                                    : (under || deathPressed == i) ? kDialogButtonHot
+                                                                   : kDialogButton;
+
+                box.rects[row][0] = left;
+                box.rects[row][1] = cursorY;
+                box.rects[row][2] = buttonWide;
+                box.rects[row][3] = buttonHigh;
+                box.fills[row][0] = fill[0];
+                box.fills[row][1] = fill[1];
+                box.fills[row][2] = fill[2];
+                box.fills[row][3] = 1.0f;
+
+                // The label, centred in its button both ways.
+                const float high = line * box.colours[row][3];
+                const float wide = box.boxes[row][2] * high / windowAspect;
+                box.boxes[row][0] = left + (buttonWide - wide) * 0.5f;
+                box.boxes[row][1] = cursorY + (buttonHigh - high) * 0.5f;
+
+                deathButtons[i] = DialogButton{left, cursorY, buttonWide, buttonHigh, live[i], choices[i]};
+            }
+
+            deathPanel[0] = panelLeft;
+            deathPanel[1] = panelBottom;
+            deathPanel[2] = panelWide;
+            deathPanel[3] = panelHigh;
+            deathBoxShown = true;
+
+            box.counts[0] = static_cast<float>(rows);
+            queue.WriteBuffer(dialogUniformBuffer, 0, &box, sizeof(box));
+            pass.SetPipeline(dialogPipeline);
+            pass.SetBindGroup(0, dialogBindGroup);
+            pass.Draw(3);
         }
 
         pass.End();

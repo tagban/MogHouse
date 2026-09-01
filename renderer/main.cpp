@@ -106,6 +106,13 @@ ViewerOptions optionsFromEnvironment(int argc, char** argv)
         }
     }
 
+    // 1 lays the character out dead, 2 offers them a raise as well. The box
+    // is otherwise reachable only by dying on a real server.
+    if (const std::optional<std::string> death = fromEnvironment("MOGHOUSE_DEAD"))
+    {
+        options.testDeath = std::atoi(death->c_str());
+    }
+
     if (const std::optional<std::string> frame = fromEnvironment("MOGHOUSE_FRAME"))
     {
         options.frame = static_cast<float>(std::atof(frame->c_str()));

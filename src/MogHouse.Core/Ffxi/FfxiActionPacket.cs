@@ -30,10 +30,23 @@ public static class FfxiActionPacket
     /// <summary>
     /// Answer the menu a dead character gets. The buffer's StatusId picks
     /// which answer and Accept is zero, so a zeroed buffer is 'yes, send me
-    /// to my home point' - which is the whole of what this client can do
-    /// about dying so far.
+    /// to my home point'.
     /// </summary>
     public const ushort ActionHomePointMenu = 0x0B;
+
+    /// <summary>
+    /// The other answer: take the raise somebody has offered.
+    ///
+    /// The same buffer as the home point menu - the server reads this one
+    /// through ACTIONBUF_HOMEPOINTMENU too - and Accept is again zero, so a
+    /// zeroed buffer says yes. Declining is a 1 there, which this client has
+    /// no way to ask for: a raise nobody wants is one you walk away from by
+    /// pressing the other button.
+    ///
+    /// The server drops this unless it has already offered, so it is only
+    /// worth sending after a <see cref="FfxiRaiseOffer"/> has arrived.
+    /// </summary>
+    public const ushort ActionRaiseMenu = 0x0D;
 
     private const int OffsetIdAndSize = 0;
     private const int OffsetSync = 2;

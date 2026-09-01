@@ -148,6 +148,30 @@ typedef struct MhZoneLine
 /// the zone it came from and means nothing on the other side.
 MH_API void mh_viewer_set_zone_lines(MhViewerHandle viewer, const MhZoneLine* lines, int32_t count);
 
+/// What a dead player pressed in the box the renderer draws them. Matches
+/// mh::DeathChoice.
+enum
+{
+    MH_DEATH_NONE = 0,
+    MH_DEATH_HOME_POINT = 1,
+    MH_DEATH_ACCEPT_RAISE = 2
+};
+
+/// Whether the character is down, and whether a raise has been offered.
+///
+/// Per session rather than per entity, which is why this is a call of its own
+/// rather than another field on MhRadarEntity. The renderer cannot work either
+/// out for itself: it knows where the body is and nothing about the state of
+/// it. Hit points arrive in one packet and the raise offer in another, so both
+/// are the caller's answer - and together they are the whole of what the box
+/// draws itself from. It appears on the first and its second button lights on
+/// the second.
+MH_API void mh_viewer_set_death(MhViewerHandle viewer, int32_t dead, int32_t raise_offered);
+
+/// What the player pressed there, as one of MH_DEATH_*, consumed by the read.
+/// Both answers are packets only the caller can send, the same way a jump is.
+MH_API int32_t mh_viewer_take_death_choice(MhViewerHandle viewer);
+
 /// Takes the entity the player asked to talk to, if any. Returns 0 when
 /// nothing is pending; the request is consumed either way.
 MH_API uint32_t mh_viewer_take_talk(MhViewerHandle viewer);
