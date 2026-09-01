@@ -142,6 +142,13 @@ public partial class GameViewModel : ViewModelBase
                     await session.SayAsync(typed);
                 }
 
+                // Space: a jump on your feet, a wave lying down - see
+                // JumpAsync. A corpse has no other way to be noticed.
+                if (_world?.TakeJump() == true)
+                {
+                    await session.JumpAsync();
+                }
+
                 // Whichever button a dead character pressed. The renderer drew
                 // the choice; only this half has a socket to say it down.
                 switch (_world?.TakeDeathChoice())

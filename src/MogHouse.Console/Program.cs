@@ -1145,6 +1145,7 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
 
     session.DeathChanged += dead =>
     {
+
         if (dead)
         {
             radar?.Say("", "You fall to the ground.");
@@ -1304,6 +1305,14 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
             {
                 await session.TalkToAsync(facing.UniqueNo, facing.ActIndex);
             }
+        }
+
+        // Space: a jump on your feet, a wave lying down - see JumpAsync. This
+        // loop never consumed the jump at all until now, so pressing space
+        // animated our own character and told nobody.
+        if (radar?.TakeJump() == true)
+        {
+            await session.JumpAsync();
         }
 
         // And whichever button a dead character pressed. The renderer drew

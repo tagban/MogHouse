@@ -232,12 +232,20 @@ public sealed class FfxiGameSession : IDisposable
     /// </summary>
     public void PlaceAt(float x, float vertical, float depth, sbyte facing)
     {
-        // Nor while dead. The server ignores it, and the renderer would
-        // otherwise walk a corpse around the zone.
-        if (IsDead)
-        {
-            return;
-        }
+        // Reported while dead too, which it did not used to be.
+        //
+        // The old refusal said the server ignores a corpse's position. It does
+        // not: LandSandBoat's 0x015_pos.cpp checks only that the character is
+        // not disappearing or shutting down, then takes the position and tells
+        // everyone nearby. What the refusal was really protecting against was
+        // the renderer walking a corpse around the zone - and the renderer now
+        // refuses that itself, at the keys, so the only movement that can
+        // reach here while dead is the deliberate drag on the jump key and the
+        // fall that settles the body onto the ground.
+        //
+        // Both of those are worth sending. A body that shifts is the only
+        // thing a dead player can do that someone across a clearing might
+        // notice.
 
         // Not while we are between zones.
         //
@@ -265,7 +273,15 @@ public sealed class FfxiGameSession : IDisposable
         }
 
         Moved?.Invoke();
-        _ = CheckZoneLinesAsync();
+
+        // Not the zone lines, though. Dying on top of one and then shuffling
+        // would ask to change zone from the floor, and a corpse arriving in a
+        // new zone is a mess nobody asked for - the raise you were waiting on
+        // is in the zone you just left.
+        if (!IsDead)
+        {
+            _ = CheckZoneLinesAsync();
+        }
     }
 
     public void Move(float dx, float dz)
@@ -973,6 +989,43 @@ public sealed class FfxiGameSession : IDisposable
 
         await _zone.SendActionAsync(_zoneEndpoint, ZoneState.UniqueNo, ZoneState.ActIndex,
                                     FfxiActionPacket.ActionHomePointMenu);
+    }
+
+    /// <summary>
+    /// Jumps - or waves, when there is nothing left to jump with.
+    ///
+    /// A dead character in FFXI has no way to say anything. Movement, chat,
+    /// actions and abilities are all refused, so somebody lying on the floor
+    /// waiting for a raise cannot signal the party wandering past that they
+    /// are there. The two packets the server does still take from a corpse are
+    /// the jump and the emote - LandSandBoat's handlers for both check only
+    /// that you are not mid-event, and rebroadcast to everyone in range - and
+    /// of the two, a wave is the one that means "over here" rather than "I am
+    /// hopping".
+    ///
+    /// So the key is the same key, and what it sends depends on whether you
+    /// are on your feet. The renderer plays the local half either way: alive
+    /// it is the jump clip, dead it restarts the death clip, so the body
+    /// flinches where it lies.
+    /// </summary>
+    public async Task JumpAsync()
+    {
+        if (_zone is null || _zoneEndpoint is null || ZoneState is null)
+        {
+            return;
+        }
+
+        if (IsDead)
+        {
+            // Motion only. The text form would put a line in everyone's log
+            // every time, and someone waving for a raise will press this more
+            // than once.
+            await _zone.SendEmoteAsync(_zoneEndpoint, ZoneState.UniqueNo, ZoneState.ActIndex,
+                                       FfxiMotionPacket.EmoteWave, FfxiEmoteMode.Motion);
+            return;
+        }
+
+        await _zone.SendJumpAsync(_zoneEndpoint, ZoneState.UniqueNo, ZoneState.ActIndex);
     }
 
     /// <summary>

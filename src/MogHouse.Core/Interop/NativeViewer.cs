@@ -477,6 +477,7 @@ public sealed partial class NativeViewer : IDisposable
     [LibraryImport(LibraryName)]
     private static partial uint mh_viewer_take_talk(IntPtr viewer);
 
+
     [LibraryImport(LibraryName)]
     private static partial void mh_viewer_set_death(IntPtr viewer, int dead, int raiseOffered);
 

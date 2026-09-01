@@ -177,6 +177,20 @@ inline constexpr float kDialogButton[3] = {0.15f, 0.24f, 0.42f};
 inline constexpr float kDialogButtonHot[3] = {0.27f, 0.42f, 0.68f};
 inline constexpr float kDialogButtonOff[3] = {0.11f, 0.12f, 0.15f};
 
+/// How far a corpse hauls itself on one press of the jump key, in world units.
+///
+/// Half a walking pace. A whole one reads as the body getting up and taking a
+/// step, which is the opposite of the point; anything much under this is not
+/// visible from across a clearing, which is the whole reason for it - the
+/// person who might raise you is not standing over you.
+inline constexpr float kCorpseDrag = 0.35f;
+
+/// How much of the death clip to replay on that press, counted back from its
+/// end. Its tail is the body's last settle onto the ground; its beginning is
+/// the character still standing, which is why the clip is rewound to near the
+/// end rather than restarted.
+inline constexpr int kCorpseTwitchFrames = 3;
+
 /// Where the box put a button last frame, so a click can be tested against
 /// what the player is actually looking at.
 ///
@@ -2439,6 +2453,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     const ffxi::Animation* walkClip = nullptr;
     const ffxi::Animation* runClip = nullptr;
     const ffxi::Animation* jumpClip = nullptr;
+    const ffxi::Animation* deadClip = nullptr;
     // When the jump finishes, on the same clock animationOffset is measured
     // against. Idle, walk and run are chosen every frame from what the
     // character is doing; a jump is not, so it needs an end to hold until.
@@ -2459,6 +2474,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         walkClip = find("wlk0");
         runClip = find("run0");
         jumpClip = find("jmp0");
+        deadClip = find("ded0");
 
         // The clips ending 0 drive the root, hips and legs - sixteen bones of
         // ninety-four. Everything above the waist, the spine and torso and
@@ -2644,6 +2660,18 @@ constexpr float kGravity = 26.0f;
     bool running = true;
     while (running)
     {
+        // Dead, and whether a way up has been offered. Read once at the top of
+        // the frame and answered everywhere below: a corpse does not walk and
+        // does not jump, it holds the fallen pose rather than the idle one,
+        // and it is looking at the box that asks what to do about it.
+        //
+        // One read rather than one per site, because one per site drifted.
+        // Only the box knew about testDeath, so the standalone viewer drew it
+        // over a character still standing up - four parts of one state
+        // disagreeing about whether anyone had died.
+        bool raiseOffered = options.testDeath > 1;
+        const bool dead = link ? link->dead(raiseOffered) : options.testDeath > 0;
+
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
@@ -2703,6 +2731,27 @@ constexpr float kGravity = 26.0f;
                 {
                     camera.orbiting = !camera.orbiting;
                 }
+                // Deliberately not gated on being dead.
+                //
+                // A corpse cannot walk, act or use an ability - the server
+                // turns all of it away - so a dead player has no way to say "I
+                // am over here, and I would like a raise". Two things do still
+                // get through, and this key sends both.
+                //
+                // Alive it is a jump. Dead it is a wave and a shove: the client
+                // turns the request into an emote (see FfxiGameSession's
+                // JumpAsync), and the body drags itself a little way along the
+                // ground here, which the client reports like any other movement.
+                // LandSandBoat relays both - its jump, motion and position
+                // handlers all check only that you are not mid-event, never
+                // that you are alive. See 0x11d_jump.cpp, 0x05d_motion.cpp and
+                // 0x015_pos.cpp.
+                //
+                // What it looks like from here is a twitch rather than a hop:
+                // the pose below overrules the jump clip on this same frame and
+                // restarts the death clip, so the body flinches where it lies.
+                // jumpUntil rate-limits it to one per clip, so it cannot be
+                // held down into a seizure.
                 else if (event.key.key == SDLK_SPACE && driving && jumpClip)
                 {
                     // Only while driving: flying the camera, space is still
@@ -2712,13 +2761,52 @@ constexpr float kGravity = 26.0f;
                     const float now = static_cast<float>(SDL_GetTicksNS() / 1000000ull) / 1000.0f;
                     if (jumpUntil <= now)
                     {
-                        playing = jumpClip;
-                        animationOffset = now;
+                        if (dead)
+                        {
+                            // Rewound to the last few frames of the death clip,
+                            // never restarted and never handed to the jump.
+                            //
+                            // Either of those puts the clip back at frame zero,
+                            // and frame zero of a death is the character on
+                            // their feet - so a press stood the corpse up and
+                            // dropped it again, which is a resurrection, not a
+                            // twitch. The tail is the body's last settle onto
+                            // the ground, which is exactly the movement wanted.
+                            if (deadClip && deadClip->frames > kCorpseTwitchFrames)
+                            {
+                                animationOffset =
+                                    now - static_cast<float>(deadClip->frames - kCorpseTwitchFrames) *
+                                              deadClip->frameSeconds();
+                            }
+
+                            // And the drag. Half a walking pace, along the way
+                            // the body already faces, through the same
+                            // collision check a step takes - a corpse hauling
+                            // itself through a wall would be worse than one
+                            // that cannot move at all. The height is left to
+                            // the fall below, which settles it back down.
+                            if (character)
+                            {
+                                const mh::Vec3 wanted{characterAt.x + std::sin(characterFacing) * kCorpseDrag,
+                                                      characterAt.y,
+                                                      characterAt.z + std::cos(characterFacing) * kCorpseDrag};
+                                characterAt = collision.empty() || noclip
+                                                  ? wanted
+                                                  : collision.move(characterAt, wanted, 0.5f);
+                            }
+                        }
+                        else
+                        {
+                            playing = jumpClip;
+                            animationOffset = now;
+                        }
+
                         jumpUntil = now + static_cast<float>(jumpClip->frames) * jumpClip->frameSeconds();
 
                         // And tell the client, which is the only half of this
-                        // that talks to the server. Without it the jump is
-                        // ours alone and nobody else ever sees it.
+                        // that talks to the server. Without it the jump - or
+                        // the wave it becomes when dead - is ours alone and
+                        // nobody else ever sees it.
                         if (link)
                         {
                             link->requestJump();
@@ -2971,8 +3059,15 @@ constexpr float kGravity = 26.0f;
         // Numpad 8 and 2 move, 4 and 6 turn - which is what they do in the
         // real client, where they are the movement keys rather than a second
         // set of strafes.
-        const bool forward = held[SDL_SCANCODE_W] || held[SDL_SCANCODE_KP_8];
-        const bool backward = held[SDL_SCANCODE_S] || held[SDL_SCANCODE_KP_2];
+        //
+        // Nothing moves a corpse. Cut off at the keys rather than around the
+        // block that reads them, because that block also settles the body onto
+        // the ground, writes the pose the GPU draws and keeps the camera behind
+        // the character's shoulder - none of which stops mattering when you
+        // die. Skipping the lot left the body frozen wherever it last stood
+        // while the camera wandered off on its own.
+        const bool forward = !dead && (held[SDL_SCANCODE_W] || held[SDL_SCANCODE_KP_8]);
+        const bool backward = !dead && (held[SDL_SCANCODE_S] || held[SDL_SCANCODE_KP_2]);
 
         // 4 turns left and 6 turns right, from the character's point of view.
         //
@@ -2986,7 +3081,8 @@ constexpr float kGravity = 26.0f;
         }
 
         const float ahead = (forward ? speed : 0.0f) - (backward ? speed : 0.0f);
-        const float side = (held[SDL_SCANCODE_D] ? speed : 0.0f) - (held[SDL_SCANCODE_A] ? speed : 0.0f);
+        const float side = dead ? 0.0f
+                                : (held[SDL_SCANCODE_D] ? speed : 0.0f) - (held[SDL_SCANCODE_A] ? speed : 0.0f);
         const float lift = (held[SDL_SCANCODE_SPACE] ? speed : 0.0f) - (held[SDL_SCANCODE_LCTRL] ? speed : 0.0f);
 
         // Numpad 9 and 3 pull the camera in and push it out, the way the real
@@ -3168,7 +3264,22 @@ constexpr float kGravity = 26.0f;
         // Idle, walk or run, chosen by what the character is actually doing
         // - unless a jump is still in the air, which plays to the end.
         const float nowSeconds = static_cast<float>(SDL_GetTicksNS() / 1000000ull) / 1000.0f;
-        if (!pinnedClip && jumpUntil <= nowSeconds)
+        // Dead, so nothing else applies.
+        //
+        // The death clip is not chosen from movement the way idle and walk
+        // are: the character is not doing anything, and letting the usual
+        // choice run would stand them straight back up the moment the position
+        // twitched.
+        if (dead)
+        {
+            const ffxi::Animation* fallen = deadClip ? deadClip : idleClip;
+            if (fallen && fallen != playing)
+            {
+                playing = fallen;
+                animationOffset = nowSeconds;
+            }
+        }
+        else if (!pinnedClip && jumpUntil <= nowSeconds)
         {
             // The same walk/run decision the speed uses, so the legs and the
             // ground always agree.
@@ -3507,7 +3618,18 @@ constexpr float kGravity = 26.0f;
             {
                 if (playing)
                 {
-                    const float frame = animationSeconds / playing->frameSeconds();
+                    float frame = animationSeconds / playing->frameSeconds();
+
+                    // Falling over happens once. Every clip is sampled with a
+                    // wrap - see animatedPose - which is right for a walk and
+                    // wrong for a death: left to loop, the body collapsed,
+                    // snapped upright and collapsed again for as long as you
+                    // were dead. Held on the last frame instead, so a corpse
+                    // stays a corpse.
+                    if (playing == deadClip && deadClip && deadClip->frames > 0)
+                    {
+                        frame = std::min(frame, static_cast<float>(deadClip->frames) - 1.0f);
+                    }
                     // The arms belong to the same stride as the legs, so
                     // the upper body is stepped on its own frame rate but off
                     // the same clock.
@@ -4093,9 +4215,10 @@ constexpr float kGravity = 26.0f;
         // has nothing to do with whether the player is lying on the floor of
         // it, and a box that appeared only in zones we could read would go
         // missing exactly where the client is already least useful.
-        bool raiseOffered = options.testDeath > 1;
-        const bool dead = link ? link->dead(raiseOffered) : options.testDeath > 0;
-
+        //
+        // `dead` and `raiseOffered` were read at the top of the frame, with
+        // the movement gate and the pose, so what the box says and what the
+        // body does cannot disagree.
         deathBoxShown = false;
         for (DialogButton& button : deathButtons)
         {

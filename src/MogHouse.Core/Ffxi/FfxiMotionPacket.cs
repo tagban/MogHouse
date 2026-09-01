@@ -45,6 +45,17 @@ public static class FfxiMotionPacket
     public const byte MinEmote = 0;
     public const byte MaxEmote = 96;
 
+    /// <summary>
+    /// Emote::Wave - the one a dead character has any use for.
+    ///
+    /// A corpse cannot walk, act, or use an ability: the server turns all of
+    /// it away. Emotes it does not, so waving is very nearly the only thing
+    /// left that other people can be shown. See
+    /// <see cref="FfxiGameSession.JumpAsync"/>, which sends this in place of a
+    /// jump when the character is down.
+    /// </summary>
+    public const byte EmoteWave = 8;
+
     private const int OffsetIdAndSize = 0;
     private const int OffsetSync = 2;
     private const int OffsetUniqueNo = 4;

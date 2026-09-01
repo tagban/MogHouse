@@ -298,6 +298,7 @@ public:
     void requestTalk(uint32_t entityId);
     bool takeTalk(uint32_t& entityId);
 
+
     /// A line the player typed and pressed return on, taken once.
     ///
     /// The renderer has no socket; the client does. Anything typed here has to
