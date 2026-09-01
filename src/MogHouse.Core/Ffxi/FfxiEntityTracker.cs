@@ -1,3 +1,5 @@
+using System;
+
 namespace MogHouse.Core.Ffxi;
 
 /// <summary>One entity the client currently believes is nearby.</summary>
@@ -49,6 +51,9 @@ public sealed class FfxiEntityTracker
 {
     private readonly Dictionary<uint, FfxiTrackedEntity> _entities = [];
     private readonly TimeSpan _forgetAfter;
+
+    /// <summary>What MOGHOUSE_TRACE_ENTITY asked to watch, if anything.</summary>
+    private static readonly string? Trace = Environment.GetEnvironmentVariable("MOGHOUSE_TRACE_ENTITY");
 
     /// <summary>
     /// How long an entity survives without being mentioned again.
@@ -106,6 +111,20 @@ public sealed class FfxiEntityTracker
             }
 
             return;
+        }
+
+        // Set MOGHOUSE_TRACE_ENTITY to a unique id, or to "players", to watch
+        // what actually arrives for it. Reasoning about which flag hides
+        // someone has been wrong twice; this prints the bytes instead.
+        if (Trace is not null &&
+            (Trace == "players" ? update.PacketId == FfxiEntityUpdate.PlayerPacketId
+                                : update.UniqueNo.ToString() == Trace))
+        {
+            Console.WriteLine(
+                $"  TRACE {update.UniqueNo:X8} id=0x{update.PacketId:X3} send=0x{update.SendFlags:X2} " +
+                $"flags1={(update.RawFlags1 is uint f1 ? $"0x{f1:X8}" : "-")} " +
+                $"despawn={update.IsDespawn} hidden={update.IsHidden} look={update.Look?.Kind.ToString() ?? "-"} " +
+                $"name={update.Name ?? "-"} at {update.X:F1},{update.Depth:F1}");
         }
 
         // A despawn is the real answer to "is it still there", and the only
