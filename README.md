@@ -57,7 +57,7 @@ a LandSandBoat server, `MogHouse.Console login --help` lists what it takes.
 
 ## Making a build for somebody else
 
-    pwsh tools/package-windows.ps1 -Version 0.1.3 -ZoneData path/to/LandSandBoat/data/zones
+    pwsh tools/package-windows.ps1 -Version 0.1.2 -ZoneData path/to/LandSandBoat/data/zones
 
 Produces a zip that unpacks and runs with nothing installed and no environment
 set: the client and the .NET runtime, the renderer, the glyph atlas, the water,

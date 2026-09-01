@@ -41,15 +41,18 @@
       change zones with a command instead.
 
 .EXAMPLE
-    pwsh tools\package-windows.ps1 -Version 0.1.3
+    pwsh tools\package-windows.ps1 -Version 0.1.2
 
 .EXAMPLE
-    pwsh tools\package-windows.ps1 -Version 0.1.3 -NoWater -ZoneData C:\LandSandBoat\data\zones
+    pwsh tools\package-windows.ps1 -Version 0.1.2 -NoWater -ZoneData C:\LandSandBoat\data\zones
 #>
 [CmdletBinding()]
 param(
-    # Stamped into the folder and zip names. The window title is set in the
-    # renderer and is not changed by this.
+    # Stamped into the folder and zip names.
+    #
+    # The window title is set separately, in kWindowTitle in renderer/viewer.h,
+    # and this does not change it - so the two can disagree. They should not:
+    # a tester reporting a bug reads the title bar, not the zip they unpacked.
     [string]$Version = "0.1.2",
 
     # Where the staging folder and the zip are written.
