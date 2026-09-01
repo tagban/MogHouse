@@ -9,6 +9,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MogHouse.Core.Ffxi;
+using MogHouse.Core.Interop;
 
 namespace MogHouse.App.ViewModels;
 
@@ -67,6 +68,12 @@ public partial class GameViewModel : ViewModelBase
         shell.Session.ChatReceived += OnChat;
         shell.Session.EntitiesChanged += OnEntities;
 
+        // Dying, and being offered a way back up. Both are pushed at the
+        // renderer rather than shown here: the box belongs in the window the
+        // character is lying in, not in a panel beside it.
+        shell.Session.DeathChanged += OnDeathChanged;
+        shell.Session.RaiseOfferChanged += OnRaiseOfferChanged;
+
         OpenWorld();
     }
 
@@ -111,6 +118,12 @@ public partial class GameViewModel : ViewModelBase
 
         WorldStatus = $"Open, in zone {session.ZoneState.ZoneNo}.";
 
+        // A window opened over a corpse. The health packet arrives in the
+        // burst the server sends at zone-in, long before this window existed,
+        // so someone who logs in dead - or reopens the world after closing it -
+        // gets no event to tell them there is a way up.
+        _world.ShowDeath(session.IsDead, session.HasRaiseOffer);
+
         // The renderer owns movement and reports where it ended up; the session
         // owns everything the server has to be told about it.
         _feeding = new CancellationTokenSource();
@@ -127,6 +140,19 @@ public partial class GameViewModel : ViewModelBase
                 while (_world?.TakeChat() is { Length: > 0 } typed)
                 {
                     await session.SayAsync(typed);
+                }
+
+                // Whichever button a dead character pressed. The renderer drew
+                // the choice; only this half has a socket to say it down.
+                switch (_world?.TakeDeathChoice())
+                {
+                    case NativeDeathChoice.HomePoint:
+                        await session.ReturnToHomePointAsync();
+                        break;
+
+                    case NativeDeathChoice.AcceptRaise:
+                        await session.AcceptRaiseAsync();
+                        break;
                 }
 
                 _world?.Publish(_tracker);
@@ -169,6 +195,18 @@ public partial class GameViewModel : ViewModelBase
         await _shell.Session.LogoutAsync();
         _shell.Status = "Left the world.";
     }
+
+    /// <summary>
+    /// Dying, and getting up again. The box is the renderer's to draw and the
+    /// session's to fill in - the renderer knows where the body is and nothing
+    /// about the state of it.
+    /// </summary>
+    private void OnDeathChanged(bool dead) =>
+        _world?.ShowDeath(dead, dead && _shell.Session.HasRaiseOffer);
+
+    /// <summary>Someone has cast Raise, which is what lights the second button.</summary>
+    private void OnRaiseOfferChanged(bool offered) =>
+        _world?.ShowDeath(_shell.Session.IsDead, offered);
 
     private void OnChat(FfxiChatLine line) => Dispatcher.UIThread.Post(() =>
     {

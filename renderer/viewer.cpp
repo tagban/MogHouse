@@ -2066,10 +2066,6 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     /// How many entity bodies the instance buffer currently holds.
     int drawnBodies = 0;
 
-    int plateShown = 0;
-    int plateHidden = 0;
-    int plateReport = -1;
-
     /// The Vana'diel clock in seconds, when the server has supplied one. Also
     /// gives the weekday, which is the same eight day cycle the game shows.
     uint64_t vanaSeconds = 0;
@@ -4034,10 +4030,8 @@ constexpr float kGravity = 26.0f;
                     // a handful of entities is a handful of rays.
                     if (collision.firstWallAlong(camera.eye(), mh::Vec3{entity.x, headY, entity.z}))
                     {
-                        ++plateHidden;
                         continue;
                     }
-                    ++plateShown;
 
                     plate.positions[named][0] = entity.x;
                     plate.positions[named][1] = headY;
@@ -4072,15 +4066,6 @@ constexpr float kGravity = 26.0f;
 
                     named = layOutPlate(plate, named, shown);
                 }
-
-                if (plateReport != plateHidden * 1000 + plateShown)
-                {
-                    plateReport = plateHidden * 1000 + plateShown;
-                    std::printf("plates: %d shown, %d hidden by walls, eye %.1f %.1f %.1f\n",
-                                plateShown, plateHidden, camera.eye().x, camera.eye().y, camera.eye().z);
-                }
-                plateShown = 0;
-                plateHidden = 0;
 
                 if (named > 0)
                 {
