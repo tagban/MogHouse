@@ -151,8 +151,15 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
 
     // Entities. Nearest wins, so a dot on top of another is still one dot
     // rather than a blend of two colours that reads as a third kind.
-    let dotRadius = range * 0.045;
-    var best = dotRadius;
+    // Smaller than they were, and ringed in black. A dot has to read as a
+    // dot against grass, stone, water and a dark interior, and size was doing
+    // the work an outline does better - two of them close together used to
+    // merge into one blob.
+    let dotRadius = range * 0.030;
+    let outlineRadius = dotRadius * 1.7;
+    // Searched to the outline rather than the fill, or the ring would be
+    // clipped to the dot it is meant to surround.
+    var best = outlineRadius;
     var dot = vec3<f32>(0.0);
     var found = false;
 
@@ -165,27 +172,38 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
             found = true;
             let kind = i32(entity.z);
             if (kind == 0) {
-                dot = vec3<f32>(0.36, 0.62, 1.00);   // player
+                dot = vec3<f32>(0.25, 0.62, 1.00);   // player
             } else if (kind == 2) {
                 dot = vec3<f32>(0.95, 0.26, 0.24);   // enemy
             } else {
-                dot = vec3<f32>(0.30, 0.85, 0.40);   // npc
+                dot = vec3<f32>(0.24, 0.92, 0.36);   // npc
             }
         }
     }
     if (found) {
-        // A dark rim, so a dot stays legible on ground of any colour.
-        let edge = smoothstep(dotRadius, dotRadius * 0.62, best);
-        colour = mix(colour * 0.25, dot, edge);
+        // Black first, then the colour inside it, so the ring is a ring rather
+        // than a darkening of whatever happens to be underneath.
+        let ring = smoothstep(outlineRadius, outlineRadius * 0.80, best);
+        colour = mix(colour, vec3<f32>(0.0, 0.0, 0.0), ring);
+        let fill = smoothstep(dotRadius, dotRadius * 0.65, best);
+        colour = mix(colour, dot, fill);
     }
 
     // Us, at the centre, with a notch showing which way we face. With the
     // map turning, that is always straight up - which is the point of it.
+    //
+    // Orange, and the only orange thing on the radar: at a glance the question
+    // is where am I, and a white dot among white range rings answers it more
+    // slowly than a colour nothing else uses.
     let facing = select(vec2<f32>(sin(heading), cos(heading)), vec2<f32>(0.0, 1.0), turning);
+    let self = vec3<f32>(1.00, 0.58, 0.13);
+    if (distance < 0.075) {
+        colour = mix(colour, vec3<f32>(0.0, 0.0, 0.0), smoothstep(0.075, 0.060, distance));
+    }
     if (distance < 0.055) {
-        colour = vec3<f32>(0.98, 0.98, 1.0);
+        colour = self;
     } else if (distance < 0.13 && dot2(normalize(offset), facing) > 0.86) {
-        colour = vec3<f32>(0.98, 0.98, 1.0);
+        colour = self;
     }
 
     // A rim around the whole thing, so it reads as an instrument rather than a

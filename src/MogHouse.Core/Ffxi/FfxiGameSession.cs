@@ -423,6 +423,7 @@ public sealed class FfxiGameSession : IDisposable
             if (id == FfxiZoneLoginReply.PacketId && size == FfxiZoneLoginReply.PacketSize)
             {
                 ZoneState = FfxiZoneLoginReply.Parse(reply.Plaintext.AsSpan(offset, size));
+                AdoptZoneMusic();
             }
         }
 
@@ -624,6 +625,31 @@ public sealed class FfxiGameSession : IDisposable
         }
     }
 
+    /// <summary>
+    /// Takes the tracks the zone login reply carries.
+    ///
+    /// Called from both ways of arriving somewhere. It used to be called from
+    /// the zone-change path alone, which is every arrival except the first
+    /// one - so logging straight into a zone left every slot at zero and the
+    /// client played nothing at all until you walked through a zone line.
+    /// </summary>
+    private void AdoptZoneMusic()
+    {
+        if (ZoneState?.Music is not { Count: > 1 } tracks)
+        {
+            return;
+        }
+
+        for (int slot = 0; slot < _musicSlots.Length && slot < tracks.Count; ++slot)
+        {
+            _musicSlots[slot] = tracks[slot];
+        }
+
+        Status?.Invoke($"music: day {tracks[0]}, night {tracks[1]}" +
+                       (tracks.Count > 4 ? $", mount {tracks[4]}" : ""));
+        MusicChanged?.Invoke(CurrentTrack);
+    }
+
     /// <summary>Vana'diel's hour, which decides day music from night.</summary>
     public int VanadielHour =>
         ZoneState is null ? 12 : (int)(((ulong)ZoneState.GameTime * 25 / 3600) % 24);
@@ -738,16 +764,7 @@ public sealed class FfxiGameSession : IDisposable
             // the zone we are now actually in.
             ZoneChanged?.Invoke(ZoneState.ZoneNo);
             _placementSuspended = false;
-            if (ZoneState.Music is { Count: > 1 } tracks)
-            {
-                for (int slot = 0; slot < _musicSlots.Length && slot < tracks.Count; ++slot)
-                {
-                    _musicSlots[slot] = tracks[slot];
-                }
-                Status?.Invoke($"music: day {tracks[0]}, night {tracks[1]}" +
-                               (tracks.Count > 4 ? $", mount {tracks[4]}" : ""));
-                MusicChanged?.Invoke(CurrentTrack);
-            }
+            AdoptZoneMusic();
 
             Status?.Invoke($"Now in zone {ZoneState.ZoneNo}.");
         }
