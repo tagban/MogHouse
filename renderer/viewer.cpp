@@ -2080,6 +2080,17 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     /// How many entity bodies the instance buffer currently holds.
     int drawnBodies = 0;
 
+    /// Where each entity is being drawn, as opposed to where it was last
+    /// reported.
+    ///
+    /// The server sends a position a few times a second and the tracker holds
+    /// the last one, so an entity moved in steps: still for four frames, a
+    /// jump on the fifth. At sixty frames a second that reads as a tape being
+    /// shuttled rather than as somebody walking. Easing towards the reported
+    /// position spreads each step over the frames between.
+    std::map<uint32_t, mh::Vec3> drawnAt;
+    float lastFrameSeconds = 0.0f;
+
     /// The Vana'diel clock in seconds, when the server has supplied one. Also
     /// gives the weekday, which is the same eight day cycle the game shows.
     uint64_t vanaSeconds = 0;
@@ -3304,6 +3315,59 @@ constexpr float kGravity = 26.0f;
         if (link)
         {
             radarEntities = link->entities();
+
+            // Eased towards where the server says they are.
+            //
+            // Done here, before anything reads a position, so the instance
+            // transforms, the nameplates and the walk/run decision all agree
+            // about where an entity is. The rate is per second and framerate
+            // independent; a step is caught up in about a tenth of a second,
+            // which is short enough not to lag behind a runner and long enough
+            // to fill the gaps between updates.
+            //
+            // A large jump is taken whole rather than glided through: that is
+            // a teleport, a zone line or a spawn, and sliding a body across a
+            // zone to meet it looks far stranger than the jump it replaces.
+            const float sinceLast = lastFrameSeconds > 0.0f
+                                        ? std::min(nowSeconds - lastFrameSeconds, 0.25f)
+                                        : 0.0f;
+            const float ease = 1.0f - std::exp(-12.0f * sinceLast);
+            for (mh::RadarEntity& entity : radarEntities)
+            {
+                auto found = drawnAt.find(entity.id);
+                if (found == drawnAt.end())
+                {
+                    drawnAt.emplace(entity.id, mh::Vec3{entity.x, entity.y, entity.z});
+                    continue;
+                }
+
+                mh::Vec3& at = found->second;
+                const float dx = entity.x - at.x;
+                const float dy = entity.y - at.y;
+                const float dz = entity.z - at.z;
+                if (dx * dx + dy * dy + dz * dz > 64.0f)
+                {
+                    at = mh::Vec3{entity.x, entity.y, entity.z};
+                    continue;
+                }
+
+                at.x += dx * ease;
+                at.y += dy * ease;
+                at.z += dz * ease;
+                entity.x = at.x;
+                entity.y = at.y;
+                entity.z = at.z;
+            }
+
+            // Anything that has gone is not worth remembering a position for.
+            for (auto it = drawnAt.begin(); it != drawnAt.end();)
+            {
+                const bool present = std::any_of(radarEntities.begin(), radarEntities.end(),
+                                                 [&](const mh::RadarEntity& e) { return e.id == it->first; });
+                it = present ? std::next(it) : drawnAt.erase(it);
+            }
+
+            lastFrameSeconds = nowSeconds;
 
             // Nearest first, so the ones that miss out are the ones furthest
             // away.
