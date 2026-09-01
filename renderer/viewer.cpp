@@ -265,6 +265,7 @@ struct ZoneLineUniforms
     float viewProjection[16]{};
     float counts[4]{};
     float lines[mh::kZoneLineMarkers][4]{};
+    float axes[mh::kZoneLineMarkers][4]{};
 };
 
 struct LoadedCharacter
@@ -2832,7 +2833,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         }
     };
 
-    auto placeCharacter = [&](const mh::Vec3& where, float search) {
+    auto placeCharacter = [&](const mh::Vec3& where, float search, bool settle = false) {
         // Copied, not referenced. Every caller so far happened to pass
         // characterAt itself, which made the aliasing invisible; the one that
         // does not - dropping the character at the camera - would have written
@@ -2847,11 +2848,92 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             // *down* is not - a position well clear of the ground is a request
             // to be in the air, and gravity is a better answer to that than a
             // teleport.
-            characterAt = target.y > ground->y + 1.0f ? mh::Vec3{ground->x, target.y, ground->z} : *ground;
+            //
+            // Unless the caller says to settle. A zone arrival is the one case
+            // where the height is not a request to be in the air: the server
+            // sends the zone line's own y, which sits above the floor often
+            // enough that arriving meant visibly dropping onto it.
+            characterAt = (!settle && target.y > ground->y + 1.0f)
+                              ? mh::Vec3{ground->x, target.y, ground->z}
+                              : *ground;
         }
         writeCharacterInstance();
     };
     placeCharacter(characterAt, 60.0f);
+
+    /// Which way a zone line lies, and how wide the opening is.
+    ///
+    /// A zone line is a doorway, and a doorway is a narrow place: walkable
+    /// ground runs freely along the way you are going and stops quickly to
+    /// either side. So the walkable span through the point is measured in
+    /// sixteen directions and the narrowest one wins - that is the opening,
+    /// and the band is laid across it.
+    ///
+    /// The alternative was to take the direction from the `scale` pair in the
+    /// zone's yaml, which describes the box at the *other* end of the line and
+    /// says nothing about this one.
+    ///
+    /// Cached per zone: it walks the collision a few hundred times per line,
+    /// which is nothing once and too much every frame.
+    const auto orientZoneLine = [&](const mh::ZoneLineMarker& line) -> mh::Vec3 {
+        constexpr int kDirections = 16;
+        constexpr float kProbeStep = 0.5f;
+        constexpr float kProbeReach = 12.0f;
+
+        if (collision.empty())
+        {
+            return {1.0f, 0.0f, line.radius};
+        }
+
+        float narrowest = 1e9f;
+        float axisX = 1.0f;
+        float axisZ = 0.0f;
+        for (int d = 0; d < kDirections; ++d)
+        {
+            const float angle = static_cast<float>(d) * 3.14159265f / static_cast<float>(kDirections);
+            const float dx = std::cos(angle);
+            const float dz = std::sin(angle);
+
+            float span = 0.0f;
+            for (int sign = -1; sign <= 1; sign += 2)
+            {
+                float height = line.y;
+                float reached = 0.0f;
+                for (float step = kProbeStep; step <= kProbeReach; step += kProbeStep)
+                {
+                    const float px = line.x + dx * step * static_cast<float>(sign);
+                    const float pz = line.z + dz * step * static_cast<float>(sign);
+                    const std::optional<float> ground =
+                        collision.groundAt(px, pz, height, 3.0f, mh::Collision::kDefaultStepUp);
+                    if (!ground)
+                    {
+                        break;
+                    }
+                    height = *ground;
+                    reached = step;
+                }
+                span += reached;
+            }
+
+            if (span < narrowest)
+            {
+                narrowest = span;
+                axisX = dx;
+                axisZ = dz;
+            }
+        }
+
+        // Floored so a line in a doorway barely wider than a character is still
+        // visible, and capped so one standing in open country does not become a
+        // wall across the horizon.
+        const float half = std::clamp(narrowest * 0.5f, 1.5f, 10.0f);
+        return {axisX, axisZ, half};
+    };
+
+    /// The measured axes, and the zone line list they were measured for.
+    std::vector<mh::Vec3> zoneLineAxes;
+    std::vector<mh::ZoneLineMarker> orientedFor;
+
     if (character)
     {
         std::printf("character stands at %.1f %.1f %.1f%s\n", characterAt.x, characterAt.y, characterAt.z,
@@ -4631,6 +4713,24 @@ constexpr float kGravity = 26.0f;
                         }
                     }
                 }
+                // Re-measured only when the list itself changes, which is
+                // once per zone.
+                if (orientedFor.size() != lines.size() ||
+                    !std::equal(lines.begin(), lines.end(), orientedFor.begin(),
+                                [](const mh::ZoneLineMarker& a, const mh::ZoneLineMarker& b) {
+                                    return a.x == b.x && a.y == b.y && a.z == b.z;
+                                }))
+                {
+                    orientedFor = lines;
+                    zoneLineAxes.clear();
+                    zoneLineAxes.reserve(lines.size());
+                    for (const mh::ZoneLineMarker& line : lines)
+                    {
+                        zoneLineAxes.push_back(orientZoneLine(line));
+                    }
+                    std::printf("measured %zu zone line openings\n", zoneLineAxes.size());
+                }
+
                 if (drawn > 0)
                 {
                     ZoneLineUniforms markers{};
@@ -4657,6 +4757,14 @@ constexpr float kGravity = 26.0f;
                         markers.lines[i][1] = lines[static_cast<size_t>(i)].y;
                         markers.lines[i][2] = lines[static_cast<size_t>(i)].z;
                         markers.lines[i][3] = lines[static_cast<size_t>(i)].radius;
+
+                        if (static_cast<size_t>(i) < zoneLineAxes.size())
+                        {
+                            markers.axes[i][0] = zoneLineAxes[static_cast<size_t>(i)].x;
+                            markers.axes[i][1] = zoneLineAxes[static_cast<size_t>(i)].y;
+                            markers.axes[i][2] = zoneLineAxes[static_cast<size_t>(i)].z;
+                            markers.axes[i][3] = 1.0f;
+                        }
                     }
 
                     queue.WriteBuffer(zoneLineUniformBuffer, 0, &markers, sizeof(markers));
@@ -5554,14 +5662,27 @@ constexpr float kGravity = 26.0f;
             currentZonePath = pending.datPath;
             currentZoneName = pending.zoneName;
             entityNames = ffxi::EntityNames{};
+            // And let them be looked up again. The table is loaded once, the
+            // first time an entity arrives, behind this latch - clearing the
+            // names without clearing the latch meant the new zone's table was
+            // never read, so every NPC after the first zone was nameless.
+            triedEntityNames = false;
             entityPoses.clear();
             radarEntities.clear();
+
+            // Built models are cached by look, and the cache had no end to it:
+            // every NPC and every creature ever drawn kept its geometry and its
+            // uploaded textures for the rest of the session. Nothing shared
+            // them across zones anyway - a zone's cast is its own - so holding
+            // them was paying memory for a hit rate of zero.
+            npcModels.clear();
+            creatureModels.clear();
 
             if (readZone() == 0)
             {
                 characterAt = {pending.x, pending.y, pending.z};
                 characterFacing = pending.heading;
-                placeCharacter(characterAt, 60.0f);
+                placeCharacter(characterAt, 60.0f, true);
                 breadcrumbs.clear();
                 std::printf("zoned into %s\n", pending.zoneName.c_str());
             }

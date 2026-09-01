@@ -3,6 +3,7 @@
 #include "viewer.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <optional>
 #include <string>
@@ -24,6 +25,43 @@ std::string borrowOr(const char* text, const char* fallback)
 {
     return text ? std::string{text} : std::string{fallback};
 }
+
+/// Sends this library's stdout and stderr to the file the app logs to.
+///
+/// The app is a windowed executable with no console, and redirecting
+/// Console.Out on the managed side does nothing for the C runtime in here -
+/// so every printf the renderer makes was being written to a handle that goes
+/// nowhere. Zone loads, texture counts, the reason a model failed to build:
+/// all of it existed and none of it was readable, which meant bugs in here
+/// could only be guessed at from what appeared on screen.
+///
+/// Appending rather than truncating, because the managed side owns the file
+/// and is already writing to it. Unbuffered, because the interesting lines are
+/// the ones printed just before something goes wrong.
+void redirectOutputToLog()
+{
+    static bool done = false;
+    if (done)
+    {
+        return;
+    }
+    done = true;
+
+    const char* path = std::getenv("MOGHOUSE_LOG");
+    if (!path || !*path)
+    {
+        return;
+    }
+    if (std::freopen(path, "a", stdout))
+    {
+        std::setvbuf(stdout, nullptr, _IONBF, 0);
+    }
+    if (std::freopen(path, "a", stderr))
+    {
+        std::setvbuf(stderr, nullptr, _IONBF, 0);
+    }
+    std::printf("renderer: output attached to the log\n");
+}
 } // namespace
 
 /// The options are copied at create time and the link outlives every call, so
@@ -43,6 +81,8 @@ MhViewerHandle mh_viewer_create(const MhViewerOptions* options)
     {
         return nullptr;
     }
+
+    redirectOutputToLog();
 
     auto* viewer = new MhViewer{};
     viewer->options.zonePath = borrowOr(options->zone_path, "");

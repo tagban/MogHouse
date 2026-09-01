@@ -354,12 +354,13 @@ public partial class GameViewModel : ViewModelBase
     /// <summary>
     /// How long a loading screen stays up however fast the zone reads.
     ///
-    /// Long enough to register as a deliberate screen rather than a flash of
-    /// something wrong, short enough not to be the slowest part of zoning -
-    /// swapping the zone inside the live window turned out to be quick enough
-    /// that the wait was the only thing left making it feel slow.
+    /// Zero. Swapping the zone inside the live window turned out to be quick
+    /// enough that a loading screen had nothing to cover - it was a delay
+    /// pretending to be work. The loading *state* is still tracked, because
+    /// position reporting has to stay quiet while the zone is being replaced,
+    /// but nothing waits on it any more.
     /// </summary>
-    private static readonly TimeSpan MinimumLoadingScreen = TimeSpan.FromMilliseconds(600);
+    private static readonly TimeSpan MinimumLoadingScreen = TimeSpan.Zero;
 
     /// <summary>Waits for the zone to land, and for the floor to pass.</summary>
     private async Task HoldLoadingScreen()
