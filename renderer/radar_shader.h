@@ -210,26 +210,36 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
         colour = mix(colour, dot, fill);
     }
 
-    // Us, at the centre, with a notch showing which way we face. With the
-    // map turning, that is always straight up - which is the point of it.
+    // Us, at the centre.
     //
-    // Orange, and the only orange thing on the radar: at a glance the question
-    // is where am I, and a white dot among white range rings answers it more
-    // slowly than a colour nothing else uses.
-    let facing = select(vec2<f32>(sin(heading), cos(heading)), vec2<f32>(0.0, 1.0), turning);
-    // Not `self`: that is a reserved word in WGSL, and naming a variable
-    // with one fails the whole module rather than the line - which takes the
+    // The same dot as everybody else, in the same size, ringed in black the
+    // same way: the question it answers is only "where am I on this map", and
+    // a marker larger than the things it sits among answers it no faster while
+    // covering them up.
+    //
+    // There was a notch here showing which way we face. With the map turning
+    // with the view that is always straight up, so it drew a constant; it said
+    // something only with the map held north-up, and not enough to earn the
+    // size. The compass letters carry the heading either way.
+    //
+    // The radius matches the entity dots exactly: theirs is measured in world
+    // units against a world distance, and radar space becomes world space by
+    // multiplying by `range`, so the same number here is the same size on
+    // screen.
+    //
+    // Orange, and the only orange thing on the radar: a white dot among white
+    // range rings is found more slowly than a colour nothing else uses.
+    //
+    // Not `self`: that is a reserved word in WGSL, and naming a variable with
+    // one fails the whole module rather than the line - which takes the
     // pipeline, and every pass that shares it, down to a black window. The
     // same trap as `target`, which cost an evening once already.
     let ownDot = vec3<f32>(1.00, 0.58, 0.13);
-    if (distance < 0.075) {
-        colour = mix(colour, vec3<f32>(0.0, 0.0, 0.0), smoothstep(0.075, 0.060, distance));
-    }
-    if (distance < 0.055) {
-        colour = ownDot;
-    } else if (distance < 0.13 && dot2(normalize(offset), facing) > 0.86) {
-        colour = ownDot;
-    }
+    let ownRadius = 0.030;
+    let ownOutline = ownRadius * 1.7;
+    colour = mix(colour, vec3<f32>(0.0, 0.0, 0.0),
+                 smoothstep(ownOutline, ownOutline * 0.80, distance));
+    colour = mix(colour, ownDot, smoothstep(ownRadius, ownRadius * 0.65, distance));
 
     // A rim around the whole thing, so it reads as an instrument rather than a
     // hole cut in the view.

@@ -402,6 +402,21 @@ public partial class GameViewModel : ViewModelBase
     {
         if (zone == _openZone)
         {
+            // A teleport inside the zone you are already standing in still
+            // arrives as a zone change: !goto and !bring both send you through
+            // the zone server even when the destination is the zone you are
+            // already in. There is nothing to load, but there is somewhere new
+            // to stand, and returning here without doing anything left the
+            // character exactly where they were - which is what made those two
+            // commands look like they did nothing at all.
+            //
+            // The entities are re-sent on the way in, the same as any zone
+            // change, so the old ones go.
+            _tracker.Clear();
+            FfxiGameSession here = _shell.Session;
+            _world?.PlaceCharacter(here.PosX, here.PosVertical, here.PosDepth, here.Facing);
+            Console.WriteLine(
+                $"moved inside zone {zone} to {here.PosX:F1} {here.PosVertical:F1} {here.PosDepth:F1}");
             return;
         }
 
