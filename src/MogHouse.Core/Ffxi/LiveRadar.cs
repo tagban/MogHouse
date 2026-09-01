@@ -208,6 +208,16 @@ public sealed class LiveRadar : IDisposable
         _viewer.SetDeath(dead, raiseOffered);
     }
 
+    /// <summary>The player's own hit points, magic and TP, for the world window.</summary>
+    public void ShowVitals(FfxiCharacterHealth health)
+    {
+        if (_closed)
+        {
+            return;
+        }
+        _viewer.SetVitals(health.Hp, health.Mp, health.Tp, health.HealthPercent, health.ManaPercent);
+    }
+
     /// <summary>
     /// What the player pressed in that box, or None. Consumed, so a press
     /// reaches the server once.

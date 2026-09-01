@@ -157,6 +157,15 @@ void mh_viewer_set_death(MhViewerHandle viewer, int32_t dead, int32_t raise_offe
     }
 }
 
+void mh_viewer_set_vitals(MhViewerHandle viewer, uint32_t hp, uint32_t mp, uint32_t tp,
+                          uint8_t hp_percent, uint8_t mp_percent)
+{
+    if (viewer)
+    {
+        viewer->link.setVitals(hp, mp, tp, hp_percent, mp_percent);
+    }
+}
+
 int32_t mh_viewer_take_death_choice(MhViewerHandle viewer)
 {
     return viewer ? static_cast<int32_t>(viewer->link.takeDeathChoice()) : MH_DEATH_NONE;

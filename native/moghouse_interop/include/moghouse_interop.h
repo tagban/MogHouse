@@ -172,6 +172,12 @@ enum
 /// the second.
 MH_API void mh_viewer_set_death(MhViewerHandle viewer, int32_t dead, int32_t raise_offered);
 
+/// The player's own HP, MP and TP, with the two percentages the server sends
+/// beside them. Drawn as a panel in the world window - without it, being dead
+/// is something you deduce from not being able to move.
+MH_API void mh_viewer_set_vitals(MhViewerHandle viewer, uint32_t hp, uint32_t mp, uint32_t tp,
+                                 uint8_t hp_percent, uint8_t mp_percent);
+
 /// What the player pressed there, as one of MH_DEATH_*, consumed by the read.
 /// Both answers are packets only the caller can send, the same way a jump is.
 MH_API int32_t mh_viewer_take_death_choice(MhViewerHandle viewer);

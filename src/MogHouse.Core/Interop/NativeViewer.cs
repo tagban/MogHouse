@@ -358,6 +358,20 @@ public sealed partial class NativeViewer : IDisposable
     public uint TakeTalk() => _disposed || _handle == IntPtr.Zero ? 0 : mh_viewer_take_talk(_handle);
 
     /// <summary>
+    /// The player's own HP, MP and TP, drawn as a panel in the world window.
+    ///
+    /// Without it the only sign of being dead is being unable to move, which
+    /// looks exactly like a client that has stopped responding.
+    /// </summary>
+    public void SetVitals(uint hp, uint mp, uint tp, byte hpPercent, byte mpPercent)
+    {
+        if (!_disposed && _handle != IntPtr.Zero)
+        {
+            mh_viewer_set_vitals(_handle, hp, mp, tp, hpPercent, mpPercent);
+        }
+    }
+
+    /// <summary>
     /// Whether the character is down, and whether a raise has been offered.
     /// The renderer draws its death box from these two and nothing else.
     /// </summary>
@@ -483,6 +497,10 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static partial void mh_viewer_set_death(IntPtr viewer, int dead, int raiseOffered);
+
+    [LibraryImport(LibraryName)]
+    private static partial void mh_viewer_set_vitals(IntPtr viewer, uint hp, uint mp, uint tp,
+                                                     byte hpPercent, byte mpPercent);
 
     [LibraryImport(LibraryName)]
     private static partial int mh_viewer_take_death_choice(IntPtr viewer);

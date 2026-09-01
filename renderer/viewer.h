@@ -352,6 +352,26 @@ public:
     /// so does the raise, so both are the client's answer - and together they
     /// are the whole of what the death box draws itself from.
     void setDeath(bool dead, bool raiseOffered);
+
+    /// The player's own hit points, magic and TP.
+    ///
+    /// Nothing on screen said whether a character was alive, which made being
+    /// dead something you worked out from not being able to move. The numbers
+    /// arrive in one packet - GP_SERV_COMMAND_GROUP_ATTR - and are pushed
+    /// straight through rather than kept anywhere clever.
+    void setVitals(uint32_t hp, uint32_t mp, uint32_t tp, uint8_t hpPercent, uint8_t mpPercent);
+
+    struct Vitals
+    {
+        uint32_t hp{};
+        uint32_t mp{};
+        uint32_t tp{};
+        uint8_t hpPercent{};
+        uint8_t mpPercent{};
+        bool known{};
+    };
+
+    Vitals vitals() const;
     bool dead(bool& raiseOffered) const;
 
     /// What the player pressed in that box, taken once.
@@ -380,6 +400,12 @@ private:
     // nothing the box would draw differently.
     std::atomic<bool> dead_{false};
     std::atomic<bool> raiseOffered_{false};
+    std::atomic<uint32_t> hp_{0};
+    std::atomic<uint32_t> mp_{0};
+    std::atomic<uint32_t> tp_{0};
+    std::atomic<uint8_t> hpPercent_{0};
+    std::atomic<uint8_t> mpPercent_{0};
+    std::atomic<bool> vitalsKnown_{false};
     std::atomic<int> deathChoice_{0};
 };
 

@@ -1513,6 +1513,11 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
                 break;
         }
 
+        if (session.Health is { } vitals)
+        {
+            radar?.ShowVitals(vitals);
+        }
+
         radar?.Publish(tracker);
 
             if (radar is not null && radar.Closed)

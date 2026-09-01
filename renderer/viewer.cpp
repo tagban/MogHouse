@@ -833,6 +833,21 @@ bool mh::ViewerLink::dead(bool& raiseOffered) const
     return dead_;
 }
 
+void mh::ViewerLink::setVitals(uint32_t hp, uint32_t mp, uint32_t tp, uint8_t hpPercent, uint8_t mpPercent)
+{
+    hp_ = hp;
+    mp_ = mp;
+    tp_ = tp;
+    hpPercent_ = hpPercent;
+    mpPercent_ = mpPercent;
+    vitalsKnown_ = true;
+}
+
+mh::ViewerLink::Vitals mh::ViewerLink::vitals() const
+{
+    return Vitals{hp_.load(), mp_.load(), tp_.load(), hpPercent_.load(), mpPercent_.load(), vitalsKnown_.load()};
+}
+
 void mh::ViewerLink::chooseDeath(DeathChoice choice) { deathChoice_ = static_cast<int>(choice); }
 
 /// Exchange rather than a read and a clear, for the same reason takeJump is.
@@ -4365,6 +4380,51 @@ constexpr float kGravity = 26.0f;
                     label("S", radarCentreX, southY, compass, kHudDim, 0.0f);
                     label("E", radarCentreX + ringX, radarCentreY - half, compass, kHudDim, 0.0f);
                     label("W", radarCentreX - ringX, radarCentreY - half, compass, kHudDim, 0.0f);
+                }
+
+                // HP, MP and TP, bottom left, above the chat log.
+                //
+                // The one thing the window never said was whether the player
+                // was alive. Being dead read as being unable to move, which is
+                // indistinguishable from a stuck client, and that is exactly
+                // how it was reported. The numbers come straight off
+                // GP_SERV_COMMAND_GROUP_ATTR; the percentages are the server's
+                // own, so a full bar means what the server thinks it means.
+                if (link)
+                {
+                    const mh::ViewerLink::Vitals vitals = link->vitals();
+                    if (vitals.known)
+                    {
+                        constexpr float kVitalScale = 0.75f;
+                        const float vitalLeft = -0.97f;
+                        float vitalY = -0.62f;
+
+                        // Red when it is low enough to matter, and plainly
+                        // different when it is zero - a corpse should not look
+                        // like a character on one hit point.
+                        const float kDead[3] = {1.00f, 0.35f, 0.35f};
+                        const float kHurt[3] = {1.00f, 0.78f, 0.42f};
+                        const bool dead = vitals.hp == 0;
+                        const float* hpTint = dead ? kDead : (vitals.hpPercent <= 25 ? kHurt : kHudBright);
+
+                        char row[48] = {};
+                        std::snprintf(row, sizeof(row), "HP %u  (%u%%)", vitals.hp, vitals.hpPercent);
+                        place(row, vitalLeft, vitalY, kVitalScale, hpTint, 0.55f, false);
+                        vitalY -= line * kVitalScale + gap * 0.4f;
+
+                        std::snprintf(row, sizeof(row), "MP %u  (%u%%)", vitals.mp, vitals.mpPercent);
+                        place(row, vitalLeft, vitalY, kVitalScale, kHudDim, 0.55f, false);
+                        vitalY -= line * kVitalScale + gap * 0.4f;
+
+                        std::snprintf(row, sizeof(row), "TP %u", vitals.tp);
+                        place(row, vitalLeft, vitalY, kVitalScale, kHudDim, 0.55f, false);
+
+                        if (dead)
+                        {
+                            vitalY -= line * kVitalScale + gap * 0.4f;
+                            place("DEAD", vitalLeft, vitalY, kVitalScale, kDead, 0.55f, false);
+                        }
+                    }
                 }
 
                 // The zone name, as a ribbon under the radar, with the position

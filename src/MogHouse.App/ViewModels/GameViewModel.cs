@@ -192,6 +192,14 @@ public partial class GameViewModel : ViewModelBase
                         break;
                 }
 
+                // Pushed rather than raised on change: hit points move
+                // constantly, and the panel wants the current number, not a
+                // notification that it moved.
+                if (session.Health is { } vitals)
+                {
+                    _world?.ShowVitals(vitals);
+                }
+
                 _world?.Publish(_tracker);
                 await Task.Delay(50, token).ConfigureAwait(false);
             }
