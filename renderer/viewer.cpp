@@ -2650,7 +2650,8 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     bool dragMoved = false;
 
     std::printf("wasd to walk, mouse drag to look, space to jump, wheel or numpad 9/3 to zoom,\n");
-    std::printf("shift to run, tab to orbit, p to print position, c to place the character,\n");
+    std::printf("shift to run, r to auto-run, tab to orbit, p to print position,\n");
+    std::printf("c to place the character,\n");
     std::printf("u to back up the trail if collision traps you, n for no collision,\n");
     std::printf("numpad 8/2 to move and 4/6 to turn, numpad minus to walk, shift to invert it,\n");
     std::printf("f to swap between driving the character and flying the camera,\n");
@@ -2849,6 +2850,11 @@ constexpr float kGravity = 26.0f;
     // so a moment of walking does not need a mode change and back.
     bool walkByDefault = false;
 
+    /// Keep going forward without holding the key. R toggles it, and anything
+    /// that means "stop" clears it: pressing back, or dying. Holding forward
+    /// while it is on is harmless - it is the same direction.
+    bool autoRun = false;
+
     // The death box, as the last frame left it.
     //
     // Immediate mode: the box is laid out while it is drawn and the rectangles
@@ -3046,6 +3052,11 @@ constexpr float kGravity = 26.0f;
                 else if (event.key.key == SDLK_TAB)
                 {
                     camera.orbiting = !camera.orbiting;
+                }
+                else if (event.key.key == SDLK_R)
+                {
+                    autoRun = !autoRun;
+                    std::printf(autoRun ? "auto-run on\n" : "auto-run off\n");
                 }
                 // Deliberately not gated on being dead.
                 //
@@ -3430,8 +3441,14 @@ constexpr float kGravity = 26.0f;
         // the character's shoulder - none of which stops mattering when you
         // die. Skipping the lot left the body frozen wherever it last stood
         // while the camera wandered off on its own.
-        const bool forward = !dead && (held[SDL_SCANCODE_W] || held[SDL_SCANCODE_KP_8]);
         const bool backward = !dead && (held[SDL_SCANCODE_S] || held[SDL_SCANCODE_KP_2]);
+
+        // Auto-run ends the moment you ask to go the other way, or die.
+        if (backward || dead)
+        {
+            autoRun = false;
+        }
+        const bool forward = !dead && (held[SDL_SCANCODE_W] || held[SDL_SCANCODE_KP_8] || autoRun);
 
         // 4 turns left and 6 turns right, from the character's point of view.
         //
