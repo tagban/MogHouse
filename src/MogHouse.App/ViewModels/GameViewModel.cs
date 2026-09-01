@@ -71,6 +71,9 @@ public partial class GameViewModel : ViewModelBase
         // Dying, and being offered a way back up. Both are pushed at the
         // renderer rather than shown here: the box belongs in the window the
         // character is lying in, not in a panel beside it.
+        // The zone's tune, and whatever the server changes it to.
+        shell.Session.MusicChanged += OnMusicChanged;
+
         // A GM teleport, a homepoint return, anything the server decides.
         // Without this the character stays where the renderer last drew them.
         shell.Session.MovedByServer += OnMovedByServer;
@@ -157,6 +160,9 @@ public partial class GameViewModel : ViewModelBase
         // so someone who logs in dead - or reopens the world after closing it -
         // gets no event to tell them there is a way up.
         _world.ShowDeath(session.IsDead, session.HasRaiseOffer);
+
+        // The world window is new; it has not heard the zone's music yet.
+        OnMusicChanged(session.CurrentTrack);
 
         // The renderer owns movement and reports where it ended up; the session
         // owns everything the server has to be told about it.
@@ -289,6 +295,24 @@ public partial class GameViewModel : ViewModelBase
     /// <summary>Someone has cast Raise, which is what lights the second button.</summary>
     private void OnRaiseOfferChanged(bool offered) =>
         _world?.ShowDeath(_shell.Session.IsDead, offered);
+
+    /// <summary>
+    /// The server sends a track number; the file it names has to be found.
+    ///
+    /// Which sound directory holds it is not fixed - the install spreads them
+    /// across sound, sound2 and so on as expansions were added - so this looks
+    /// rather than computes, and a track this install does not have goes
+    /// quiet rather than failing.
+    /// </summary>
+    private void OnMusicChanged(int track) => Dispatcher.UIThread.Post(() =>
+    {
+        string? path = FfxiMusicFile.Resolve(FfxiInstall.Find() ?? "", track);
+        if (path is null && track > 0)
+        {
+            _shell.Status = $"No file for music track {track}.";
+        }
+        _world?.ShowMusic(path);
+    });
 
     private void OnMovedByServer() => Dispatcher.UIThread.Post(() =>
     {

@@ -366,6 +366,17 @@ public sealed partial class NativeViewer : IDisposable
     public uint TakeTalk() => _disposed || _handle == IntPtr.Zero ? 0 : mh_viewer_take_talk(_handle);
 
     /// <summary>
+    /// The music file the zone wants, or null for silence.
+    /// </summary>
+    public void SetMusic(string? path)
+    {
+        if (!_disposed && _handle != IntPtr.Zero)
+        {
+            mh_viewer_set_music(_handle, path);
+        }
+    }
+
+    /// <summary>
     /// Which link the player clicked in the world window, or None.
     /// </summary>
     public NativeLink TakeLink() =>
@@ -518,6 +529,9 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static partial int mh_viewer_take_link(IntPtr viewer);
+
+    [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial void mh_viewer_set_music(IntPtr viewer, string? path);
 
     [LibraryImport(LibraryName)]
     private static partial int mh_viewer_take_death_choice(IntPtr viewer);

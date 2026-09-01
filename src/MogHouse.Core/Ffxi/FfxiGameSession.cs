@@ -590,6 +590,44 @@ public sealed class FfxiGameSession : IDisposable
     /// </summary>
     public event Action? MovedByServer;
 
+    /// <summary>
+    /// The track the zone wants, by slot. Filled from the zone login reply and
+    /// then kept current by GP_SERV_COMMAND_MUSIC.
+    /// </summary>
+    private readonly ushort[] _musicSlots = new ushort[8];
+
+    /// <summary>Raised when the music the zone wants has changed.</summary>
+    public event Action<int>? MusicChanged;
+
+    /// <summary>
+    /// Which track should be playing now.
+    ///
+    /// Day and night are separate slots and the server does not say which
+    /// applies - the client is expected to know the time, which it does. The
+    /// other slots are situations we do not model yet, so this is the zone's
+    /// tune and nothing else.
+    /// </summary>
+    public int CurrentTrack
+    {
+        get
+        {
+            bool night = VanadielHour is < 6 or >= 18;
+            ushort wanted = night ? _musicSlots[(int)FfxiMusicSlot.ZoneNight] : _musicSlots[(int)FfxiMusicSlot.ZoneDay];
+
+            // A zone with one tune leaves the other slot empty rather than
+            // repeating itself.
+            if (wanted == 0)
+            {
+                wanted = _musicSlots[(int)FfxiMusicSlot.ZoneDay];
+            }
+            return wanted;
+        }
+    }
+
+    /// <summary>Vana'diel's hour, which decides day music from night.</summary>
+    public int VanadielHour =>
+        ZoneState is null ? 12 : (int)(((ulong)ZoneState.GameTime * 25 / 3600) % 24);
+
     /// <summary>Raised when the server moves us to a different zone.</summary>
     public event Action<uint>? ZoneChanged;
 
@@ -702,8 +740,13 @@ public sealed class FfxiGameSession : IDisposable
             _placementSuspended = false;
             if (ZoneState.Music is { Count: > 1 } tracks)
             {
+                for (int slot = 0; slot < _musicSlots.Length && slot < tracks.Count; ++slot)
+                {
+                    _musicSlots[slot] = tracks[slot];
+                }
                 Status?.Invoke($"music: day {tracks[0]}, night {tracks[1]}" +
                                (tracks.Count > 4 ? $", mount {tracks[4]}" : ""));
+                MusicChanged?.Invoke(CurrentTrack);
             }
 
             Status?.Invoke($"Now in zone {ZoneState.ZoneNo}.");
@@ -926,6 +969,19 @@ public sealed class FfxiGameSession : IDisposable
             if (chat is not null && chat.Text.Length > 0)
             {
                 ChatReceived?.Invoke(new FfxiChatLine(DateTimeOffset.Now, chat.Kind, chat.Sender, chat.Text));
+            }
+
+            // The zone changing its mind about the music - a battle
+            // starting, night falling, stepping onto a chocobo.
+            FfxiMusicChange? tune = FfxiMusicChange.TryParse(reply.Plaintext.AsSpan(offset, size));
+            if (tune is not null && (int)tune.Slot < _musicSlots.Length)
+            {
+                int before = CurrentTrack;
+                _musicSlots[(int)tune.Slot] = tune.Track;
+                if (CurrentTrack != before)
+                {
+                    MusicChanged?.Invoke(CurrentTrack);
+                }
             }
 
             // Being put somewhere. GP_SERV_COMMAND_POS, which is what every

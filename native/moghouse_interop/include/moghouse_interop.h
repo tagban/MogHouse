@@ -183,6 +183,11 @@ MH_API void mh_viewer_set_vitals(MhViewerHandle viewer, uint32_t hp, uint32_t mp
 /// nothing about browsers, so opening it is the caller's job.
 MH_API int32_t mh_viewer_take_link(MhViewerHandle viewer);
 
+/// The .bgw the zone wants playing, or null for silence. The server sends a
+/// track number and the caller turns that into a path; the renderer owns the
+/// audio device because that is where SDL already is.
+MH_API void mh_viewer_set_music(MhViewerHandle viewer, const char* path);
+
 /// What the player pressed there, as one of MH_DEATH_*, consumed by the read.
 /// Both answers are packets only the caller can send, the same way a jump is.
 MH_API int32_t mh_viewer_take_death_choice(MhViewerHandle viewer);

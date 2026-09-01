@@ -36,6 +36,7 @@
 #include "scene.h"
 #include "surface.h"
 #include "sky_shader.h"
+#include "music.h"
 #include "water_shader.h"
 #include "zone_shader.h"
 #include "zonemesh.h"
@@ -940,6 +941,24 @@ void mh::ViewerLink::setVitals(uint32_t hp, uint32_t mp, uint32_t tp, uint8_t hp
 }
 
 void mh::ViewerLink::chooseLink(Link which) { link_ = static_cast<int>(which); }
+
+void mh::ViewerLink::setMusic(std::string path)
+{
+    std::lock_guard<std::mutex> held{musicLock_};
+    if (path != music_)
+    {
+        music_ = std::move(path);
+        musicChanged_ = true;
+    }
+}
+
+std::string mh::ViewerLink::takeMusic(bool& changed)
+{
+    std::lock_guard<std::mutex> held{musicLock_};
+    changed = musicChanged_;
+    musicChanged_ = false;
+    return music_;
+}
 
 mh::ViewerLink::Link mh::ViewerLink::takeLink()
 {
@@ -2739,6 +2758,14 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     SDL_Cursor* arrowCursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
     SDL_Cursor* handCursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_POINTER);
 
+    // The zone's music. Opened here rather than at startup so a client
+    // that cannot make a sound still draws.
+    mh::Music music;
+    if (const char* volume = std::getenv("MOGHOUSE_MUSIC_VOLUME"))
+    {
+        music.setVolume(static_cast<float>(std::atof(volume)));
+    }
+
     bool dragging = false;
 
     /// Whether the pointer moved between press and release. A drag turns the
@@ -3964,6 +3991,15 @@ constexpr float kGravity = 26.0f;
 
                 std::printf("placed at %.1f %.1f %.1f facing %.0f degrees\n", characterAt.x, characterAt.y,
                             characterAt.z, characterFacing * 180.0f / 3.14159265f);
+            }
+
+            // Whatever the server last asked for. Checked every frame rather
+            // than pushed, because the link is what the session can reach.
+            bool musicChanged = false;
+            const std::string wantedMusic = link->takeMusic(musicChanged);
+            if (musicChanged)
+            {
+                music.play(wantedMusic);
             }
 
             link->setCharacter(characterAt.x, characterAt.y, characterAt.z, characterFacing);

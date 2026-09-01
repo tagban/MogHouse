@@ -30,6 +30,7 @@ endif()
 # C# client has to be able to load this rather than talk to a second
 # executable over a socket - see renderer/viewer.h.
 add_library(moghouse-render STATIC
+    music.cpp
     character.cpp
     collision.cpp
     scene.cpp
@@ -71,6 +72,7 @@ endif()
 # neither Dawn nor SDL, so it builds fast and can be checked against the python
 # in tools/ that was validated across every zone in ROM/1.
 add_library(ffxi-dat STATIC
+    ffxi/bgw.cpp
     ffxi/dat.cpp
     ffxi/filetable.cpp
     ffxi/lighting.cpp

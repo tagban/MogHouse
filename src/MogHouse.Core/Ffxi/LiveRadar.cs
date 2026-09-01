@@ -208,6 +208,15 @@ public sealed class LiveRadar : IDisposable
         _viewer.SetDeath(dead, raiseOffered);
     }
 
+    /// <summary>The music file the zone wants, or null for silence.</summary>
+    public void ShowMusic(string? path)
+    {
+        if (!_closed)
+        {
+            _viewer.SetMusic(path);
+        }
+    }
+
     /// <summary>Which link the player clicked in the world window, or None.</summary>
     public NativeLink TakeLink() => _closed ? NativeLink.None : _viewer.TakeLink();
 

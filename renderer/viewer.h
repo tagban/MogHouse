@@ -380,6 +380,11 @@ public:
     };
 
     void chooseLink(Link which);
+
+    /// The .bgw the zone wants playing, or empty for silence. Set from the
+    /// session, which is the half that hears the server say so.
+    void setMusic(std::string path);
+    std::string takeMusic(bool& changed);
     Link takeLink();
 
     struct Vitals
@@ -428,6 +433,9 @@ private:
     std::atomic<uint8_t> mpPercent_{0};
     std::atomic<bool> vitalsKnown_{false};
     std::atomic<int> link_{0};
+    mutable std::mutex musicLock_;
+    std::string music_;
+    bool musicChanged_{false};
     std::atomic<int> deathChoice_{0};
 };
 

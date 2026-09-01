@@ -166,6 +166,14 @@ void mh_viewer_set_vitals(MhViewerHandle viewer, uint32_t hp, uint32_t mp, uint3
     }
 }
 
+void mh_viewer_set_music(MhViewerHandle viewer, const char* path)
+{
+    if (viewer)
+    {
+        viewer->link.setMusic(path ? std::string{path} : std::string{});
+    }
+}
+
 int32_t mh_viewer_take_link(MhViewerHandle viewer)
 {
     return viewer ? static_cast<int32_t>(viewer->link.takeLink()) : 0;
