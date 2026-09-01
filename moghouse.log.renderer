@@ -65,3 +65,5 @@ skipping 2x1 compressed texture: not whole 4x4 blocks
 creature model built: id 50 -> file 1350
 character: 97 bones, 5 meshes, 2044 triangles, 1.67 tall, 130 animations
 NPC model built: race 2 0/20/20/20/20
+music volume 10%
+music volume 5%

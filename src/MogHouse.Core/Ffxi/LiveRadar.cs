@@ -49,8 +49,16 @@ public sealed class LiveRadar : IDisposable
             return configured;
         }
 
-        string beside = Path.Combine(AppContext.BaseDirectory, "keys", fileName);
-        return File.Exists(beside) ? beside : "";
+        foreach (string folder in new[] { "keys", Path.Combine("data", "keys") })
+        {
+            string beside = Path.Combine(AppContext.BaseDirectory, folder, fileName);
+            if (File.Exists(beside))
+            {
+                return beside;
+            }
+        }
+
+        return "";
     }
 
     public static LiveRadar? Open(int zoneId, float x, float vertical, float depth, uint serverClock = 0,

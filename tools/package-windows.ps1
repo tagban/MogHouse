@@ -3,31 +3,40 @@
     Builds a MogHouse alpha someone else can unzip and run.
 
 .DESCRIPTION
-    The goal is a folder with no install step: unzip, run the exe, type in a
-    server address. Everything the client needs travels with it except the
-    game itself, which the player already has.
+    The goal is a folder someone opens and understands: one executable, their
+    own settings beside it, and everything else out of the way.
 
-    What ships, and why:
+        MogHouse XI.exe          what you run
+        moghouse-settings.json   volume, draw distance - written on first run
+        ffxi-server-profiles.json  the servers you have added
+        ffxi-install.json        where you told it the game is
+        README.txt
+        data\                    hidden; the runtime and its files
 
-      MogHouse.App.exe and the .NET runtime beside it
-          Self-contained on purpose. A tester who has to install .NET 10 first
-          is a tester who does not test tonight.
+    Everything the client needs travels with it except the game itself, which
+    the player already has.
+
+    In data\:
+
+      MogHouse XI.exe is published as a single file, so the .NET runtime and
+      every managed library are inside it rather than beside it. Self-contained
+      on purpose: a tester who has to install .NET 10 first is a tester who
+      does not test tonight.
 
       moghouse_interop.dll, SDL3.dll
           The renderer. Dawn is linked into the first of those, so there is no
-          third library to lose. They sit beside the exe because that is the
-          first place the loader looks.
+          third library to lose. These cannot go inside the single file,
+          because the renderer looks for its own assets beside whichever
+          directory the library was loaded from - so they live in data\ and
+          the assets live with them.
 
       assets\  - the glyph atlas, the interior table, and the water
-          The renderer finds these beside whatever loaded it.
-
-      res\     - compress.dat and decompress.dat
-          The protocol's Huffman tables. Required: without them the client
-          cannot talk to any server at all. They are not in a retail install;
-          they come from LandSandBoat's own res directory.
-
-      keys\    - the MZB and MMB key tables
-          Without these no zone can be decrypted, so nothing is drawn.
+      res\     - compress.dat and decompress.dat, the protocol's Huffman
+                 tables. Required: without them the client cannot talk to any
+                 server. Not in a retail install; they come from
+                 LandSandBoat's own res directory.
+      keys\    - the MZB and MMB key tables. Without these no zone decrypts.
+      zones\   - zone lines, if -ZoneData was given.
 
     What does not ship:
 
@@ -35,10 +44,6 @@
 
       The navmeshes - 422MB, and they only feed the launcher's flat map. The
       world's own collision comes from the DATs, so movement is unaffected.
-
-      The zone data, unless -ZoneData is given. 34MB, and all it buys is zone
-      lines: without it, walking to the edge of a zone does nothing and you
-      change zones with a command instead.
 
 .EXAMPLE
     pwsh tools\package-windows.ps1 -Version 0.1.2
@@ -110,20 +115,37 @@ Step "Publishing the client"
 if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $staging | Out-Null
 
+# Into data\ first. Single file, so this produces one executable and a handful
+# of native libraries rather than two hundred assemblies; the executable is
+# then moved up to where the player will look for it, and everything it needs
+# stays down here.
+$data = Join-Path $staging "data"
+New-Item -ItemType Directory -Force -Path $data | Out-Null
+
 dotnet publish (Join-Path $root "src\MogHouse.App\MogHouse.App.csproj") `
     -c Release -r win-x64 --self-contained true `
+    -p:PublishSingleFile=true `
+    -p:IncludeNativeLibrariesForSelfExtract=true `
+    -p:EnableCompressionInSingleFile=true `
     -p:DebugType=none -p:GenerateDocumentationFile=false `
-    -o $staging --nologo -v quiet
+    -o $data --nologo -v quiet
 if ($LASTEXITCODE -ne 0) { throw "The client did not publish." }
+
+# Debug symbols are not worth 80MB to someone who cannot read them.
+Get-ChildItem $data -Filter *.pdb -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force
+
+$exe = Join-Path $data "MogHouse XI.exe"
+if (-not (Test-Path $exe)) { throw "The published executable is not where it was expected: $exe" }
+Move-Item $exe (Join-Path $staging "MogHouse XI.exe") -Force
 
 # --- everything it needs beside it -------------------------------------------
 
 Step "Copying the renderer"
-Copy-Item (Join-Path $native "moghouse_interop.dll") $staging -Force
-Copy-Item (Join-Path $native "SDL3.dll") $staging -Force
+Copy-Item (Join-Path $native "moghouse_interop.dll") $data -Force
+Copy-Item (Join-Path $native "SDL3.dll") $data -Force
 
 Step "Copying assets"
-$assets = Join-Path $staging "assets"
+$assets = Join-Path $data "assets"
 New-Item -ItemType Directory -Force -Path $assets | Out-Null
 Copy-Item (Join-Path $root "renderer\assets\font.*") $assets -Force
 Copy-Item (Join-Path $root "renderer\assets\subrooms.txt") $assets -Force
@@ -143,12 +165,12 @@ if ($NoWater) {
 }
 
 Step "Copying the key tables"
-$keys = Join-Path $staging "keys"
+$keys = Join-Path $data "keys"
 New-Item -ItemType Directory -Force -Path $keys | Out-Null
 Copy-Item (Join-Path $root "keys\*.bin") $keys -Force
 
 Step "Copying the compression tables"
-$resOut = Join-Path $staging "res"
+$resOut = Join-Path $data "res"
 New-Item -ItemType Directory -Force -Path $resOut | Out-Null
 foreach ($table in @("compress.dat", "decompress.dat")) {
     $from = Join-Path $Res $table
@@ -161,7 +183,7 @@ foreach ($table in @("compress.dat", "decompress.dat")) {
 if ($ZoneData) {
     Step "Copying zone data"
     if (-not (Test-Path $ZoneData)) { throw "No zone data at $ZoneData." }
-    $zonesOut = Join-Path $staging "zones"
+    $zonesOut = Join-Path $data "zones"
     Copy-Item $ZoneData $zonesOut -Recurse -Force
     Write-Host "    $((Get-ChildItem $zonesOut -Directory).Count) zones"
 } else {
@@ -192,11 +214,17 @@ Running it
 
   1. Unzip anywhere. There is no installer and nothing is written outside this
      folder.
-  2. Run MogHouse.App.exe.
-  3. Enter your server's address, then log in.
+  2. Run "MogHouse XI.exe".
+  3. Confirm where the game is, enter your server's address, then log in.
+
+The data folder beside it holds the renderer and the files it reads. Nothing
+in there needs touching, which is why it is hidden; delete the whole folder to
+remove the client completely.
 
 Settings live in moghouse-settings.json beside the exe, and the servers you
-add live beside that. Deleting the folder removes the client completely.
+add live beside that. Both are plain text and safe to edit while the client is
+closed. bodyDrawDistance is the one worth knowing: 0 draws every character the
+client can, and a smaller number is how a machine short of headroom keeps up.
 
 Controls
 --------
@@ -230,6 +258,12 @@ the GitHub issues page. There is a Discord link beside it.
 "@ | Set-Content (Join-Path $staging "README.txt") -Encoding utf8
 
 # --- zip ---------------------------------------------------------------------
+
+# data\ is deliberately *not* hidden here. Twice wrong if it is:
+# Compress-Archive silently skips hidden folders, so the zip came out holding
+# an executable and a README and nothing else - and a zip carries no Windows
+# attributes anyway, so it would not have arrived hidden regardless. The client
+# hides the folder itself on first run, where it actually sticks.
 
 Step "Compressing"
 if (Test-Path $zip) { Remove-Item $zip -Force }

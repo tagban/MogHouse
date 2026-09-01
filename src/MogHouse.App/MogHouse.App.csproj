@@ -6,6 +6,10 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- The taskbar and the .exe itself. -->
     <ApplicationIcon>Assets\moghouse.ico</ApplicationIcon>
+
+    <!-- What the player double-clicks. The assembly keeps its dotted name so
+         namespaces and the build are unaffected; only the file is renamed. -->
+    <AssemblyName>MogHouse XI</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>

@@ -12,6 +12,7 @@ sealed class Program
     public static void Main(string[] args)
     {
         StartLogging();
+        HideRuntimeFolder();
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 
@@ -28,6 +29,40 @@ sealed class Program
     /// MOGHOUSE_LOG=path writes it down instead. Unbuffered, because the
     /// interesting case is a client that stopped.
     /// </summary>
+    /// <summary>
+    /// Marks the runtime folder hidden, so the folder a player opens holds an
+    /// executable, their own settings and a README rather than the several
+    /// hundred files underneath.
+    ///
+    /// Done here rather than when the package is built, for two reasons: a zip
+    /// carries no Windows attributes, so it would not survive the trip; and
+    /// Compress-Archive silently skips hidden folders, so setting it before
+    /// zipping produced an archive with the runtime missing entirely.
+    ///
+    /// Best effort. A folder that will not take the attribute is untidy, not
+    /// broken, and a development checkout has no such folder at all.
+    /// </summary>
+    private static void HideRuntimeFolder()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        try
+        {
+            var runtime = new System.IO.DirectoryInfo(
+                System.IO.Path.Combine(AppContext.BaseDirectory, "data"));
+            if (runtime.Exists && !runtime.Attributes.HasFlag(System.IO.FileAttributes.Hidden))
+            {
+                runtime.Attributes |= System.IO.FileAttributes.Hidden;
+            }
+        }
+        catch (Exception)
+        {
+        }
+    }
+
     private static void StartLogging()
     {
         string? path = Environment.GetEnvironmentVariable("MOGHOUSE_LOG");

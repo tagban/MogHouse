@@ -139,8 +139,16 @@ public partial class MainViewModel : ViewModelBase
             return configured;
         }
 
-        string beside = Path.Combine(AppContext.BaseDirectory, folder);
-        return Directory.Exists(beside) ? beside : null;
+        foreach (string root in new[] { AppContext.BaseDirectory, Path.Combine(AppContext.BaseDirectory, "data") })
+        {
+            string beside = Path.Combine(root, folder);
+            if (Directory.Exists(beside))
+            {
+                return beside;
+            }
+        }
+
+        return null;
     }
 
     public void Navigate(ViewModelBase page) => CurrentPage = page;

@@ -247,6 +247,7 @@ public sealed class FfxiHuffmanTables
 
         string baseDirectory = AppContext.BaseDirectory;
         yield return Path.Combine(baseDirectory, "res");
+        yield return Path.Combine(baseDirectory, "data", "res");
         yield return Path.Combine(baseDirectory, "PlayonlineAssets", "res");
         yield return Path.Combine(baseDirectory, "..", "Playonline Assets", "res");
     }

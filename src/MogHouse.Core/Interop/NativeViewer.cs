@@ -243,6 +243,14 @@ public sealed partial class NativeViewer : IDisposable
 
         yield return AppContext.BaseDirectory;
 
+        // A packaged build keeps the runtime out of sight in data\, so the
+        // folder a player opens holds an executable and their settings rather
+        // than two hundred files they must not touch. The renderer's assets
+        // travel with the library - they are looked up beside whatever loaded
+        // it - so putting the library here puts the atlas, the interior table
+        // and the water here too.
+        yield return Path.Combine(AppContext.BaseDirectory, "data");
+
         // The development layout: the renderer builds into build-renderer at
         // the repository root, which is several levels above bin/Debug/net10.0.
         string? walk = AppContext.BaseDirectory;
