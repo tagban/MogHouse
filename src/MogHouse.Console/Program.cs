@@ -1067,6 +1067,14 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
             await session.ConnectToZoneAsync(selected, login.SessionHash, profile.Host);
             break;
         }
+        catch (InvalidOperationException) when (attempt < 15)
+        {
+            // The zone server not answering is the same situation wearing a
+            // different exception: the session is still being torn down and
+            // the handover lands in the gap. Worth the same patience.
+            Console.WriteLine("  the zone server did not answer; waiting and trying again...");
+            await Task.Delay(TimeSpan.FromSeconds(10));
+        }
         catch (FfxiLoginErrorException e) when (e.Code == 201 && attempt < 15)
         {
             Console.WriteLine($"  {selected.Name} is still logged in on the server; waiting for it to clear...");
@@ -1123,7 +1131,17 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
         return 1;
     }
 
-    session.ChatReceived += line => radar?.Say(line.Sender, line.Text);
+    session.ChatReceived += line =>
+    {
+        // To the terminal as well as the window. Anything driving this
+        // without a person watching the window - a scripted /talk, a test -
+        // otherwise cannot tell the difference between an NPC that said
+        // nothing and one that was never asked.
+        Console.WriteLine(string.IsNullOrEmpty(line.Sender)
+                              ? $"  chat: {line.Text}"
+                              : $"  chat: {line.Sender}: {line.Text}");
+        radar?.Say(line.Sender, line.Text);
+    };
 
     // Dying is a decision, not just a state. FFXI gives a dead character
     // the choice of going to their home point or waiting for someone to
@@ -1245,43 +1263,35 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
         ShowDeathPrompt();
     }
 
-    // Lines to send once we are in, as if they had been typed.
+    // Lines to run once we are in, as if they had been typed.
     //
-    // Everything the client can be told to do goes through the chat box,
-    // and the chat box only exists inside the renderer's window - so
-    // anything driving this without a person at the keyboard has no way to
-    // say `!zone 100` or `!godmode`. Semicolons separate them; they go out
-    // a second apart so the server is not answering three things at once.
+    // Everything the client can be told to do goes through the chat box, and
+    // the chat box only exists inside the renderer's window - so anything
+    // driving this without a person at the keyboard has no way to say
+    // `!zone 100` or `/talk`. Semicolons separate them; they are queued a
+    // second apart so the server is not answering three things at once, and
+    // they go through the same switch a typed line does.
+    var scripted = new System.Collections.Concurrent.ConcurrentQueue<string>();
     if (flags.TryGetValue("say", out string? script) && script.Length > 0)
     {
         _ = Task.Run(async () =>
         {
             foreach (string line in script.Split(';', StringSplitOptions.RemoveEmptyEntries))
             {
-                await Task.Delay(TimeSpan.FromSeconds(1));
+                // Long enough for the zone's entities to have arrived.
+                // A second was not: /talk ran before anyone was in the list
+                // and quietly found nobody.
+                await Task.Delay(TimeSpan.FromSeconds(4));
                 string typed = line.Trim();
-                if (typed.Length == 0)
+                if (typed.Length > 0)
                 {
-                    continue;
-                }
-
-                Console.WriteLine($"  saying: {typed}");
-                FfxiClientCommand parsed = FfxiClientCommands.Parse(typed);
-                if (parsed.Kind == FfxiClientCommandKind.None)
-                {
-                    await session.SayAsync(typed);
-                }
-                else if (parsed.Kind == FfxiClientCommandKind.Chat)
-                {
-                    await session.SayAsync(parsed.Rest, parsed.Channel);
+                    Console.WriteLine($"  saying: {typed}");
+                    scripted.Enqueue(typed);
                 }
             }
         });
     }
 
-    // What the zone wants playing. Nothing plays it yet - see the music
-    // slots on the login reply - but knowing which track a zone asks for is
-    // the half of the problem that is not a codec.
     if (session.ZoneState?.Music is { Count: > 1 } opening)
     {
         string? track = FfxiMusicFile.Resolve(FfxiFileTable.DefaultInstallRoot(), opening[0]);
@@ -1324,7 +1334,19 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
                 session.PlaceAt(x, vertical, depth, direction);
             }
 
-            while (radar?.TakeChat() is { Length: > 0 } typed)
+            // Typed and scripted lines are the same thing.
+            //
+            // --say used to handle a couple of kinds itself and silently drop
+            // the rest, so /talk went out and nothing happened. Anything that
+            // can be typed should behave identically when it is scripted,
+            // which means one queue and one switch rather than two.
+            string? next = radar?.TakeChat();
+            if (string.IsNullOrEmpty(next) && scripted.TryDequeue(out string? fromScript))
+            {
+                next = fromScript;
+            }
+
+            while (next is { Length: > 0 } typed)
             {
                 // The client's own commands never reach the server as chat.
                 FfxiClientCommand command = FfxiClientCommands.Parse(typed);
@@ -1341,6 +1363,47 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
                         await session.LogoutAsync(FfxiLogoutKind.Shutdown);
                         leaving = true;
                         break;
+
+                    case FfxiClientCommandKind.Talk:
+                    {
+                        // The nearest NPC, or the nearest whose name contains
+                        // what was typed. Pressing E does the same thing from
+                        // the renderer; this is the version that works without
+                        // a keyboard, which is what makes it testable.
+                        var near = tracker.Visible(DateTimeOffset.UtcNow)
+                            .Where(e => e.Kind != FfxiEntityKind.Player && !e.Hidden)
+                            .Where(e => command.Rest.Length == 0 ||
+                                        (e.Name ?? "").Contains(command.Rest, StringComparison.OrdinalIgnoreCase))
+                            .OrderBy(e => (e.X - session.PosX) * (e.X - session.PosX) +
+                                          (e.Depth - session.PosDepth) * (e.Depth - session.PosDepth))
+                            .FirstOrDefault();
+
+                        if (near is null)
+                        {
+                            Console.WriteLine("  nobody in range to talk to.");
+                            radar?.Say("", "Nobody here to talk to.");
+                            break;
+                        }
+
+                        // Six units, which is the server's rule:
+                        // 0x01a_action.cpp refuses a trigger beyond
+                        // `distance(PNpc->loc.p, PChar->loc.p) <= 6.0f` and
+                        // says nothing about it, so a client that does not
+                        // check looks like one whose NPCs are mute.
+                        double away = Math.Sqrt((near.X - session.PosX) * (near.X - session.PosX) +
+                                                (near.Depth - session.PosDepth) * (near.Depth - session.PosDepth));
+                        Console.WriteLine($"  {near.Name ?? "?"} ({near.UniqueNo:X8}) is {away:F1} away" +
+                                          $" at {near.X:F1} {near.Vertical:F1} {near.Depth:F1}");
+
+                        if (away > 6.0)
+                        {
+                            radar?.Say("", $"Too far away to talk - {away:F0} units, and six is the limit.");
+                            break;
+                        }
+
+                        await session.TalkToAsync(near.UniqueNo, near.ActIndex);
+                        break;
+                    }
 
                     case FfxiClientCommandKind.HomePoint:
                         radar?.Say("", "Returning to your home point...");
@@ -1370,6 +1433,12 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
                     default:
                         await session.SayAsync(typed);
                         break;
+                }
+
+                next = radar?.TakeChat();
+                if (string.IsNullOrEmpty(next) && scripted.TryDequeue(out string? another))
+                {
+                    next = another;
                 }
             }
 

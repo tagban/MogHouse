@@ -18,6 +18,9 @@ public enum FfxiClientCommandKind
     /// <summary>Say something to one person.</summary>
     Tell,
 
+    /// <summary>Talk to the nearest NPC, or one named after the command.</summary>
+    Talk,
+
     /// <summary>Accept the home point after dying.</summary>
     HomePoint,
 
@@ -71,6 +74,7 @@ public static class FfxiClientCommands
             "logout" => new FfxiClientCommand(FfxiClientCommandKind.Logout, name, rest),
             "shutdown" or "quit" => new FfxiClientCommand(FfxiClientCommandKind.Shutdown, name, rest),
             "homepoint" or "hp" or "return" => new FfxiClientCommand(FfxiClientCommandKind.HomePoint, name, rest),
+            "talk" or "trigger" => new FfxiClientCommand(FfxiClientCommandKind.Talk, name, rest),
 
             // The channels, under the names the real client answers to. Every
             // one has a short form because nobody types /linkshell twice.
