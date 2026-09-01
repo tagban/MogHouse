@@ -8,6 +8,14 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# As a Windows path. Path conversion is turned off below so slash commands
+# survive as arguments, and that also stops these being converted - which
+# left the renderer unable to open its key tables from /c/Users/... and
+# closing its window the moment it opened.
+if command -v cygpath >/dev/null 2>&1; then
+    here="$(cygpath -m "$here")"
+fi
+
 : "${MOGHOUSE_FFXI_RES:=C:/Users/Gaming/Desktop/LandSandBoat/res}"
 : "${MOGHOUSE_FFXI_KEYTABLE:=$here/keys/mzb_key_table.bin}"
 : "${MOGHOUSE_FFXI_KEYTABLE2:=$here/keys/mmb_key_table2.bin}"
@@ -25,5 +33,11 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 export MOGHOUSE_FFXI_RES MOGHOUSE_FFXI_KEYTABLE MOGHOUSE_FFXI_KEYTABLE2 MOGHOUSE_FONT
 export MOGHOUSE_FFXI_ZONEDATA MOGHOUSE_FFXI_NAVMESHES
+
+# Git Bash rewrites an argument that looks like a Unix path into a Windows one,
+# so `--say /talk` arrives as `C:/Program Files/Git/talk` and the client says
+# that instead of running the command. Every slash command would hit this.
+export MSYS_NO_PATHCONV=1
+export MSYS2_ARG_CONV_EXCL="*"
 
 exec "$here/src/MogHouse.Console/bin/Debug/net10.0/MogHouse.Console.exe" "$@"
