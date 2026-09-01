@@ -16,7 +16,8 @@ namespace mh
 /// natively, which is the whole reason DXT3 assets are cheap to load.
 inline wgpu::Texture uploadTexture(const wgpu::Device& device, const ffxi::Texture& source)
 {
-    const bool compressed = source.format == ffxi::TextureFormat::Bc2;
+    const bool dxt1 = source.format == ffxi::TextureFormat::Bc1;
+    const bool compressed = dxt1 || source.format == ffxi::TextureFormat::Bc2;
 
     // A block-compressed texture has to be a whole number of 4x4 blocks.
     //
@@ -38,7 +39,9 @@ inline wgpu::Texture uploadTexture(const wgpu::Device& device, const ffxi::Textu
     descriptor.usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst;
     descriptor.dimension = wgpu::TextureDimension::e2D;
     descriptor.size = {source.width, source.height, 1};
-    descriptor.format = compressed ? wgpu::TextureFormat::BC2RGBAUnorm : wgpu::TextureFormat::RGBA8Unorm;
+    descriptor.format = dxt1    ? wgpu::TextureFormat::BC1RGBAUnorm
+                        : compressed ? wgpu::TextureFormat::BC2RGBAUnorm
+                                     : wgpu::TextureFormat::RGBA8Unorm;
     descriptor.mipLevelCount = 1;
     descriptor.sampleCount = 1;
 
@@ -52,9 +55,12 @@ inline wgpu::Texture uploadTexture(const wgpu::Device& device, const ffxi::Textu
     destination.texture = texture;
 
     wgpu::TexelCopyBufferLayout layout{};
-    // BC2 packs a 4x4 block into 16 bytes, so a row of blocks covers four rows
-    // of pixels and there are width/4 blocks across.
-    layout.bytesPerRow = compressed ? (source.width / 4) * 16 : source.width * 4;
+    // A block covers 4x4 pixels either way, so a row of blocks covers four rows
+    // of pixels and there are width/4 blocks across - but a BC1 block is eight
+    // bytes where a BC2 block is sixteen, because BC1 has no alpha channel to
+    // store. Getting this wrong does not fail, it skews.
+    const uint32_t blockBytes = dxt1 ? 8 : 16;
+    layout.bytesPerRow = compressed ? (source.width / 4) * blockBytes : source.width * 4;
     layout.rowsPerImage = compressed ? source.height / 4 : source.height;
 
     device.GetQueue().WriteTexture(&destination, source.pixels.data(), source.pixels.size(), &layout, &descriptor.size);

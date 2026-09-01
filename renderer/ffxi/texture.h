@@ -13,6 +13,8 @@ namespace ffxi
 {
 enum class TextureFormat
 {
+    Bc1,   ///< DXT1 blocks, uploadable untouched. Half the size of BC2: no
+           ///< alpha channel, only a punch-through bit.
     Bc2,   ///< DXT3 blocks, uploadable to the GPU untouched
     Rgba8, ///< expanded here from an 8-bit paletted image
 };

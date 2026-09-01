@@ -152,7 +152,7 @@ int main(int argc, char** argv)
         // Textures. BC2 stores one byte per pixel, so payload size should equal
         // width * height exactly - a cheap check that the header was read right.
         {
-            size_t textures = 0, bc2 = 0, paletted = 0, sizeMismatch = 0, failed = 0;
+            size_t textures = 0, bc1 = 0, bc2 = 0, paletted = 0, sizeMismatch = 0, failed = 0;
             std::string texSample, texFailure;
             for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkTexture))
             {
@@ -160,6 +160,11 @@ int main(int argc, char** argv)
                 {
                     ffxi::Texture t = ffxi::parseTexture(chunk);
                     ++textures;
+                    if (t.format == ffxi::TextureFormat::Bc1)
+                    {
+                        ++bc1;
+                    }
+                    else
                     if (t.format == ffxi::TextureFormat::Bc2)
                     {
                         ++bc2;
@@ -188,7 +193,7 @@ int main(int argc, char** argv)
             }
             if (textures || failed)
             {
-                std::printf("textures %zu (bc2 %zu, paletted %zu, failed %zu)\n", textures, bc2, paletted, failed);
+                std::printf("textures %zu (bc1 %zu, bc2 %zu, paletted %zu, failed %zu)\n", textures, bc1, bc2, paletted, failed);
                 std::printf("  e.g. %s   size mismatches: %zu\n", texSample.c_str(), sizeMismatch);
                 if (failed)
                 {

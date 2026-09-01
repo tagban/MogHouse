@@ -1245,6 +1245,40 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
         ShowDeathPrompt();
     }
 
+    // Lines to send once we are in, as if they had been typed.
+    //
+    // Everything the client can be told to do goes through the chat box,
+    // and the chat box only exists inside the renderer's window - so
+    // anything driving this without a person at the keyboard has no way to
+    // say `!zone 100` or `!godmode`. Semicolons separate them; they go out
+    // a second apart so the server is not answering three things at once.
+    if (flags.TryGetValue("say", out string? script) && script.Length > 0)
+    {
+        _ = Task.Run(async () =>
+        {
+            foreach (string line in script.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1));
+                string typed = line.Trim();
+                if (typed.Length == 0)
+                {
+                    continue;
+                }
+
+                Console.WriteLine($"  saying: {typed}");
+                FfxiClientCommand parsed = FfxiClientCommands.Parse(typed);
+                if (parsed.Kind == FfxiClientCommandKind.None)
+                {
+                    await session.SayAsync(typed);
+                }
+                else if (parsed.Kind == FfxiClientCommandKind.Chat)
+                {
+                    await session.SayAsync(parsed.Rest, parsed.Channel);
+                }
+            }
+        });
+    }
+
     Console.WriteLine($"Playing as {selected.Name} in zone {currentZone}. Close the window to stop.");
 
     // /logout and /shutdown both end this loop; the server needs a few seconds
