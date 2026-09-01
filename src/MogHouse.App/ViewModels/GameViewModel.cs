@@ -379,23 +379,39 @@ public partial class GameViewModel : ViewModelBase
         IsZoning = true;
         WorldVisibilityChanged?.Invoke(false);
 
-        _feeding?.Cancel();
-        _world?.Dispose();
-        _world = null;
-
         // Target indices are only unique within a zone, so carrying one across
         // would put an old entity's name and kind on whatever now holds that
         // index.
         _tracker.Clear();
-
         WorldStatus = $"Zoning to {ZoningTo}...";
+
+        // The window draws the new zone itself rather than being replaced by
+        // one that does. Closing it was what made zoning look like the client
+        // shutting down: for as long as the new zone took to read there was
+        // nothing on screen at all.
+        FfxiGameSession session = _shell.Session;
+        if (_world is { Closed: false } &&
+            _world.LoadZone((int)zone, ZoningTo, session.PosX, session.PosVertical, session.PosDepth, session.Facing))
+        {
+            _openZone = zone;
+            IsZoning = false;
+            WorldVisibilityChanged?.Invoke(true);
+            _world.ShowZoneLines(session.ZoneLines);
+            OnMusicChanged(session.CurrentTrack);
+            WorldStatus = $"In {ZoningTo}.";
+            return;
+        }
+
+        // No window to reuse, or no DAT for that zone: fall back to opening a
+        // fresh one, and say so if even that fails.
+        _feeding?.Cancel();
+        _world?.Dispose();
+        _world = null;
         OpenWorld();
 
         IsZoning = false;
         if (_world is null)
         {
-            // Say so and stay visible, rather than hiding behind a window that
-            // never opened.
             WorldStatus = $"Could not open {ZoningTo}. Reopen the world to try again.";
             _shell.Status = WorldStatus;
         }

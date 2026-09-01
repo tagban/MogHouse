@@ -208,6 +208,41 @@ public sealed class LiveRadar : IDisposable
         _viewer.SetDeath(dead, raiseOffered);
     }
 
+    /// <summary>
+    /// Draws a different zone in the window already open.
+    ///
+    /// Returns false when this install has no DAT for that zone, which is the
+    /// caller's cue to say so rather than to leave a window showing a zone the
+    /// player has already left.
+    /// </summary>
+    public bool LoadZone(int zoneId, string zoneName, float x, float vertical, float depth, sbyte direction)
+    {
+        if (_closed)
+        {
+            return false;
+        }
+
+        string? path;
+        try
+        {
+            path = new FfxiFileTable(FfxiFileTable.DefaultInstallRoot()).ZonePath(zoneId);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+        if (path is null)
+        {
+            return false;
+        }
+
+        // The same half turn about X and heading convention PlaceCharacter
+        // uses - see the note there.
+        float heading = (float)(Math.PI / 2 - (direction & 0xFF) * (Math.PI * 2) / 256);
+        _viewer.LoadZone(path, zoneName, x, -vertical, -depth, heading);
+        return true;
+    }
+
     /// <summary>Hands the saved preferences to the world window.</summary>
     public void ShowSettings(MogHouseSettings settings)
     {

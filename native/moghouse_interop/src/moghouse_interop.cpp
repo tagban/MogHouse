@@ -174,6 +174,15 @@ void mh_viewer_set_music(MhViewerHandle viewer, const char* path)
     }
 }
 
+void mh_viewer_load_zone(MhViewerHandle viewer, const char* dat_path, const char* zone_name, float x, float y,
+                         float z, float heading)
+{
+    if (viewer && dat_path)
+    {
+        viewer->link.requestZone({dat_path, zone_name ? zone_name : "", x, y, z, heading});
+    }
+}
+
 void mh_viewer_set_settings(MhViewerHandle viewer, float music_volume, int32_t radar_turns)
 {
     if (viewer)

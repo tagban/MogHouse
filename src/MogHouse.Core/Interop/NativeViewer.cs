@@ -365,6 +365,15 @@ public sealed partial class NativeViewer : IDisposable
     /// <summary>Who the player asked to talk to, or 0 if nobody.</summary>
     public uint TakeTalk() => _disposed || _handle == IntPtr.Zero ? 0 : mh_viewer_take_talk(_handle);
 
+    /// <summary>Draws a different zone in the window that is already open.</summary>
+    public void LoadZone(string datPath, string zoneName, float x, float y, float z, float heading)
+    {
+        if (!_disposed && _handle != IntPtr.Zero)
+        {
+            mh_viewer_load_zone(_handle, datPath, zoneName, x, y, z, heading);
+        }
+    }
+
     /// <summary>Hands the saved preferences to the world window.</summary>
     public void SetSettings(float musicVolume, bool radarTurns)
     {
@@ -557,6 +566,10 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static partial void mh_viewer_set_settings(IntPtr viewer, float musicVolume, int radarTurns);
+
+    [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial void mh_viewer_load_zone(IntPtr viewer, string datPath, string zoneName,
+                                                    float x, float y, float z, float heading);
 
     [LibraryImport(LibraryName)]
     private static partial int mh_viewer_take_settings(IntPtr viewer, out float musicVolume, out int radarTurns);

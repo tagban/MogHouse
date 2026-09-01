@@ -188,6 +188,11 @@ MH_API int32_t mh_viewer_take_link(MhViewerHandle viewer);
 /// audio device because that is where SDL already is.
 MH_API void mh_viewer_set_music(MhViewerHandle viewer, const char* path);
 
+/// Draws a different zone in the window already open, rather than closing it
+/// and opening another. The position is where the character lands.
+MH_API void mh_viewer_load_zone(MhViewerHandle viewer, const char* dat_path, const char* zone_name,
+                                float x, float y, float z, float heading);
+
 /// Preferences, both ways. Set once when the world opens; read back after the
 /// keys in the world window change them, so they can be written to disk.
 /// mh_viewer_take_settings returns non-zero when something changed.
