@@ -1038,41 +1038,6 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 
     // Each building interior lights its own inside; see InteriorLighting.
     std::vector<mh::InteriorLighting> interiors;
-    if (!options.zonePath.empty())
-    {
-        const char* keyPath = options.keyTablePath.empty() ? nullptr : options.keyTablePath.c_str();
-        if (!keyPath)
-        {
-            std::printf("set MOGHOUSE_FFXI_KEYTABLE to the 256-byte MZB key table to load a zone\n");
-            return 2;
-        }
-        zone = loadZone(options.zonePath.c_str(), keyPath,
-                        options.keyTable2Path.empty() ? nullptr : options.keyTable2Path.c_str(), zoneId, textures,
-                        lighting, collision, interiors);
-        if (!zone)
-        {
-            return 1;
-        }
-        // The character is loaded after the zone so it can share the texture
-        // map: a PC in a town wears textures the zone never mentions, and a
-        // zone texture the character happens to name should not be read twice.
-        if (options.zoneName)
-        {
-            const size_t water = loadWater(*options.zoneName, *zone);
-            if (water)
-            {
-                std::printf("water: %zu triangles\n", water);
-            }
-        }
-        std::printf("collision: %zu triangles, %zu walls\n", collision.triangleCount(), collision.wallCount());
-        std::printf("zone %s: %zu triangles\n", zoneId.c_str(), zone->indices.size() / 3);
-        std::printf("  bounds x %.1f..%.1f  y %.1f..%.1f  z %.1f..%.1f\n", zone->boundsMin.x, zone->boundsMax.x,
-                    zone->boundsMin.y, zone->boundsMax.y, zone->boundsMin.z, zone->boundsMax.z);
-    }
-    else
-    {
-        std::printf("no DAT given - clearing only. Pass a zone DAT to draw one.\n");
-    }
 
     if (!SDL_Init(SDL_INIT_VIDEO))
     {
@@ -1260,6 +1225,53 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     std::vector<wgpu::Texture> batchTextures;
     std::vector<wgpu::BindGroup> batchBindGroups;
     uint32_t indexCount = 0;
+
+    // The zone is read here, after the window and the device exist, rather
+    // than before SDL is even started.
+    //
+    // Reading it first meant there was nothing on screen while it happened -
+    // no surface, no pipelines, nothing to draw a loading screen on. Several
+    // seconds of a zone opening with no window at all, and on a zone change
+    // the client looked like it had closed.
+    //
+    // Nothing between here and there needs the zone: the device, the swap
+    // chain and the shaders are all built from the window.
+
+    if (!options.zonePath.empty())
+    {
+        const char* keyPath = options.keyTablePath.empty() ? nullptr : options.keyTablePath.c_str();
+        if (!keyPath)
+        {
+            std::printf("set MOGHOUSE_FFXI_KEYTABLE to the 256-byte MZB key table to load a zone\n");
+            return 2;
+        }
+        zone = loadZone(options.zonePath.c_str(), keyPath,
+                        options.keyTable2Path.empty() ? nullptr : options.keyTable2Path.c_str(), zoneId, textures,
+                        lighting, collision, interiors);
+        if (!zone)
+        {
+            return 1;
+        }
+        // The character is loaded after the zone so it can share the texture
+        // map: a PC in a town wears textures the zone never mentions, and a
+        // zone texture the character happens to name should not be read twice.
+        if (options.zoneName)
+        {
+            const size_t water = loadWater(*options.zoneName, *zone);
+            if (water)
+            {
+                std::printf("water: %zu triangles\n", water);
+            }
+        }
+        std::printf("collision: %zu triangles, %zu walls\n", collision.triangleCount(), collision.wallCount());
+        std::printf("zone %s: %zu triangles\n", zoneId.c_str(), zone->indices.size() / 3);
+        std::printf("  bounds x %.1f..%.1f  y %.1f..%.1f  z %.1f..%.1f\n", zone->boundsMin.x, zone->boundsMax.x,
+                    zone->boundsMin.y, zone->boundsMax.y, zone->boundsMin.z, zone->boundsMax.z);
+    }
+    else
+    {
+        std::printf("no DAT given - clearing only. Pass a zone DAT to draw one.\n");
+    }
 
     if (zone && !zone->indices.empty())
     {
