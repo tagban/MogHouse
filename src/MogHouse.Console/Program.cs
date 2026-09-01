@@ -1270,7 +1270,11 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
         {
             // Where the renderer walked to, which is what the zone-line check runs
             // against.
-            if (radar.Position() is (float x, float vertical, float depth, sbyte direction))
+            //
+            // Null while a zone change swaps the windows - the loop now stays
+            // alive through that, so everything inside it has to cope with
+            // there being no window for a moment.
+            if (radar?.Position() is (float x, float vertical, float depth, sbyte direction))
             {
                 session.PlaceAt(x, vertical, depth, direction);
             }

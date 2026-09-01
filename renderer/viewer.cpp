@@ -3305,6 +3305,25 @@ constexpr float kGravity = 26.0f;
         {
             radarEntities = link->entities();
 
+            // Nearest first, so the ones that miss out are the ones furthest
+            // away.
+            //
+            // Bodies are drawn from a fixed pool of instance slots and slots
+            // were handed out in whatever order the server happened to mention
+            // people, so past the cap you did not lose the distant ones - you
+            // lost whoever arrived late, which could be the NPC you were
+            // standing next to. Sorting here rather than at each use keeps the
+            // instance slots, the skinning pass and the nameplates all talking
+            // about the same entity for a given index.
+            std::sort(radarEntities.begin(), radarEntities.end(),
+                      [&](const mh::RadarEntity& a, const mh::RadarEntity& b) {
+                          const float ax = a.x - characterAt.x;
+                          const float az = a.z - characterAt.z;
+                          const float bx = b.x - characterAt.x;
+                          const float bz = b.z - characterAt.z;
+                          return ax * ax + az * az < bx * bx + bz * bz;
+                      });
+
             // The server moving us, before we report where we think we are -
             // otherwise the position we just posted would win and the move
             // would be undone on the same frame.
