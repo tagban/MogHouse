@@ -451,11 +451,29 @@ std::vector<std::filesystem::path> subroomsFor(const std::filesystem::path& zone
 /// linking zlib to parse a file that never changes.
 size_t loadWater(const std::string& zoneName, mh::Scene& scene)
 {
-    std::filesystem::path path = std::filesystem::path{"assets"} / "water" / (zoneName + ".water");
+    // The file is named the way the server names its zone directories -
+    // Bastok_Markets, Southern_San_dOria - and the name arriving here is the
+    // one shown to the player, which has had its underscores turned into
+    // spaces for display. Looking up "Bastok Markets.water" found nothing, so
+    // every zone entered by zoning had no material water at all; only the
+    // named water models showed, which is why a canal with no `water` model
+    // over it was dry.
+    std::string stem;
+    stem.reserve(zoneName.size());
+    for (char c : zoneName)
+    {
+        if (c == '\'')
+        {
+            continue;                       // Southern San d'Oria -> Southern_San_dOria
+        }
+        stem.push_back(c == ' ' ? '_' : c);
+    }
+
+    std::filesystem::path path = std::filesystem::path{"assets"} / "water" / (stem + ".water");
     if (const char* nativeDir = std::getenv("MOGHOUSE_NATIVE_DIR"))
     {
         const std::filesystem::path beside =
-            std::filesystem::path{nativeDir} / "assets" / "water" / (zoneName + ".water");
+            std::filesystem::path{nativeDir} / "assets" / "water" / (stem + ".water");
         if (std::filesystem::exists(beside))
         {
             path = beside;
@@ -463,7 +481,7 @@ size_t loadWater(const std::string& zoneName, mh::Scene& scene)
     }
     if (const char* fontDir = std::getenv("MOGHOUSE_FONT"))
     {
-        const std::filesystem::path beside = std::filesystem::path{fontDir} / "water" / (zoneName + ".water");
+        const std::filesystem::path beside = std::filesystem::path{fontDir} / "water" / (stem + ".water");
         if (std::filesystem::exists(beside))
         {
             path = beside;
@@ -1320,10 +1338,10 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             if (currentZoneName)
             {
                 const size_t water = loadWater(*currentZoneName, *zone);
-                if (water)
-                {
-                    std::printf("water: %zu triangles\n", water);
-                }
+                // Reported either way. A silent zero is how a zone name
+                // that did not match a filename went unnoticed.
+                std::printf("water: %zu triangles for %s\n", water,
+                            currentZoneName->c_str());
             }
             std::printf("collision: %zu triangles, %zu walls\n", collision.triangleCount(), collision.wallCount());
             std::printf("zone %s: %zu triangles\n", zoneId.c_str(), zone->indices.size() / 3);

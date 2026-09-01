@@ -5,29 +5,58 @@ and because half of these were found by playing rather than by reading code.
 
 ## Loading
 
-Zoning tears the world window down and builds a new one, so there is a gap with
-nothing in it. That gap should say something.
+Done: the window stays up across a zone change and the zone is swapped inside
+it, which turned out to be fast enough that the loading screen had nothing to
+cover. The artificial hold is gone.
 
-- **A loading screen.** A bouncing moogle would do, and the moogle is in the
-  DATs - creature models already render, so it could be the real one animating
-  rather than a picture of one.
-- **Eventually: the destination zone's map, and its name.** A top-down image is
-  already baked per zone, so this is a question of *when* rather than *how*:
-  either bake the destination early in its own load and show it while the rest
-  finishes, or pre-generate every zone's map into assets and show it instantly.
-  The second makes the client bigger and the loading screen honest about
-  progress; the first costs nothing on disk and cannot show the map until it
-  exists.
+- **Eventually: the destination zone's map, and its name** - wanted as a
+  per-zone screen rather than one shared picture. A top-down image is already
+  baked per zone, so every zone gets its own without any art being drawn. The
+  question is *when*: bake the destination early in its own load and show it
+  while the rest finishes, or pre-generate every zone's map into assets and
+  show it instantly.
 
 ## The map
 
 - **The full-screen map.** No map DATs needed: the baked top-down image, the
   zone lines and their destinations all exist already. Zone lines drawn as
   markers, each labelled with where it goes.
-- **Movement reads mirrored on the minimap** when walking, though the compass
-  agrees with a retail client and the bake measures 99.1% against the zone's own
-  geometry. Isolate by pressing M for north-up: if it reads correctly then, the
-  rotation's sign is wrong; if not, it is something else again.
+- **Movement may read mirrored on the minimap** when walking. Unresolved, and
+  worth stating carefully because the evidence conflicts. The compass agrees
+  with a retail client and the bake measures 99.1% against the zone's own
+  geometry - but those checks only prove the bake, `mapUv` and the dots agree
+  with *each other*, which they do by construction: the dots are placed by
+  comparing world positions against the same reconstruction the map is sampled
+  with, so a mirror shared by all three is invisible to every test run so far.
+  Deriving it from the camera says there is one: `lookAt` gives the 3D view a
+  screen-right of `(-cos h, sin h)` in world (x, z), while the radar
+  reconstructs screen-right as `(cos h, -sin h)` - exactly negated. If that is
+  right, the fix is one sign on the radar's screen-x, and the compass and notch
+  must not be flipped with it. Not applied: the last sighting was withdrawn
+  ("they just don't have names"), and this is precisely the change that was
+  made once before on a theory and had to be reverted.
+
+## Water
+
+Working again as of today: the file is named `Bastok_Markets.water` and the
+name reaching the renderer is the one shown to the player, `Bastok Markets`,
+so the lookup missed and every zone entered by zoning had no material water at
+all. Only the named water models showed, which is why canals with no `water`
+model over them were dry. 185 zones now have a water file, up from 6.
+
+- **Read the material from the DATs instead of shipping it.** The right answer,
+  and the one that removes ~50MB of derived data and the question of whether it
+  should be redistributed at all. `readMesh` already reads the fourth uint16
+  per triangle, and `MOGHOUSE_TRI_META` tallies the three candidate fields -
+  but measured against LandSandBoat's own material counts for Bastok Markets
+  (Stone 77.2%, Wood 13.3%, DeepWater 1.3%, ShallowWater 0.4%), none of the
+  three matches: the two nibbles both decay smoothly, which is the shape of a
+  count rather than a material, and the spare index bits take only four values.
+  Identifying it properly means matching triangles between our MZB parse and
+  the server's mesh by geometry and correlating from there.
+- **Flowing water.** Fountains and the Bastok canals read as moving in retail;
+  the effect chunks (`0x05` generators, `0x1F` definitions) are the likely
+  source, and the same work would light the telepoint crystals.
 
 ## Rendering
 
@@ -40,6 +69,9 @@ nothing in it. That gap should say something.
   boundary.
 - **Creatures float about 1.06 units.** Suspect the root bone's rest
   translation counted twice.
+- **Worms spawn underground** and surface when a player comes near, which is
+  their real behaviour rather than a bug - but nothing here plays the emerging
+  animation, so they sit buried instead.
 - **206 of 439 model ids** land on files with no skeleton - probably a second
   expansion-era range.
 
@@ -81,6 +113,16 @@ Worth doing properly with the textures side by side rather than guessed at.
   elements - there is only a font atlas today.
 - **The world window keeps SDL's default icon.** `SDL_SetWindowIcon` wants a
   decoded surface and `.ico` is not one; a small PNG beside it would do.
+
+## Stairs
+
+- **A Tarutaru catches on some of Bastok's stairs.** `kDefaultStepUp` is 0.95,
+  chosen as the tightest value that clears the 0.9 risers that were measured -
+  a margin of 0.05, and there are evidently stairs on the other side of it. The
+  comment on that constant already names the real fix: one global height cannot
+  tell a stair from a railing, because the difference is not height but that a
+  railing is too thin to stand on. Raising the number alone brings back
+  climbing onto bridge railings, so the width test is the work.
 
 ## Done today, for scale
 
