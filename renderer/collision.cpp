@@ -42,7 +42,7 @@ constexpr float kWalkableNormalY = 0.64f;
 /// railing is too thin to stand on. Testing whether the surface being stepped
 /// onto is wide enough to hold a character is the fix; this only narrows the
 /// window.
-constexpr float kStepUp = 0.95f;
+constexpr float kStepUp = Collision::kDefaultStepUp;
 
 /// How tall the character is, for deciding which walls are in the way. A
 /// barrier entirely above their head does not block them.
@@ -241,7 +241,7 @@ void Collision::forEachNear(float minX, float minZ, float maxX, float maxZ, cons
     single = &scratch;
 }
 
-std::optional<float> Collision::groundAt(float x, float z, float near, float maxDrop) const
+std::optional<float> Collision::groundAt(float x, float z, float near, float maxDrop, float stepUp) const
 {
     if (triangles_.empty())
     {
@@ -261,7 +261,7 @@ std::optional<float> Collision::groundAt(float x, float z, float near, float max
             continue;
         }
         const std::optional<float> y = heightAt(triangle.a, triangle.b, triangle.c, x, z);
-        if (!y || *y > near + kStepUp || *y < near - maxDrop)
+        if (!y || *y > near + stepUp || *y < near - maxDrop)
         {
             continue;
         }

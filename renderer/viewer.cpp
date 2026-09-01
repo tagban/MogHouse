@@ -3528,8 +3528,19 @@ constexpr float kGravity = 26.0f;
                     // stuck at the edge of water it should have been able to
                     // cross. Collision::waterDepthAt still reports the depth;
                     // nothing acts on it.
+                    // Climbing out is allowed more headroom than stepping up.
+                    // A character wading a canal stands on its floor, and the
+                    // quay they walked off is further above them than any kerb
+                    // - so with one step height for both, they get in and
+                    // cannot get out. FFXI has no swimming, which makes that a
+                    // trap rather than a rule.
+                    const float stepUp = collision.waterDepthAt(characterAt.x, characterAt.z, characterAt.y)
+                                             ? mh::Collision::kWaterStepUp
+                                             : mh::Collision::kDefaultStepUp;
+
                     const auto refused = [&](float x, float z) {
-                        const std::optional<float> there = collision.groundAt(x, z, characterAt.y, kFallReach);
+                        const std::optional<float> there =
+                            collision.groundAt(x, z, characterAt.y, kFallReach, stepUp);
                         return here && there && (*here - *there) > kMaxStepDown;
                     };
 
@@ -3571,8 +3582,15 @@ constexpr float kGravity = 26.0f;
             // rising through it.
             if (!collision.empty() && !noclip)
             {
+                // The same extra headroom the step used. Allowing the step
+                // onto a bank but not the rise onto it leaves a character
+                // walking at the water's edge without ever getting out.
+                const float groundStepUp =
+                    collision.waterDepthAt(characterAt.x, characterAt.z, characterAt.y)
+                        ? mh::Collision::kWaterStepUp
+                        : mh::Collision::kDefaultStepUp;
                 const std::optional<float> ground =
-                    collision.groundAt(characterAt.x, characterAt.z, characterAt.y, kFallReach);
+                    collision.groundAt(characterAt.x, characterAt.z, characterAt.y, kFallReach, groundStepUp);
 
                 if (ground && *ground >= characterAt.y - kGroundSnap)
                 {

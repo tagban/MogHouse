@@ -57,8 +57,22 @@ public:
     /// tread should be finds the floor underneath the staircase instead and
     /// drops you inside it, and stepping off any edge falls to whatever is
     /// below rather than stopping.
+    /// `stepUp` is how far above `near` a surface may be and still be
+    /// something you can step onto. The default is a kerb. Climbing out of
+    /// water wants more: a character standing in a river is at the riverbed,
+    /// and the bank they should be able to get back onto is further above them
+    /// than any step on land would be.
     std::optional<float> groundAt(float x, float z, float near,
-                                  float maxDrop = std::numeric_limits<float>::max()) const;
+                                  float maxDrop = std::numeric_limits<float>::max(),
+                                  float stepUp = kDefaultStepUp) const;
+
+    /// How far above your feet a surface can be and still be a step.
+    static constexpr float kDefaultStepUp = 0.95f;
+
+    /// The same, for someone standing in water. FFXI has no swimming, so
+    /// wading in and then being unable to get out is a trap rather than a
+    /// rule.
+    static constexpr float kWaterStepUp = 2.4f;
 
     /// The walkable surface closest to `y`, above or below, however far.
     ///
