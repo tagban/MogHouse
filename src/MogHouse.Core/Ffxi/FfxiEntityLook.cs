@@ -3,6 +3,26 @@ namespace MogHouse.Core.Ffxi;
 /// <summary>
 /// How an entity's appearance is described - look_t's `size` field, which is
 /// a kind rather than a length.
+///
+/// Two sources describe this byte and they do not agree, so both are recorded.
+/// The names here are LandSandBoat's, because that is the server we talk to
+/// and its values are what actually arrive. The second column is what the
+/// retail client makes of the same byte:
+///
+///   0  Standard   non-visible static object
+///   1  Equipped   player type
+///   2  Door       doors
+///   3  Elevator   elevator or other moving platform
+///   4  Ship       movable object
+///   5  Unknown5   a "binary name" in LSB - really an index code, and LSB's
+///                 packet handling of it is wrong
+///   6  Automaton  used by besieged and campaign monsters in an "npc" state
+///   7  Chocobo    used in cutscenes; these objects are named like "NPC[FE]"
+///                 in the DATs
+///
+/// Where they differ, LSB's writer decides what we receive: toLookFields in
+/// src/map/data/shared_types/look.h puts 7 in the first field for a chocobo
+/// and nine equipment-shaped fields after it, so 7 is read that way here.
 /// </summary>
 public enum FfxiLookKind : ushort
 {

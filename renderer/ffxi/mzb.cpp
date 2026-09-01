@@ -189,6 +189,16 @@ Zone parseMzb(const Chunk& chunk, const KeyTable& keys)
     // is where the geometry this cannot find must be: the fountain's water
     // model is in the DAT with no placement, and so are the sky sphere and the
     // collision proxies.
+    // The decrypted buffer, so the regions the parser does not understand can
+    // be picked apart outside it.
+    if (const char* dumpTo = std::getenv("MOGHOUSE_MZB_DUMP"))
+    {
+        std::ofstream out{dumpTo, std::ios::binary};
+        out.write(reinterpret_cast<const char*>(buffer.data()),
+                  static_cast<std::streamsize>(buffer.size()));
+        std::printf("wrote %zu decrypted bytes to %s\n", buffer.size(), dumpTo);
+    }
+
     if (std::getenv("MOGHOUSE_MZB_HEADER"))
     {
         std::printf("MZB header, as 32-bit words:\n");
@@ -200,6 +210,37 @@ Zone parseMzb(const Chunk& chunk, const KeyTable& keys)
         }
         std::printf("  chunk is %zu bytes; placements end at %zu\n", buffer.size(),
                     kPlacementsOffset + static_cast<size_t>(placementCount) * kPlacementSize);
+
+        const size_t placementsEnd =
+            kPlacementsOffset + static_cast<size_t>(placementCount) * kPlacementSize;
+        const size_t spots[] = { placementsEnd, read<uint32_t>(buffer, 16),
+                                 read<uint32_t>(buffer, 24) };
+        const char* labels[] = { "after the placements", "word 16", "word 24" };
+        for (size_t s = 0; s < 3; ++s)
+        {
+            std::printf("  %s, at %zu:\n", labels[s], spots[s]);
+            for (size_t row = 0; row < 6; ++row)
+            {
+                const size_t at = spots[s] + row * 16;
+                if (at + 16 > buffer.size()) break;
+                std::printf("    %8zu  ", at);
+                for (size_t b = 0; b < 16; ++b) std::printf("%02X ", buffer[at + b]);
+                std::printf(" ");
+                for (size_t b = 0; b < 16; ++b)
+                {
+                    const uint8_t c = buffer[at + b];
+                    std::printf("%c", c >= 32 && c < 127 ? c : '.');
+                }
+                std::printf("\n");
+            }
+            std::printf("    floats: ");
+            for (size_t f = 0; f < 8; ++f)
+                std::printf("%.3f ", read<float>(buffer, spots[s] + f * 4));
+            std::printf("\n    u32:    ");
+            for (size_t f = 0; f < 8; ++f)
+                std::printf("%u ", read<uint32_t>(buffer, spots[s] + f * 4));
+            std::printf("\n");
+        }
     }
     zone.placements.reserve(placementCount);
     for (uint32_t i = 0; i < placementCount; ++i)

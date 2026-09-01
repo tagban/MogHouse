@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <set>
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
@@ -72,6 +73,9 @@ int main(int argc, char** argv)
         // Models. The check that matters is whether vertices land inside the
         // bounding box the model declares for itself - a wrong stride or offset
         // scatters them outside it immediately.
+        // Every model the file holds, so the zone block below can say which
+        // of them no placement ever names.
+        std::set<std::string> modelNames;
         const char* key2Path = std::getenv("MOGHOUSE_FFXI_KEYTABLE2");
         if (key2Path)
         {
@@ -100,6 +104,7 @@ int main(int argc, char** argv)
                         continue;
                     }
                     ++models;
+                    modelNames.insert(m.name);
                     meshes += m.meshes.size();
                     verts += m.vertexCount();
                     tris += m.triangleCount();
@@ -416,8 +421,29 @@ int main(int argc, char** argv)
                     const ffxi::Placement& p = zone.placements[i];
                     std::printf("  %-16s %9.2f %8.2f %8.2f\n", p.model.c_str(), p.translate[0], p.translate[1], p.translate[2]);
                 }
-            }
 
+                // A model in the file that no placement names is either drawn
+                // some other way or not drawn at all - and that gap is where
+                // missing scenery would hide.
+                std::set<std::string> placed;
+                for (const ffxi::Placement& p : zone.placements)
+                {
+                    placed.insert(p.model);
+                }
+                std::vector<std::string> unplaced;
+                for (const std::string& name : modelNames)
+                {
+                    if (!placed.count(name)) unplaced.push_back(name);
+                }
+                std::printf("  %zu distinct models placed, %zu models in the file, %zu never placed\n",
+                            placed.size(), modelNames.size(), unplaced.size());
+                for (size_t u = 0; u < unplaced.size(); ++u)
+                {
+                    std::printf("%s%s", u % 8 == 0 ? "    " : " ", unplaced[u].c_str());
+                    if (u % 8 == 7 || u + 1 == unplaced.size()) std::printf("\n");
+                }
+
+            }
             totalVertices += vertices;
             totalTriangles += triangles;
         }
