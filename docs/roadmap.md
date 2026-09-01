@@ -43,6 +43,26 @@ nothing in it. That gap should say something.
 - **206 of 439 model ids** land on files with no skeleton - probably a second
   expansion-era range.
 
+### Hair comes out the wrong colour
+
+Pipira is `face = 2, race = 6` in `char_look`, and renders with reddish hair
+where a retail client shows blue.
+
+What is established: `look.face` is a single value 0-15 - LandSandBoat's
+`login_helpers.cpp` rejects anything above 15 with the comment `// Face 8B`, so
+it is eight faces times two variants, and the variant is the hair. The head
+window is 32 entries at offset 8 from the race base, and the two Tarutaru sexes
+share one base, so those 32 have to cover more than one thing. The file we load
+for face 2 is `ROM/46/100`, whose texture is a Tarutaru face with reddish-brown
+hair - which is what is on screen, so the load is doing what it is told.
+
+What is not established: the index. Only sixteen of the thirty-two entries
+resolve to distinct head files, which is exactly 8 x 2, so something else has to
+select between the sexes that share the base. Feeding the raw face value in
+lands somewhere plausible enough to look like a character and not be one.
+
+Worth doing properly with the textures side by side rather than guessed at.
+
 ## Protocol
 
 - **`HIDE_MODEL` and `UNTARGETABLE`** are parsed and not acted on. Wiring them

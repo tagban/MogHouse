@@ -351,6 +351,28 @@ public partial class GameViewModel : ViewModelBase
     /// <summary>Which zone the open window was built for.</summary>
     private uint _openZone;
 
+    /// <summary>How long a loading screen stays up however fast the zone reads.</summary>
+    private static readonly TimeSpan MinimumLoadingScreen = TimeSpan.FromSeconds(3);
+
+    /// <summary>Waits for the zone to land, and for the floor to pass.</summary>
+    private async Task HoldLoadingScreen()
+    {
+        DateTimeOffset started = DateTimeOffset.UtcNow;
+
+        // The renderer reads the zone on its own thread, so this is how long it
+        // actually took rather than how long it was expected to take.
+        while (_world?.IsLoading == true && DateTimeOffset.UtcNow - started < TimeSpan.FromSeconds(60))
+        {
+            await Task.Delay(50);
+        }
+
+        TimeSpan left = MinimumLoadingScreen - (DateTimeOffset.UtcNow - started);
+        if (left > TimeSpan.Zero)
+        {
+            await Task.Delay(left);
+        }
+    }
+
     /// <summary>Whether a zone is being loaded, and which one.</summary>
     [ObservableProperty]
     public partial bool IsZoning { get; set; }
@@ -368,7 +390,7 @@ public partial class GameViewModel : ViewModelBase
     /// the client had frozen - the character could not move, because the
     /// ground under them was somewhere else entirely.
     /// </summary>
-    private void OnZoneChanged(uint zone) => Dispatcher.UIThread.Post(() =>
+    private void OnZoneChanged(uint zone) => Dispatcher.UIThread.Post(async () =>
     {
         if (zone == _openZone)
         {
@@ -400,6 +422,17 @@ public partial class GameViewModel : ViewModelBase
             _world.LoadZone((int)zone, ZoningTo, session.PosX, session.PosVertical, session.PosDepth, session.Facing))
         {
             _openZone = zone;
+
+            // Held until the renderer says it has finished, and for a moment
+            // beyond that.
+            //
+            // The floor is deliberate. Reading a zone is quick enough on a warm
+            // disk that the screen can come and go faster than it can be read,
+            // which looks like nothing happened - and "nothing happened" is
+            // exactly what a zone change used to look like when it was broken.
+            // A loading screen nobody sees cannot be trusted.
+            await HoldLoadingScreen();
+
             IsZoning = false;
             WorldVisibilityChanged?.Invoke(true);
             _world.ShowZoneLines(session.ZoneLines);
