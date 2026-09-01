@@ -421,9 +421,33 @@ int main(int argc, char** argv)
                 }
                 if (withWater)
                 {
-                    std::printf("  water: %zu of %zu instances, heights %.1f to %.1f\n", withWater,
+                    std::printf("  water: %zu of %zu instances, heights %.4f to %.4f\n", withWater,
                                 zone.instances.size(), waterLo, waterHi);
                 }
+
+                    // Where the water is, as a picture. A count says nothing
+                    // about whether the cells form canals or are scattered
+                    // noise, and that is the whole question.
+                    if (std::getenv("MOGHOUSE_WATER_MAP"))
+                    {
+                        constexpr int kCells = 46;
+                        std::string grid(kCells * kCells, ' ');
+                        const float spanX = hi[0] - lo[0];
+                        const float spanZ = hi[2] - lo[2];
+                        for (const ffxi::CollisionInstance& one : zone.instances)
+                        {
+                            const int cx = spanX > 0 ? static_cast<int>((one.transform[12] - lo[0]) / spanX * (kCells - 1)) : 0;
+                            const int cz = spanZ > 0 ? static_cast<int>((one.transform[14] - lo[2]) / spanZ * (kCells - 1)) : 0;
+                            char& cell = grid[cz * kCells + cx];
+                            if (one.waterHeight != 0.0f) { cell = '~'; }
+                            else if (cell == ' ') { cell = '.'; }
+                        }
+                        std::printf("  water map, %.0f x %.0f units, ~ is water:\n", spanX, spanZ);
+                        for (int row = 0; row < kCells; ++row)
+                        {
+                            std::printf("   %.*s\n", kCells, grid.data() + row * kCells);
+                        }
+                    }
 
                 if (!zone.instances.empty())
                 {
