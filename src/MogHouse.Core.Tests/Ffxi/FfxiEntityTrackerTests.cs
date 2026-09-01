@@ -19,7 +19,11 @@ public class FfxiEntityTrackerTests
         packet[0x1E] = 100;
         packet[0x29] = allegiance;
         packet[0x25] = livingMob ? FfxiEntityUpdate.MobAliveFlag : (byte)0;
-        packet[0x0A] = despawn ? FfxiEntityUpdate.DespawnFlag : (byte)0;
+
+        // The general block has to be announced or none of the above means
+        // anything: an unset flag marks bytes the server never wrote.
+        packet[0x0A] = (byte)(FfxiEntityUpdate.UpdateGeneral |
+                              (despawn ? FfxiEntityUpdate.DespawnFlag : (byte)0));
         return FfxiEntityUpdate.TryParse(packet)!;
     }
 
@@ -198,6 +202,7 @@ public class FfxiEntityTrackerTests
         byte[] player = new byte[0x70];
         BinaryPrimitives.WriteUInt16LittleEndian(player, (ushort)(0x00D | (player.Length / 4) << 9));
         BinaryPrimitives.WriteUInt32LittleEndian(player.AsSpan(4), 200u);
+        player[0x0A] = FfxiEntityUpdate.UpdateName;
         "Questria"u8.CopyTo(player.AsSpan(90));
         tracker.Observe(FfxiEntityUpdate.TryParse(player)!, Now);
 

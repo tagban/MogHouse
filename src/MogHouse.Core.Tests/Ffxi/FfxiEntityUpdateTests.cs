@@ -168,6 +168,11 @@ public class FfxiEntityUpdateAppearanceTests
         BinaryPrimitives.WriteUInt16LittleEndian(packet, (ushort)(0x00E | (packet.Length / 4) << 9));
         BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(4), 0x01000000u | actIndex);
         BinaryPrimitives.WriteUInt16LittleEndian(packet.AsSpan(8), actIndex);
+        // Announce the block being filled, the way the server does. Hit
+        // points and the battle flags live in the general block, and a packet
+        // that writes them without saying so is one no server sends - the
+        // reader is right to treat those bytes as untouched.
+        packet[0x0A] = FfxiEntityUpdate.UpdateGeneral;
         packet[0x1E] = healthPercent;
         packet[0x29] = allegiance;
         packet[0x25] = livingMob ? FfxiEntityUpdate.MobAliveFlag : (byte)0;

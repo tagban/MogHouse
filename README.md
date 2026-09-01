@@ -19,6 +19,16 @@ about the file formats so far.
 opens a zone with a character standing in it, no server needed. To play against
 a LandSandBoat server, `MogHouse.Console login --help` lists what it takes.
 
+## Tests
+
+```
+MOGHOUSE_FFXI_RES=/path/to/LandSandBoat/res dotnet test src/MogHouse.Core.Tests
+```
+
+Twelve of them need the retail compression tables, which are not bundled, and
+skip themselves with an explanation if `MOGHOUSE_FFXI_RES` is not set. All 143
+pass with it.
+
 ## Controls
 
 The world window takes the keyboard directly. Nothing here is configurable yet.

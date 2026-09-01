@@ -195,10 +195,20 @@ public sealed record FfxiEntityUpdate(
     // lives in decides whether reading it means anything: a flag that is not
     // set is a block the server never wrote, so the bytes are whatever the
     // buffer happened to hold.
-    private const byte UpdateClaimStatus = 0x02;
-    private const byte UpdateGeneral = 0x04;
-    private const byte UpdateName = 0x08;
-    private const byte UpdateModel = 0x10;
+    /// <summary>The claim block: BtTargetID, and the look on an NPC.</summary>
+    public const byte UpdateClaimStatus = 0x02;
+
+    /// <summary>
+    /// The general block: hit points, server status, and the flags word that
+    /// carries HideFlag. Anything here is meaningless unless this is set.
+    /// </summary>
+    public const byte UpdateGeneral = 0x04;
+
+    /// <summary>The name block.</summary>
+    public const byte UpdateName = 0x08;
+
+    /// <summary>A player's GrapIDTbl - what they are wearing.</summary>
+    public const byte UpdateModel = 0x10;
     private const int OffsetDirection = Body + 7;
     private const int OffsetX = Body + 8;
     private const int OffsetVertical = Body + 12; // engine Y - see FfxiPositionPacket
