@@ -4551,6 +4551,16 @@ constexpr float kGravity = 26.0f;
                         continue;
                     }
 
+                    // Nothing to label. warp07 in Windurst Waters is model 50,
+                    // and that file holds one black triangle and nothing else -
+                    // a trigger the game never draws - so a plate over it names
+                    // bare ground. The zone table has a name for it either way,
+                    // because these are the client's own internal names.
+                    if (!modelForEntity(entity))
+                    {
+                        continue;
+                    }
+
                     const std::string& shown =
                         entity.name.empty() ? entityNames.lookup(entity.id) : entity.name;
                     if (shown.empty())

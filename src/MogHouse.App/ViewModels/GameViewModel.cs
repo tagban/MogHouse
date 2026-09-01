@@ -93,6 +93,16 @@ public partial class GameViewModel : ViewModelBase
     /// it. What the player sees is one window that becomes the game.
     /// </summary>
     public event Action<bool>? WorldVisibilityChanged;
+
+    /// <summary>
+    /// Whether the world window is up right now.
+    ///
+    /// The constructor opens the world, so the first
+    /// <see cref="WorldVisibilityChanged"/> is raised before anything can have
+    /// subscribed - the window is only handed this view model once
+    /// construction has returned. Whoever attaches has to ask.
+    /// </summary>
+    public bool WorldIsOpen => _world is { Closed: false };
     private readonly FfxiEntityTracker _tracker = new();
     private CancellationTokenSource? _feeding;
 

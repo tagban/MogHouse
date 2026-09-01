@@ -54,6 +54,13 @@ public partial class MainWindow : Window
         if (_watching is not null)
         {
             _watching.WorldVisibilityChanged += OnWorldVisibilityChanged;
+
+            // It opens the world in its constructor, so the first notification
+            // was raised before this could subscribe. Ask rather than wait.
+            if (_watching.WorldIsOpen)
+            {
+                OnWorldVisibilityChanged(true);
+            }
         }
         else
         {
