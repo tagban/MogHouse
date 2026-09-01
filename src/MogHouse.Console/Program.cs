@@ -1175,6 +1175,23 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
     // and none of it survives a move - so it is opened again on the other side.
     // The real client shows a loading screen here for the same reason.
     uint currentZone = session.ZoneState.ZoneNo;
+    // Set while one window is being closed and the next opened.
+    //
+    // The loop below uses `radar` being null to mean the player closed the
+    // window, which is true except during a zone change, when it is null
+    // for as long as the old window takes to shut down. The log caught it:
+    //
+    //     Zoned to 115 - reopening the window.
+    //     Leaving.
+    //       Logout requested.
+    //     --view: opening zone 115 ...
+    //
+    // The session logged itself out and then finished loading the new zone
+    // into a window nobody was waiting for. Whether it happens depends on
+    // where the loop is when the receive thread swaps the window, which is
+    // why zoning has been unreliable rather than broken.
+    bool zoning = false;
+
     session.ZoneChanged += zone =>
     {
         if (zone == currentZone)
@@ -1185,9 +1202,12 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
         Console.WriteLine($"Zoned to {zone} - reopening the window.");
         currentZone = zone;
 
-        LiveRadar? old = radar;
-        radar = null;
-        old?.Dispose();
+        zoning = true;
+        try
+        {
+            LiveRadar? old = radar;
+            radar = null;
+            old?.Dispose();
 
         // Nothing from the old zone belongs in the new one.
         tracker.Clear();
@@ -1203,6 +1223,14 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
             // otherwise put a live character's corpse in a zone with no box
             // over it and no way to ask for one.
             radar.ShowDeath(session.IsDead, session.HasRaiseOffer);
+        }
+        }
+        finally
+        {
+            // Whatever happened, the window is no longer mid-swap. Leaving
+            // this set would keep the loop alive after a failed reopen with
+            // nothing to draw into.
+            zoning = false;
         }
     };
 
@@ -1224,6 +1252,7 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
     // to be reaped on a timeout.
     bool leaving = false;
 
+
     // A file another process can create to ask us to log out. Closing the
     // window works when there is someone at it; this is how a script stops
     // the client without killing it and stranding the session.
@@ -1237,7 +1266,7 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
     // does, so the goodbye goes in a finally.
     try
     {
-        while (radar is not null && session.IsConnected && !leaving && !(stopFile is not null && File.Exists(stopFile)))
+        while ((radar is not null || zoning) && session.IsConnected && !leaving && !(stopFile is not null && File.Exists(stopFile)))
         {
             // Where the renderer walked to, which is what the zone-line check runs
             // against.
