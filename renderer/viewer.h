@@ -403,6 +403,28 @@ public:
 
     /// The .bgw the zone wants playing, or empty for silence. Set from the
     /// session, which is the half that hears the server say so.
+    /// Asks the window to draw a different zone without closing.
+    ///
+    /// Zoning used to mean disposing this window and opening another, which is
+    /// why the client appeared to shut down on !zone: for as long as the new
+    /// zone took to read there was nothing on screen at all, and if it failed
+    /// there was nothing to say so.
+    struct ZoneRequest
+    {
+        std::string datPath;
+        std::string zoneName;
+        float x{}, y{}, z{};
+        float heading{};
+    };
+
+    void requestZone(ZoneRequest request);
+    bool takeZoneRequest(ZoneRequest& out);
+
+    /// Whether a zone is being read right now, for anything that should not
+    /// act on a world that is half-replaced.
+    bool loading() const { return loading_; }
+    void setLoading(bool loading) { loading_ = loading; }
+
     void setMusic(std::string path);
     std::string takeMusic(bool& changed);
     Link takeLink();
@@ -457,6 +479,10 @@ private:
     std::atomic<bool> radarTurns_{true};
     std::atomic<bool> settingsDirty_{false};
     std::atomic<bool> settingsPending_{false};
+    std::atomic<bool> loading_{false};
+    std::mutex zoneLock_;
+    ZoneRequest zoneRequest_;
+    bool zoneRequested_{false};
     mutable std::mutex musicLock_;
     std::string music_;
     bool musicChanged_{false};

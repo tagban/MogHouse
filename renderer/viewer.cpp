@@ -974,6 +974,25 @@ void mh::ViewerLink::noteSettings(Settings settings)
     settingsDirty_ = true;
 }
 
+void mh::ViewerLink::requestZone(ZoneRequest request)
+{
+    std::lock_guard<std::mutex> held{zoneLock_};
+    zoneRequest_ = std::move(request);
+    zoneRequested_ = true;
+}
+
+bool mh::ViewerLink::takeZoneRequest(ZoneRequest& out)
+{
+    std::lock_guard<std::mutex> held{zoneLock_};
+    if (!zoneRequested_)
+    {
+        return false;
+    }
+    out = zoneRequest_;
+    zoneRequested_ = false;
+    return true;
+}
+
 void mh::ViewerLink::setMusic(std::string path)
 {
     std::lock_guard<std::mutex> held{musicLock_};
@@ -1245,12 +1264,18 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // variables held outside it, and every WebGPU handle releases what it
     // held when it is reassigned, so calling it again simply replaces the
     // zone in the window already on screen.
+    // Which zone is being drawn. Its own variables rather than the options,
+    // because the options describe how the window was started and this changes
+    // every time the player walks through a door.
+    std::string currentZonePath = options.zonePath;
+    std::optional<std::string> currentZoneName = options.zoneName;
+
     // The baked overhead map. Declared out here rather than beside the bake
     // because the radar reads it every frame and a new zone replaces it.
     wgpu::Texture mapTexture;
 
     const auto readZone = [&]() -> int {
-        if (!options.zonePath.empty())
+        if (!currentZonePath.empty())
         {
             const char* keyPath = options.keyTablePath.empty() ? nullptr : options.keyTablePath.c_str();
             if (!keyPath)
@@ -1258,7 +1283,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                 std::printf("set MOGHOUSE_FFXI_KEYTABLE to the 256-byte MZB key table to load a zone\n");
                 return 2;
             }
-            zone = loadZone(options.zonePath.c_str(), keyPath,
+            zone = loadZone(currentZonePath.c_str(), keyPath,
                             options.keyTable2Path.empty() ? nullptr : options.keyTable2Path.c_str(), zoneId, textures,
                             lighting, collision, interiors);
             if (!zone)
@@ -1268,9 +1293,9 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             // The character is loaded after the zone so it can share the texture
             // map: a PC in a town wears textures the zone never mentions, and a
             // zone texture the character happens to name should not be read twice.
-            if (options.zoneName)
+            if (currentZoneName)
             {
-                const size_t water = loadWater(*options.zoneName, *zone);
+                const size_t water = loadWater(*currentZoneName, *zone);
                 if (water)
                 {
                     std::printf("water: %zu triangles\n", water);
@@ -3054,6 +3079,9 @@ constexpr float kGravity = 26.0f;
     /// while it is on is harmless - it is the same direction.
     bool autoRun = false;
 
+    /// The zone being read, drawn over everything while it happens.
+    std::string loadingZone;
+
     /// Whether the radar turns with the player or holds north at the top.
     ///
     /// Both are defensible and people are firm about which they want, so it is
@@ -4106,6 +4134,43 @@ constexpr float kGravity = 26.0f;
 
             // Whatever the server last asked for. Checked every frame rather
             // than pushed, because the link is what the session can reach.
+            // Somewhere else entirely, without closing this window.
+            //
+            // The frame drawn just before this one is still on screen while the
+            // read happens, so what the player sees during it is whatever the
+            // loading pass put there rather than a window that has gone.
+            mh::ViewerLink::ZoneRequest wanted;
+            if (link->takeZoneRequest(wanted))
+            {
+                currentZonePath = wanted.datPath;
+                currentZoneName = wanted.zoneName;
+                loadingZone = wanted.zoneName;
+                link->setLoading(true);
+
+                // Nothing from the zone being left belongs to the one being
+                // entered: names are per-zone, and so is every entity in the
+                // pose table.
+                entityNames = ffxi::EntityNames{};
+                entityPoses.clear();
+                radarEntities.clear();
+
+                if (readZone() == 0)
+                {
+                    characterAt = {wanted.x, wanted.y, wanted.z};
+                    characterFacing = wanted.heading;
+                    placeCharacter(characterAt, 60.0f);
+                    breadcrumbs.clear();
+                    std::printf("zoned into %s\n", wanted.zoneName.c_str());
+                }
+                else
+                {
+                    std::printf("could not read %s\n", wanted.datPath.c_str());
+                }
+
+                link->setLoading(false);
+                loadingZone.clear();
+            }
+
             // Preferences the last session left behind, taken once.
             if (link->takeSettings(musicVolume, radarTurns))
             {
