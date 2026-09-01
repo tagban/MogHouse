@@ -321,6 +321,13 @@ public partial class GameViewModel : ViewModelBase
     /// <summary>Which zone the open window was built for.</summary>
     private uint _openZone;
 
+    /// <summary>Whether a zone is being loaded, and which one.</summary>
+    [ObservableProperty]
+    public partial bool IsZoning { get; set; }
+
+    [ObservableProperty]
+    public partial string ZoningTo { get; set; } = "";
+
     /// <summary>
     /// Rebuilds the world window on the other side of a zone change.
     ///
@@ -338,6 +345,16 @@ public partial class GameViewModel : ViewModelBase
             return;
         }
 
+        // Somewhere to look while the world is gone.
+        //
+        // Tearing the window down without this left nothing on screen at all -
+        // the launcher hides itself while the world is up, so a zone change
+        // that failed to reopen produced a running, logged-in, invisible
+        // client. Which is exactly what "!zone 235 and it closed" was.
+        ZoningTo = FfxiZoneNames.Get(zone)?.Replace('_', ' ') ?? $"zone {zone}";
+        IsZoning = true;
+        WorldVisibilityChanged?.Invoke(false);
+
         _feeding?.Cancel();
         _world?.Dispose();
         _world = null;
@@ -347,8 +364,17 @@ public partial class GameViewModel : ViewModelBase
         // index.
         _tracker.Clear();
 
-        WorldStatus = $"Zoning to {zone}...";
+        WorldStatus = $"Zoning to {ZoningTo}...";
         OpenWorld();
+
+        IsZoning = false;
+        if (_world is null)
+        {
+            // Say so and stay visible, rather than hiding behind a window that
+            // never opened.
+            WorldStatus = $"Could not open {ZoningTo}. Reopen the world to try again.";
+            _shell.Status = WorldStatus;
+        }
     });
 
     /// <summary>

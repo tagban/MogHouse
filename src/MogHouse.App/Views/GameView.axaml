@@ -10,6 +10,7 @@
     <app:FirstLinkConverter x:Key="FirstLink"/>
   </UserControl.Resources>
 
+  <Panel>
   <Grid ColumnDefinitions="*,320" Margin="10">
 
     <!-- Chat -->
@@ -89,4 +90,41 @@
       </Border>
     </StackPanel>
   </Grid>
+
+    <!-- Loading. Covers the page rather than sitting in it: the panel behind
+         is describing a world that has already been torn down, and a Leave
+         button that acts on a disposed window is worse than no button. -->
+    <Border IsVisible="{Binding IsZoning}" Background="#E6101418">
+      <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="18">
+        <Image Source="/Assets/moghouse.ico" Width="96" Height="96"
+               HorizontalAlignment="Center" RenderTransformOrigin="0.5,1.0">
+          <Image.Styles>
+            <!-- A hop rather than a spinner. Slower on the way up than the way
+                 down, because that is what falling looks like. -->
+            <Style Selector="Image">
+              <Style.Animations>
+                <Animation Duration="0:0:0.85" IterationCount="INFINITE" Easing="SineEaseInOut">
+                  <KeyFrame Cue="0%">
+                    <Setter Property="RenderTransform" Value="translateY(0px) scale(1.0, 1.0)"/>
+                  </KeyFrame>
+                  <KeyFrame Cue="45%">
+                    <Setter Property="RenderTransform" Value="translateY(-26px) scale(1.0, 1.0)"/>
+                  </KeyFrame>
+                  <KeyFrame Cue="90%">
+                    <Setter Property="RenderTransform" Value="translateY(0px) scale(1.06, 0.94)"/>
+                  </KeyFrame>
+                  <KeyFrame Cue="100%">
+                    <Setter Property="RenderTransform" Value="translateY(0px) scale(1.0, 1.0)"/>
+                  </KeyFrame>
+                </Animation>
+              </Style.Animations>
+            </Style>
+          </Image.Styles>
+        </Image>
+
+        <TextBlock Text="{Binding ZoningTo}" FontSize="24" HorizontalAlignment="Center"/>
+        <TextBlock Text="Loading" Opacity="0.5" FontSize="12" HorizontalAlignment="Center"/>
+      </StackPanel>
+    </Border>
+  </Panel>
 </UserControl>

@@ -3244,8 +3244,13 @@ constexpr float kGravity = 26.0f;
                         SDL_StartTextInput(window);
                     }
                 }
-                else if (link && (event.key.key == SDLK_SLASH || event.key.key == SDLK_EXCLAIM))
+                else if (link && (event.key.key == SDLK_SLASH || event.key.key == SDLK_EXCLAIM ||
+                                  (event.key.key == SDLK_1 && (event.key.mod & SDL_KMOD_SHIFT))))
                 {
+                    // Shift and 1, as well as SDLK_EXCLAIM. On most layouts
+                    // there is no key that produces ! on its own, so the
+                    // keycode for it never arrives and only the shifted digit
+                    // does - which is why this did nothing at all.
                     // Almost everything typed here starts with one of these -
                     // / for the client's own commands, ! for the server's - so
                     // they open the line and put themselves in it rather than
