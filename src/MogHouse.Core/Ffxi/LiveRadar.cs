@@ -208,6 +208,9 @@ public sealed class LiveRadar : IDisposable
         _viewer.SetDeath(dead, raiseOffered);
     }
 
+    /// <summary>Whether the window is reading a zone right now.</summary>
+    public bool IsLoading => !_closed && _viewer.IsLoading;
+
     /// <summary>
     /// Draws a different zone in the window already open.
     ///

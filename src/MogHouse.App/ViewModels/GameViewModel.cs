@@ -205,7 +205,13 @@ public partial class GameViewModel : ViewModelBase
         {
             while (!token.IsCancellationRequested && _world is { Closed: false })
             {
-                if (_world.Position() is (float x, float vertical, float depth, sbyte direction))
+                // Not while a zone is being read. Until it finishes the window
+                // is still holding the position it had in the zone being left,
+                // and telling the server that is how one zone change becomes
+                // several: a position from the old zone can be standing in the
+                // line that sent us here.
+                if (_world.IsLoading != true &&
+                    _world.Position() is (float x, float vertical, float depth, sbyte direction))
                 {
                     session.PlaceAt(x, vertical, depth, direction);
                 }

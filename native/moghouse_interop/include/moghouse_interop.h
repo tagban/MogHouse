@@ -193,6 +193,11 @@ MH_API void mh_viewer_set_music(MhViewerHandle viewer, const char* path);
 MH_API void mh_viewer_load_zone(MhViewerHandle viewer, const char* dat_path, const char* zone_name,
                                 float x, float y, float z, float heading);
 
+/// Whether a zone is being read right now. While it is, the position this
+/// window reports still belongs to the zone being left, and sending that to the
+/// server is how a zone change turns into a loop.
+MH_API int32_t mh_viewer_is_loading(MhViewerHandle viewer);
+
 /// Preferences, both ways. Set once when the world opens; read back after the
 /// keys in the world window change them, so they can be written to disk.
 /// mh_viewer_take_settings returns non-zero when something changed.

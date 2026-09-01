@@ -183,6 +183,11 @@ void mh_viewer_load_zone(MhViewerHandle viewer, const char* dat_path, const char
     }
 }
 
+int32_t mh_viewer_is_loading(MhViewerHandle viewer)
+{
+    return viewer && viewer->link.loading() ? 1 : 0;
+}
+
 void mh_viewer_set_settings(MhViewerHandle viewer, float music_volume, int32_t radar_turns)
 {
     if (viewer)
