@@ -447,7 +447,7 @@ std::vector<std::filesystem::path> subroomsFor(const std::filesystem::path& zone
 /// wrong. The server ships the decoded meshes, so the triangles are lifted out
 /// of those and written world-space ahead of time; reading them here would mean
 /// linking zlib to parse a file that never changes.
-size_t loadWater(const std::string& zoneName, mh::Scene& scene)
+size_t loadWater(const std::string& zoneName, mh::Scene& scene, const mh::Collision& collision)
 {
     std::filesystem::path path = std::filesystem::path{"assets"} / "water" / (zoneName + ".water");
     if (const char* nativeDir = std::getenv("MOGHOUSE_NATIVE_DIR"))
@@ -493,12 +493,32 @@ size_t loadWater(const std::string& zoneName, mh::Scene& scene)
 
     for (uint32_t triangle = 0; triangle < count; ++triangle)
     {
+        // These triangles are the bed - the ground the terrain material calls
+        // submerged - so each is lifted to the top of the water above it. The
+        // whole triangle goes to one height, because a water surface is level
+        // and a sloping bed is not.
+        //
+        // The two come from different files and answer different questions:
+        // the mesh knows which ground is underwater, the MZB knows how deep it
+        // is over each cell, and neither is any use alone.
+        float surface = 0.0f;
+        bool lifted = false;
+        for (int corner = 0; corner < 3 && !lifted; ++corner)
+        {
+            const float* p = corners.data() + (static_cast<size_t>(triangle) * 9 + corner * 3);
+            if (const std::optional<float> top = collision.waterSurfaceAt(p[0], p[2], p[1]))
+            {
+                surface = *top;
+                lifted = true;
+            }
+        }
+
         for (int corner = 0; corner < 3; ++corner)
         {
             const float* p = corners.data() + (static_cast<size_t>(triangle) * 9 + corner * 3);
             mh::Vertex vertex{};
             vertex.position[0] = p[0];
-            vertex.position[1] = p[1];
+            vertex.position[1] = lifted ? surface : p[1];
             vertex.position[2] = p[2];
             vertex.normal[1] = 1.0f;
             // World-space UVs, so the surface is continuous across the seams
@@ -996,7 +1016,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         // zone texture the character happens to name should not be read twice.
         if (options.zoneName)
         {
-            const size_t water = loadWater(*options.zoneName, *zone);
+            const size_t water = loadWater(*options.zoneName, *zone, collision);
             if (water)
             {
                 std::printf("water: %zu triangles\n", water);

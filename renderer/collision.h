@@ -132,6 +132,15 @@ public:
     /// the server reports them in deep water.
     std::optional<float> waterDepthAt(float x, float z, float y) const;
 
+    /// The height of the water's surface over (x, z), nearest `y`.
+    ///
+    /// Different question from waterDepthAt, and the one that has to be asked
+    /// to draw water. The terrain material says which ground is submerged -
+    /// the bed - and the MZB's per-cell height says where the top of the water
+    /// over it is. Drawing the bed without this puts the surface at the bottom
+    /// of the canal.
+    std::optional<float> waterSurfaceAt(float x, float z, float y) const;
+
     /// How far along `from` -> `to` the first solid face is, as a fraction of
     /// the way, or nothing if the line is clear.
     ///

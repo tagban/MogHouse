@@ -343,6 +343,40 @@ std::optional<float> Collision::firstAlong(const Vec3& from, const Vec3& to, boo
     return nearest;
 }
 
+std::optional<float> Collision::waterSurfaceAt(float x, float z, float y) const
+{
+    if (triangles_.empty())
+    {
+        return std::nullopt;
+    }
+
+    const std::vector<uint32_t>* candidates = nullptr;
+    std::vector<uint32_t> scratch;
+    forEachNear(x, z, x, z, candidates, scratch);
+
+    std::optional<float> bestFloor;
+    std::optional<float> bestWater;
+    for (uint32_t index : *candidates)
+    {
+        const Triangle& triangle = triangles_[index];
+        if (!triangle.hasWater)
+        {
+            continue;
+        }
+        const std::optional<float> floor = heightAt(triangle.a, triangle.b, triangle.c, x, z);
+        if (!floor)
+        {
+            continue;
+        }
+        if (!bestFloor || std::fabs(*floor - y) < std::fabs(*bestFloor - y))
+        {
+            bestFloor = floor;
+            bestWater = triangle.waterY;
+        }
+    }
+    return bestWater;
+}
+
 std::optional<float> Collision::waterDepthAt(float x, float z, float y) const
 {
     if (triangles_.empty())
