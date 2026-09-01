@@ -381,6 +381,26 @@ public:
 
     void chooseLink(Link which);
 
+    /// What the player has chosen, so it can be kept between sessions.
+    ///
+    /// Both directions: set once when the world opens, and read back after
+    /// the keys in the world window change them. The window is where they are
+    /// changed and the managed side is what has a file.
+    struct Settings
+    {
+        float musicVolume{0.35f};
+        bool radarTurns{true};
+    };
+
+    void applySettings(Settings settings);
+    Settings settings() const;
+    bool settingsChanged();
+    void noteSettings(Settings settings);
+
+    /// Takes settings handed in from outside, once. False when there were
+    /// none waiting, which is every frame after the first.
+    bool takeSettings(float& volume, bool& radarTurns);
+
     /// The .bgw the zone wants playing, or empty for silence. Set from the
     /// session, which is the half that hears the server say so.
     void setMusic(std::string path);
@@ -433,6 +453,10 @@ private:
     std::atomic<uint8_t> mpPercent_{0};
     std::atomic<bool> vitalsKnown_{false};
     std::atomic<int> link_{0};
+    std::atomic<float> musicVolume_{0.35f};
+    std::atomic<bool> radarTurns_{true};
+    std::atomic<bool> settingsDirty_{false};
+    std::atomic<bool> settingsPending_{false};
     mutable std::mutex musicLock_;
     std::string music_;
     bool musicChanged_{false};

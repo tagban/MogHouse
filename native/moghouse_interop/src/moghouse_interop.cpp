@@ -174,6 +174,32 @@ void mh_viewer_set_music(MhViewerHandle viewer, const char* path)
     }
 }
 
+void mh_viewer_set_settings(MhViewerHandle viewer, float music_volume, int32_t radar_turns)
+{
+    if (viewer)
+    {
+        viewer->link.applySettings({music_volume, radar_turns != 0});
+    }
+}
+
+int32_t mh_viewer_take_settings(MhViewerHandle viewer, float* music_volume, int32_t* radar_turns)
+{
+    if (!viewer || !viewer->link.settingsChanged())
+    {
+        return 0;
+    }
+    const auto settings = viewer->link.settings();
+    if (music_volume)
+    {
+        *music_volume = settings.musicVolume;
+    }
+    if (radar_turns)
+    {
+        *radar_turns = settings.radarTurns ? 1 : 0;
+    }
+    return 1;
+}
+
 int32_t mh_viewer_take_link(MhViewerHandle viewer)
 {
     return viewer ? static_cast<int32_t>(viewer->link.takeLink()) : 0;

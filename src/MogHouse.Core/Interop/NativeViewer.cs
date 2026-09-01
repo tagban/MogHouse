@@ -365,6 +365,28 @@ public sealed partial class NativeViewer : IDisposable
     /// <summary>Who the player asked to talk to, or 0 if nobody.</summary>
     public uint TakeTalk() => _disposed || _handle == IntPtr.Zero ? 0 : mh_viewer_take_talk(_handle);
 
+    /// <summary>Hands the saved preferences to the world window.</summary>
+    public void SetSettings(float musicVolume, bool radarTurns)
+    {
+        if (!_disposed && _handle != IntPtr.Zero)
+        {
+            mh_viewer_set_settings(_handle, musicVolume, radarTurns ? 1 : 0);
+        }
+    }
+
+    /// <summary>
+    /// What the player changed in the world window since last asked, or null.
+    /// </summary>
+    public (float MusicVolume, bool RadarTurns)? TakeSettings()
+    {
+        if (_disposed || _handle == IntPtr.Zero ||
+            mh_viewer_take_settings(_handle, out float volume, out int turns) == 0)
+        {
+            return null;
+        }
+        return (volume, turns != 0);
+    }
+
     /// <summary>
     /// The music file the zone wants, or null for silence.
     /// </summary>
@@ -532,6 +554,12 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
     private static partial void mh_viewer_set_music(IntPtr viewer, string? path);
+
+    [LibraryImport(LibraryName)]
+    private static partial void mh_viewer_set_settings(IntPtr viewer, float musicVolume, int radarTurns);
+
+    [LibraryImport(LibraryName)]
+    private static partial int mh_viewer_take_settings(IntPtr viewer, out float musicVolume, out int radarTurns);
 
     [LibraryImport(LibraryName)]
     private static partial int mh_viewer_take_death_choice(IntPtr viewer);

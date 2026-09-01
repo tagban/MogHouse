@@ -188,6 +188,12 @@ MH_API int32_t mh_viewer_take_link(MhViewerHandle viewer);
 /// audio device because that is where SDL already is.
 MH_API void mh_viewer_set_music(MhViewerHandle viewer, const char* path);
 
+/// Preferences, both ways. Set once when the world opens; read back after the
+/// keys in the world window change them, so they can be written to disk.
+/// mh_viewer_take_settings returns non-zero when something changed.
+MH_API void mh_viewer_set_settings(MhViewerHandle viewer, float music_volume, int32_t radar_turns);
+MH_API int32_t mh_viewer_take_settings(MhViewerHandle viewer, float* music_volume, int32_t* radar_turns);
+
 /// What the player pressed there, as one of MH_DEATH_*, consumed by the read.
 /// Both answers are packets only the caller can send, the same way a jump is.
 MH_API int32_t mh_viewer_take_death_choice(MhViewerHandle viewer);

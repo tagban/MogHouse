@@ -208,6 +208,19 @@ public sealed class LiveRadar : IDisposable
         _viewer.SetDeath(dead, raiseOffered);
     }
 
+    /// <summary>Hands the saved preferences to the world window.</summary>
+    public void ShowSettings(MogHouseSettings settings)
+    {
+        if (!_closed)
+        {
+            _viewer.SetSettings(settings.MusicVolume, settings.RadarTurnsWithPlayer);
+        }
+    }
+
+    /// <summary>What the player changed in the world window, or null.</summary>
+    public (float MusicVolume, bool RadarTurns)? TakeSettings() =>
+        _closed ? null : _viewer.TakeSettings();
+
     /// <summary>The music file the zone wants, or null for silence.</summary>
     public void ShowMusic(string? path)
     {

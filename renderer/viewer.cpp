@@ -942,6 +942,38 @@ void mh::ViewerLink::setVitals(uint32_t hp, uint32_t mp, uint32_t tp, uint8_t hp
 
 void mh::ViewerLink::chooseLink(Link which) { link_ = static_cast<int>(which); }
 
+void mh::ViewerLink::applySettings(Settings settings)
+{
+    musicVolume_ = settings.musicVolume;
+    radarTurns_ = settings.radarTurns;
+    settingsPending_ = true;
+}
+
+mh::ViewerLink::Settings mh::ViewerLink::settings() const
+{
+    return Settings{musicVolume_.load(), radarTurns_.load()};
+}
+
+bool mh::ViewerLink::settingsChanged() { return settingsDirty_.exchange(false); }
+
+bool mh::ViewerLink::takeSettings(float& volume, bool& radarTurns)
+{
+    if (!settingsPending_.exchange(false))
+    {
+        return false;
+    }
+    volume = musicVolume_.load();
+    radarTurns = radarTurns_.load();
+    return true;
+}
+
+void mh::ViewerLink::noteSettings(Settings settings)
+{
+    musicVolume_ = settings.musicVolume;
+    radarTurns_ = settings.radarTurns;
+    settingsDirty_ = true;
+}
+
 void mh::ViewerLink::setMusic(std::string path)
 {
     std::lock_guard<std::mutex> held{musicLock_};
@@ -3242,11 +3274,19 @@ constexpr float kGravity = 26.0f;
                     const float step = event.key.key == SDLK_MINUS ? -0.05f : 0.05f;
                     musicVolume = std::clamp(musicVolume + step, 0.0f, 1.0f);
                     music.setVolume(musicVolume);
+                    if (link)
+                    {
+                        link->noteSettings({musicVolume, radarTurns});
+                    }
                     std::printf("music volume %.0f%%\n", musicVolume * 100.0f);
                 }
                 else if (event.key.key == SDLK_M)
                 {
                     radarTurns = !radarTurns;
+                    if (link)
+                    {
+                        link->noteSettings({musicVolume, radarTurns});
+                    }
                     std::printf(radarTurns ? "radar turns with you\n" : "radar holds north up\n");
                 }
                 else if (event.key.key == SDLK_R)
@@ -4029,6 +4069,12 @@ constexpr float kGravity = 26.0f;
 
             // Whatever the server last asked for. Checked every frame rather
             // than pushed, because the link is what the session can reach.
+            // Preferences the last session left behind, taken once.
+            if (link->takeSettings(musicVolume, radarTurns))
+            {
+                music.setVolume(musicVolume);
+            }
+
             bool musicChanged = false;
             const std::string wantedMusic = link->takeMusic(musicChanged);
             if (musicChanged)

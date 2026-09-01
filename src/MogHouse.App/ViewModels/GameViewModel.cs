@@ -74,6 +74,11 @@ public partial class GameViewModel : ViewModelBase
         // The zone's tune, and whatever the server changes it to.
         shell.Session.MusicChanged += OnMusicChanged;
 
+        // Arriving somewhere else entirely - a zone line, !zone, a homepoint
+        // return. The world window is built around one zone's geometry and
+        // cannot be told to become another, so it is replaced.
+        shell.Session.ZoneChanged += OnZoneChanged;
+
         // A GM teleport, a homepoint return, anything the server decides.
         // Without this the character stays where the renderer last drew them.
         shell.Session.MovedByServer += OnMovedByServer;
@@ -136,6 +141,7 @@ public partial class GameViewModel : ViewModelBase
             ? FfxiAppearance.LookString(1, 0)
             : FfxiAppearance.LookString(self.Race, self.Face);
 
+        _openZone = session.ZoneState.ZoneNo;
         _world = LiveRadar.Open((int)session.ZoneState.ZoneNo, session.PosX, session.PosVertical, session.PosDepth,
                                 session.ZoneState.GameTime, CharacterName, look);
         if (_world is null)
@@ -160,6 +166,10 @@ public partial class GameViewModel : ViewModelBase
         // so someone who logs in dead - or reopens the world after closing it -
         // gets no event to tell them there is a way up.
         _world.ShowDeath(session.IsDead, session.HasRaiseOffer);
+
+        // What the last session left behind, before anything else: the
+        // volume has to be right before the first note rather than after it.
+        _world.ShowSettings(MogHouseSettings.Current);
 
         // The world window is new; it has not heard the zone's music yet.
         OnMusicChanged(session.CurrentTrack);
@@ -200,6 +210,18 @@ public partial class GameViewModel : ViewModelBase
                     case NativeDeathChoice.AcceptRaise:
                         await session.AcceptRaiseAsync();
                         break;
+                }
+
+                // Volume and the minimap are changed by keys in the world
+                // window, so this side only hears about it afterwards - and
+                // writes it out, so the next session starts where this one
+                // left off.
+                if (_world?.TakeSettings() is { } changed)
+                {
+                    MogHouseSettings settings = MogHouseSettings.Current;
+                    settings.MusicVolume = changed.MusicVolume;
+                    settings.RadarTurnsWithPlayer = changed.RadarTurns;
+                    settings.Save();
                 }
 
                 // Somewhere to send a bug from inside the world. The window
@@ -295,6 +317,39 @@ public partial class GameViewModel : ViewModelBase
     /// <summary>Someone has cast Raise, which is what lights the second button.</summary>
     private void OnRaiseOfferChanged(bool offered) =>
         _world?.ShowDeath(_shell.Session.IsDead, offered);
+
+    /// <summary>Which zone the open window was built for.</summary>
+    private uint _openZone;
+
+    /// <summary>
+    /// Rebuilds the world window on the other side of a zone change.
+    ///
+    /// Nothing here can be reused: the geometry, the collision, the baked map
+    /// and the zone lines all belong to the zone being left. Without this the
+    /// window carried on drawing the old zone while the server had already
+    /// moved the character, so !zone and a walked zone line both looked like
+    /// the client had frozen - the character could not move, because the
+    /// ground under them was somewhere else entirely.
+    /// </summary>
+    private void OnZoneChanged(uint zone) => Dispatcher.UIThread.Post(() =>
+    {
+        if (zone == _openZone)
+        {
+            return;
+        }
+
+        _feeding?.Cancel();
+        _world?.Dispose();
+        _world = null;
+
+        // Target indices are only unique within a zone, so carrying one across
+        // would put an old entity's name and kind on whatever now holds that
+        // index.
+        _tracker.Clear();
+
+        WorldStatus = $"Zoning to {zone}...";
+        OpenWorld();
+    });
 
     /// <summary>
     /// The server sends a track number; the file it names has to be found.
