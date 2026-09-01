@@ -122,6 +122,7 @@ void mh_viewer_set_entities(MhViewerHandle viewer, const MhRadarEntity* entities
             std::memcpy(entity.look, entities[i].look, sizeof(entity.look));
             entity.gmLevel = entities[i].gmLevel;
             entity.modelId = static_cast<uint16_t>(entities[i].modelId);
+            entity.healthPercent = entities[i].healthPercent;
             copied.push_back(std::move(entity));
         }
     }

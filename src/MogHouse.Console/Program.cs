@@ -1086,6 +1086,7 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
     // out about what an entity looks like and whether it should be drawn, and
     // the session only reports the updates.
     bool countedNames = false;
+    var seenOnce = new HashSet<uint>();
 
     var tracker = new FfxiEntityTracker { SelfUniqueNo = session.ZoneState.UniqueNo };
     session.EntitiesChanged += updates =>
@@ -1094,6 +1095,17 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
         foreach (FfxiEntityUpdate update in updates)
         {
             tracker.Observe(update, now);
+
+            // One line the first time each entity is seen, while working
+            // out why mobs read as NPCs.
+            if (seenOnce.Add(update.UniqueNo))
+            {
+                string hp = update.HealthPercent?.ToString() ?? "-";
+                string battle = update.BattleFlags?.ToString("X2") ?? "-";
+                string alleg = update.Allegiance?.ToString() ?? "-";
+                Console.WriteLine($"  seen {update.UniqueNo:X8} pkt={update.PacketId:X3} mask={update.SendFlags:X2}"
+                                  + $" hp={hp} battle={battle} alleg={alleg} kind={update.Kind}");
+            }
         }
 
         // Why a nameplate is missing: no name at all, or a name we were

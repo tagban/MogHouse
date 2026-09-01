@@ -90,6 +90,11 @@ struct RadarEntity
     /// empty ground where a rabbit should be.
     uint16_t modelId{};
 
+    /// Health, 0 to 100, or -1 when the server has not said. A mob at zero is
+    /// a corpse and is named in grey rather than in the colour of something
+    /// worth fighting.
+    int healthPercent{-1};
+
     /// Whether there is a look here worth building. Race zero is not a race.
     bool hasLook() const { return look[0] != 0; }
 

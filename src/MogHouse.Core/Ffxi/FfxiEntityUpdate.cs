@@ -123,9 +123,24 @@ public sealed record FfxiEntityUpdate(
     /// returns true when the operand is null, so every update too short to
     /// carry the byte would report a mob.
     /// </remarks>
-    public bool IsLivingMob => BattleFlags is byte flags && (flags & MobAliveFlag) != 0;
+    /// <remarks>
+    /// Any non-zero value, not the 0x08 bit alone.
+    ///
+    /// entity_update.cpp assigns `0x08` there and nothing else writes the
+    /// byte, so 0x08 exactly is what it should hold - but live captures say
+    /// otherwise: a Savanna Rarab arrives with 0x0B, another mob with 0x0C,
+    /// and a Carrion Crow with 0x11, which has no 0x08 in it at all and so
+    /// came out the same green as a shopkeeper. Something past that
+    /// assignment is contributing bits this client cannot yet account for.
+    ///
+    /// What holds across every capture is the weaker claim: the byte is
+    /// written only in the mob branch, so a real NPC arrives with 0x00 and
+    /// anything that fights arrives with something. Testing for written-at-
+    /// all is the part that is actually known to be true.
+    /// </remarks>
+    public bool IsLivingMob => BattleFlags is byte flags && flags != 0;
 
-    /// <summary>Set on a living mob; NPCs never write this byte at all.</summary>
+    /// <summary>The bit the server assigns for a living mob. See IsLivingMob for why it is not tested alone.</summary>
     public const byte MobAliveFlag = 0x08;
 
     /// <summary>

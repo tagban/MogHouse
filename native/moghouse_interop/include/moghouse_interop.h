@@ -73,6 +73,10 @@ typedef struct MhRadarEntity
     /// rather than as a race wearing things: a rabbit, a crab, a goblin.
     /// Zero when it has none. See mh::creatureFileId.
     uint32_t modelId;
+
+    /// Health, 0 to 100. A mob at zero is a corpse: still an entity, still
+    /// named, and not something to attack. -1 when the server has not said.
+    int32_t healthPercent;
 } MhRadarEntity;
 
 /// What to open. Every string is borrowed for the duration of the create call

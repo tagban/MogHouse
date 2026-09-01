@@ -69,6 +69,9 @@ public struct NativeRadarEntity
     /// </summary>
     public uint ModelId;
 
+    /// <summary>Health 0-100, or -1 when the server has not said.</summary>
+    public int HealthPercent;
+
     public unsafe void SetLook(Ffxi.FfxiEntityLook? look)
     {
         if (look is null)

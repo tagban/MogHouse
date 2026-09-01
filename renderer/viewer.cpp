@@ -109,6 +109,10 @@ inline constexpr float kNameNpc[3] = {0.60f, 0.98f, 0.60f};
 inline constexpr float kPlateClearance = 0.16f;
 inline constexpr float kNameMonster[3] = {0.98f, 0.86f, 0.30f};
 
+/// A corpse. Named, targetable, and not worth attacking - the one state where
+/// a monster should not be wearing the colour that says "fight me".
+inline constexpr float kNameDead[3] = {0.55f, 0.55f, 0.58f};
+
 /// A GM. Darker than the red an aggressive monster gets, which is the
 /// distinction the real client draws.
 inline constexpr float kNameGm[3] = {0.80f, 0.14f, 0.14f};
@@ -3771,7 +3775,11 @@ constexpr float kGravity = 26.0f;
                     }
                     else if (entity.kind == 2)
                     {
-                        tint = kNameMonster;
+                        // A mob the server says has no health left. The bit
+                        // that marks a mob is literally `hp > 0`, so a corpse
+                        // stops announcing itself as one - the tracker keeps
+                        // it an enemy anyway, and this is what says it is over.
+                        tint = entity.healthPercent == 0 ? kNameDead : kNameMonster;
                     }
                     else if (entity.kind == 1)
                     {
