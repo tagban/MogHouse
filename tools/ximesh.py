@@ -167,22 +167,26 @@ WATERLINE_RADIUS = 6
 # third of the way up a wall about four units tall.
 WATERLINE_MIN_DEPTH = 1.0
 
+# How far a surface will reach across a hole in its own bed, in cells.
+#
+# The server's mesh is the terrain the server cares about, which is what a
+# player can walk on. Where a bridge or a tunnel roof is the walkable surface,
+# the canal floor beneath it is not in the mesh at all - so a canal arrives
+# here in pieces, with a gap wherever something crosses over it. Bastok's has
+# a four-cell hole under one bridge and another under a tunnel.
+#
+# The water is not misplaced in those gaps, it is missing, so it is bridged: a
+# cell with no bed of its own is filled if the same pool continues on both
+# sides of it within this reach. Short on purpose - it is meant to cross a
+# bridge, not to flood a courtyard that happens to sit between two canals.
+GAP_SPAN = 4
 
-def waterlines(triangles):
-    """A surface height for each water triangle.
 
-    The MZB's per-cell height is the obvious source and is not usable: Windurst
-    Waters writes 0.0010 into every water cell, which is a flag rather than a
-    height, and lifting to it drags surfaces below their own bed. The shape
-    answers instead - water meets its bank at the highest ground it touches.
+def _pools(triangles):
+    """The cell grid, its pools, and a local waterline for each cell.
 
-    DAT space has y increasing downward, so the highest ground is the smallest
-    y, and a waterline is near the bottom of the sorted heights.
-
-    Two things the obvious version gets wrong, both found in Bastok Markets:
-    pools must not merge across a height step (see POOL_JOIN_HEIGHT), and the
-    line has to be local (see WATERLINE_RADIUS), because most of this game's
-    water is running rather than standing.
+    Shared by the two things that need it: the surface for a triangle that has
+    a bed, and the surface for a cell that has none.
     """
     cells = collections.defaultdict(list)
     owner = {}
@@ -230,7 +234,27 @@ def waterlines(triangles):
             out[cell] = best
         return out
 
-    local = sweep(sweep(level, 0), 1)
+    return cells, owner, pool_of, sweep(sweep(level, 0), 1)
+
+
+def waterlines(triangles):
+    """A surface height for each water triangle.
+
+    The MZB's per-cell height is the obvious source and is not usable: Windurst
+    Waters writes 0.0010 into every water cell, which is a flag rather than a
+    height, and lifting to it drags surfaces below their own bed. The shape
+    answers instead - water meets its bank at the highest ground it touches.
+
+    DAT space has y increasing downward, so the highest ground is the smallest
+    y, and a waterline is near the bottom of the sorted heights.
+
+    Three things the obvious version gets wrong, all found in Bastok Markets:
+    pools must not merge across a height step (POOL_JOIN_HEIGHT), the line has
+    to be local because most of this game's water runs rather than stands
+    (WATERLINE_RADIUS), and a surface resting exactly on its own bed z-fights
+    with the stone (WATERLINE_MIN_DEPTH).
+    """
+    _, owner, _, local = _pools(triangles)
 
     # Never below the triangle's own highest corner, and never resting exactly
     # on it. Below means water buried in the channel it belongs to - invisible,
@@ -242,6 +266,50 @@ def waterlines(triangles):
             for i in range(len(triangles))]
 
 
+def bridged(triangles):
+    """Squares of water for cells whose bed is missing under something solid.
+
+    Yields (corners, surface) shaped like a bed triangle, so the caller writes
+    them the same way.
+    """
+    cells, _, pool_of, local = _pools(triangles)
+    if not cells:
+        return
+
+    xs = [c[0] for c in cells]
+    zs = [c[1] for c in cells]
+    for cx in range(min(xs), max(xs) + 1):
+        for cz in range(min(zs), max(zs) + 1):
+            if (cx, cz) in cells:
+                continue
+
+            found = []
+            for axis in (0, 1):
+                before = after = None
+                for step in range(1, GAP_SPAN + 1):
+                    near = (cx - step, cz) if axis == 0 else (cx, cz - step)
+                    if near in cells:
+                        before = near
+                        break
+                for step in range(1, GAP_SPAN + 1):
+                    near = (cx + step, cz) if axis == 0 else (cx, cz + step)
+                    if near in cells:
+                        after = near
+                        break
+                if (before and after and pool_of[before] == pool_of[after] and
+                        abs(local[before] - local[after]) <= POOL_JOIN_HEIGHT):
+                    found.append((local[before] + local[after]) / 2.0)
+
+            if not found:
+                continue
+
+            surface = sum(found) / len(found)
+            x0, x1 = cx * POOL_CELL, (cx + 1) * POOL_CELL
+            z0, z1 = cz * POOL_CELL, (cz + 1) * POOL_CELL
+            yield [(x0, surface, z0), (x1, surface, z0), (x1, surface, z1)], surface
+            yield [(x0, surface, z0), (x1, surface, z1), (x0, surface, z1)], surface
+
+
 def emit(zone, data, path):
     """Write the water as a flat float32 list the renderer can read straight in.
 
@@ -251,15 +319,22 @@ def emit(zone, data, path):
     """
     triangles = list(water_triangles(data))
     surfaces = waterlines(triangles)
+    spans = list(bridged(triangles))
+
     with open(path, "wb") as out:
         out.write(b"MHWA")
-        out.write(struct.pack("<I", len(triangles)))
+        out.write(struct.pack("<I", len(triangles) + len(spans)))
         for corners, surface in zip(triangles, surfaces):
             # Flat, at its pool's waterline. These triangles are the bed, and a
             # water surface is level where a bed is not.
             for x, _, z in corners:
                 out.write(struct.pack("<3f", x, -surface, -z))
-    return len(triangles)
+        for corners, surface in spans:
+            # A square carrying the water under a bridge, where the server's
+            # mesh has no bed because the bridge is what you walk on.
+            for x, _, z in corners:
+                out.write(struct.pack("<3f", x, -surface, -z))
+    return len(triangles) + len(spans)
 
 
 def main():
