@@ -1237,491 +1237,511 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // Nothing between here and there needs the zone: the device, the swap
     // chain and the shaders are all built from the window.
 
-    if (!options.zonePath.empty())
-    {
-        const char* keyPath = options.keyTablePath.empty() ? nullptr : options.keyTablePath.c_str();
-        if (!keyPath)
+    // Reading a zone, and everything the GPU needs to draw it.
+    //
+    // A lambda rather than a straight line because it has to run more than
+    // once: zoning used to close this window and open another, which is why
+    // the client appeared to vanish on !zone. Everything below is assigned to
+    // variables held outside it, and every WebGPU handle releases what it
+    // held when it is reassigned, so calling it again simply replaces the
+    // zone in the window already on screen.
+    // The baked overhead map. Declared out here rather than beside the bake
+    // because the radar reads it every frame and a new zone replaces it.
+    wgpu::Texture mapTexture;
+
+    const auto readZone = [&]() -> int {
+        if (!options.zonePath.empty())
         {
-            std::printf("set MOGHOUSE_FFXI_KEYTABLE to the 256-byte MZB key table to load a zone\n");
-            return 2;
-        }
-        zone = loadZone(options.zonePath.c_str(), keyPath,
-                        options.keyTable2Path.empty() ? nullptr : options.keyTable2Path.c_str(), zoneId, textures,
-                        lighting, collision, interiors);
-        if (!zone)
-        {
-            return 1;
-        }
-        // The character is loaded after the zone so it can share the texture
-        // map: a PC in a town wears textures the zone never mentions, and a
-        // zone texture the character happens to name should not be read twice.
-        if (options.zoneName)
-        {
-            const size_t water = loadWater(*options.zoneName, *zone);
-            if (water)
+            const char* keyPath = options.keyTablePath.empty() ? nullptr : options.keyTablePath.c_str();
+            if (!keyPath)
             {
-                std::printf("water: %zu triangles\n", water);
+                std::printf("set MOGHOUSE_FFXI_KEYTABLE to the 256-byte MZB key table to load a zone\n");
+                return 2;
             }
-        }
-        std::printf("collision: %zu triangles, %zu walls\n", collision.triangleCount(), collision.wallCount());
-        std::printf("zone %s: %zu triangles\n", zoneId.c_str(), zone->indices.size() / 3);
-        std::printf("  bounds x %.1f..%.1f  y %.1f..%.1f  z %.1f..%.1f\n", zone->boundsMin.x, zone->boundsMax.x,
-                    zone->boundsMin.y, zone->boundsMax.y, zone->boundsMin.z, zone->boundsMax.z);
-    }
-    else
-    {
-        std::printf("no DAT given - clearing only. Pass a zone DAT to draw one.\n");
-    }
-
-    if (zone && !zone->indices.empty())
-    {
-        vertexBuffer = createBuffer(device, zone->vertices.data(), zone->vertices.size() * sizeof(mh::Vertex),
-                                    wgpu::BufferUsage::Vertex);
-        indexBuffer = createBuffer(device, zone->indices.data(), zone->indices.size() * sizeof(uint32_t),
-                                   wgpu::BufferUsage::Index);
-        instanceBuffer = createBuffer(device, zone->instances.data(), zone->instances.size() * sizeof(float),
-                                      wgpu::BufferUsage::Vertex);
-        indexCount = static_cast<uint32_t>(zone->indices.size());
-        std::printf("buffers created\n");
-
-        wgpu::BufferDescriptor uniformDescriptor{.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
-                                                 .size = sizeof(Uniforms)};
-        uniformBuffer = device.CreateBuffer(&uniformDescriptor);
-
-        wgpu::ShaderSourceWGSL wgsl;
-        wgsl.code = mh::kZoneShader;
-        wgpu::ShaderModuleDescriptor moduleDescriptor{.nextInChain = &wgsl};
-        wgpu::ShaderModule module = device.CreateShaderModule(&moduleDescriptor);
-
-        // Location 7, not 3: the instance matrix already holds 3 through 6, and
-        // the two buffers share one location space.
-        wgpu::VertexAttribute attributes[4] = {
-            {.format = wgpu::VertexFormat::Float32x3, .offset = 0, .shaderLocation = 0},
-            {.format = wgpu::VertexFormat::Float32x3, .offset = 3 * sizeof(float), .shaderLocation = 1},
-            {.format = wgpu::VertexFormat::Float32x2, .offset = 6 * sizeof(float), .shaderLocation = 2},
-            {.format = wgpu::VertexFormat::Unorm8x4, .offset = 8 * sizeof(float), .shaderLocation = 7}};
-        wgpu::VertexAttribute instanceAttributes[4] = {
-            {.format = wgpu::VertexFormat::Float32x4, .offset = 0, .shaderLocation = 3},
-            {.format = wgpu::VertexFormat::Float32x4, .offset = 4 * sizeof(float), .shaderLocation = 4},
-            {.format = wgpu::VertexFormat::Float32x4, .offset = 8 * sizeof(float), .shaderLocation = 5},
-            {.format = wgpu::VertexFormat::Float32x4, .offset = 12 * sizeof(float), .shaderLocation = 6}};
-
-        wgpu::VertexBufferLayout vertexLayout{.stepMode = wgpu::VertexStepMode::Vertex,
-                                              .arrayStride = sizeof(mh::Vertex),
-                                              .attributeCount = 4,
-                                              .attributes = attributes};
-        // Stepping per instance rather than per vertex is the whole trick: one
-        // copy of the geometry, one matrix per placement.
-        wgpu::VertexBufferLayout instanceLayout{.stepMode = wgpu::VertexStepMode::Instance,
-                                                .arrayStride = 16 * sizeof(float),
-                                                .attributeCount = 4,
-                                                .attributes = instanceAttributes};
-        wgpu::VertexBufferLayout bufferLayouts[2] = {vertexLayout, instanceLayout};
-
-        // An explicit layout shared by both pipelines. Letting each derive its
-        // own default layout makes bind groups built for one incompatible with
-        // the other, which fails at draw time rather than at creation.
-        wgpu::BindGroupLayoutEntry layoutEntries[3] = {};
-        layoutEntries[0].binding = 0;
-        layoutEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
-        layoutEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
-        layoutEntries[1].binding = 1;
-        layoutEntries[1].visibility = wgpu::ShaderStage::Fragment;
-        layoutEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
-        layoutEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
-        layoutEntries[2].binding = 2;
-        layoutEntries[2].visibility = wgpu::ShaderStage::Fragment;
-        layoutEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
-
-        wgpu::BindGroupLayoutDescriptor bindGroupLayoutDescriptor{.entryCount = 3, .entries = layoutEntries};
-        zoneBindGroupLayout = device.CreateBindGroupLayout(&bindGroupLayoutDescriptor);
-
-        wgpu::PipelineLayoutDescriptor pipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
-                                                                .bindGroupLayouts = &zoneBindGroupLayout};
-        wgpu::PipelineLayout sharedLayout = device.CreatePipelineLayout(&pipelineLayoutDescriptor);
-
-        wgpu::ColorTargetState colorTarget{.format = surfaceFormat};
-        wgpu::FragmentState fragment{.module = module, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &colorTarget};
-        wgpu::DepthStencilState depthStencil{.format = kDepthFormat,
-                                             .depthWriteEnabled = wgpu::OptionalBool::True,
-                                             .depthCompare = wgpu::CompareFunction::Less};
-
-        wgpu::RenderPipelineDescriptor pipelineDescriptor{
-            .layout = sharedLayout,
-            .vertex = {.module = module, .entryPoint = "vertexMain", .bufferCount = 2, .buffers = bufferLayouts},
-            .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
-            .depthStencil = &depthStencil,
-            .fragment = &fragment};
-        pipeline = device.CreateRenderPipeline(&pipelineDescriptor);
-
-        // Same pipeline, alpha-cutout fragment shader. Which one a batch uses
-        // comes from its mesh header rather than from one global choice.
-        wgpu::FragmentState cutoutFragment{
-            .module = module, .entryPoint = "fragmentCutout", .targetCount = 1, .targets = &colorTarget};
-        wgpu::RenderPipelineDescriptor cutoutDescriptor = pipelineDescriptor;
-        cutoutDescriptor.fragment = &cutoutFragment;
-        cutoutPipeline = device.CreateRenderPipeline(&cutoutDescriptor);
-
-        // And once more for water: the same shader, blended, and not writing
-        // depth so a surface does not hide the one behind it. Bastok Markets
-        // has two water meshes stacked - a darker body with a lighter sheet
-        // over it - and with depth writes on, whichever drew first won.
-        wgpu::BlendState surfaceBlend{
-            .color = {.operation = wgpu::BlendOperation::Add,
-                      .srcFactor = wgpu::BlendFactor::SrcAlpha,
-                      .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
-            .alpha = {.operation = wgpu::BlendOperation::Add,
-                      .srcFactor = wgpu::BlendFactor::One,
-                      .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha}};
-        wgpu::ColorTargetState surfaceTarget{.format = surfaceFormat, .blend = &surfaceBlend};
-        wgpu::FragmentState surfaceFragment{
-            .module = module, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &surfaceTarget};
-        wgpu::DepthStencilState surfaceDepth{.format = kDepthFormat,
-                                             .depthWriteEnabled = wgpu::OptionalBool::False,
-                                             .depthCompare = wgpu::CompareFunction::Less};
-        wgpu::RenderPipelineDescriptor surfaceDescriptor = pipelineDescriptor;
-        surfaceDescriptor.fragment = &surfaceFragment;
-        surfaceDescriptor.depthStencil = &surfaceDepth;
-        translucentPipeline = device.CreateRenderPipeline(&surfaceDescriptor);
-
-        // WebGPU has no bindless arrays, so each texture needs its own bind
-        // group and its own draw. Fine at a zone's few dozen textures; this is
-        // the thing that will need atlasing or caching at a larger scale.
-        wgpu::SamplerDescriptor samplerDescriptor{};
-        samplerDescriptor.addressModeU = wgpu::AddressMode::Repeat;
-        samplerDescriptor.addressModeV = wgpu::AddressMode::Repeat;
-        samplerDescriptor.magFilter = wgpu::FilterMode::Linear;
-        samplerDescriptor.minFilter = wgpu::FilterMode::Linear;
-        sampler = device.CreateSampler(&samplerDescriptor);
-
-        whiteTexture = mh::createWhiteTexture(device);
-        // Dark. Bastok's water is nearly black at night and a deep slate by
-        // day, and a cheerful mid-blue placeholder reads as a mistake in a
-        // city built out of grey stone.
-        waterFallbackTexture = mh::createSolidTexture(device, 26, 46, 54, 190);
-        const wgpu::TextureView whiteView = whiteTexture.CreateView();
-        const wgpu::TextureView waterFallbackView = waterFallbackTexture.CreateView();
-
-        if (!zone->waterIndices.empty())
-        {
-            waterVertexBuffer = createBuffer(device, zone->waterVertices.data(),
-                                             zone->waterVertices.size() * sizeof(mh::Vertex), wgpu::BufferUsage::Vertex);
-            waterIndexBuffer = createBuffer(device, zone->waterIndices.data(),
-                                            zone->waterIndices.size() * sizeof(uint32_t), wgpu::BufferUsage::Index);
-            waterIndexCount = static_cast<uint32_t>(zone->waterIndices.size());
-
-            wgpu::ShaderSourceWGSL waterWgsl;
-            waterWgsl.code = mh::kWaterShader;
-            wgpu::ShaderModuleDescriptor waterModuleDescriptor{.nextInChain = &waterWgsl};
-            wgpu::ShaderModule waterModule = device.CreateShaderModule(&waterModuleDescriptor);
-
-            // Blended, and writing no depth: water is a surface you see through,
-            // and letting it write depth hides whatever is under it.
-            wgpu::BlendState waterBlend{};
-            waterBlend.color.operation = wgpu::BlendOperation::Add;
-            waterBlend.color.srcFactor = wgpu::BlendFactor::SrcAlpha;
-            waterBlend.color.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
-            waterBlend.alpha.operation = wgpu::BlendOperation::Add;
-            waterBlend.alpha.srcFactor = wgpu::BlendFactor::One;
-            waterBlend.alpha.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
-
-            wgpu::ColorTargetState waterTarget{.format = surfaceFormat, .blend = &waterBlend};
-            wgpu::FragmentState waterFragment{
-                .module = waterModule, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &waterTarget};
-            wgpu::DepthStencilState waterDepth{.format = kDepthFormat,
-                                               .depthWriteEnabled = wgpu::OptionalBool::False,
-                                               .depthCompare = wgpu::CompareFunction::Less};
-
-            // FFXI's own water texture, scrolled, rather than an invented
-            // colour. The models nothing places - kw01 for rivers, ike for
-            // ponds, umi1 for sea - all carry one of these.
-            // Blue, not white. This looks for a texture by name and falls
-            // back when it finds none, and it finds none in Bastok Markets -
-            // so every pooled quad painted an opaque white patch over the
-            // floor it was sitting on. Read as missing floor, which is fair.
-            wgpu::TextureView waterView = waterFallbackTexture.CreateView();
-            for (const char* candidate : {"effect  kaw1", "effect  ike1", "effect  ike2", "effect  umna", "effect  nami"})
+            zone = loadZone(options.zonePath.c_str(), keyPath,
+                            options.keyTable2Path.empty() ? nullptr : options.keyTable2Path.c_str(), zoneId, textures,
+                            lighting, collision, interiors);
+            if (!zone)
             {
-                auto found = textures.find(candidate);
-                if (found != textures.end())
+                return 1;
+            }
+            // The character is loaded after the zone so it can share the texture
+            // map: a PC in a town wears textures the zone never mentions, and a
+            // zone texture the character happens to name should not be read twice.
+            if (options.zoneName)
+            {
+                const size_t water = loadWater(*options.zoneName, *zone);
+                if (water)
                 {
-                    wgpu::Texture gpu = mh::uploadTexture(device, found->second);
-                    if (gpu)
-                    {
-                        batchTextures.push_back(gpu);
-                        waterView = batchTextures.back().CreateView();
-                        std::printf("water texture: %s\n", candidate);
-                        break;
-                    }
+                    std::printf("water: %zu triangles\n", water);
                 }
             }
+            std::printf("collision: %zu triangles, %zu walls\n", collision.triangleCount(), collision.wallCount());
+            std::printf("zone %s: %zu triangles\n", zoneId.c_str(), zone->indices.size() / 3);
+            std::printf("  bounds x %.1f..%.1f  y %.1f..%.1f  z %.1f..%.1f\n", zone->boundsMin.x, zone->boundsMax.x,
+                        zone->boundsMin.y, zone->boundsMax.y, zone->boundsMin.z, zone->boundsMax.z);
+        }
+        else
+        {
+            std::printf("no DAT given - clearing only. Pass a zone DAT to draw one.\n");
+        }
 
-            wgpu::BindGroupLayoutEntry waterLayoutEntries[3] = {};
-            waterLayoutEntries[0].binding = 0;
-            waterLayoutEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
-            waterLayoutEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
-            waterLayoutEntries[1].binding = 1;
-            waterLayoutEntries[1].visibility = wgpu::ShaderStage::Fragment;
-            waterLayoutEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
-            waterLayoutEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
-            waterLayoutEntries[2].binding = 2;
-            waterLayoutEntries[2].visibility = wgpu::ShaderStage::Fragment;
-            waterLayoutEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
-            wgpu::BindGroupLayoutDescriptor waterBglDescriptor{.entryCount = 3, .entries = waterLayoutEntries};
-            wgpu::BindGroupLayout waterBgl = device.CreateBindGroupLayout(&waterBglDescriptor);
-            wgpu::PipelineLayoutDescriptor waterPlDescriptor{.bindGroupLayoutCount = 1, .bindGroupLayouts = &waterBgl};
-            wgpu::PipelineLayout waterPl = device.CreatePipelineLayout(&waterPlDescriptor);
+        if (zone && !zone->indices.empty())
+        {
+            vertexBuffer = createBuffer(device, zone->vertices.data(), zone->vertices.size() * sizeof(mh::Vertex),
+                                        wgpu::BufferUsage::Vertex);
+            indexBuffer = createBuffer(device, zone->indices.data(), zone->indices.size() * sizeof(uint32_t),
+                                       wgpu::BufferUsage::Index);
+            instanceBuffer = createBuffer(device, zone->instances.data(), zone->instances.size() * sizeof(float),
+                                          wgpu::BufferUsage::Vertex);
+            indexCount = static_cast<uint32_t>(zone->indices.size());
+            std::printf("buffers created\n");
 
-            wgpu::RenderPipelineDescriptor waterPipelineDescriptor{
-                .layout = waterPl,
-                .vertex = {.module = waterModule, .entryPoint = "vertexMain", .bufferCount = 1, .buffers = &vertexLayout},
+            wgpu::BufferDescriptor uniformDescriptor{.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
+                                                     .size = sizeof(Uniforms)};
+            uniformBuffer = device.CreateBuffer(&uniformDescriptor);
+
+            wgpu::ShaderSourceWGSL wgsl;
+            wgsl.code = mh::kZoneShader;
+            wgpu::ShaderModuleDescriptor moduleDescriptor{.nextInChain = &wgsl};
+            wgpu::ShaderModule module = device.CreateShaderModule(&moduleDescriptor);
+
+            // Location 7, not 3: the instance matrix already holds 3 through 6, and
+            // the two buffers share one location space.
+            wgpu::VertexAttribute attributes[4] = {
+                {.format = wgpu::VertexFormat::Float32x3, .offset = 0, .shaderLocation = 0},
+                {.format = wgpu::VertexFormat::Float32x3, .offset = 3 * sizeof(float), .shaderLocation = 1},
+                {.format = wgpu::VertexFormat::Float32x2, .offset = 6 * sizeof(float), .shaderLocation = 2},
+                {.format = wgpu::VertexFormat::Unorm8x4, .offset = 8 * sizeof(float), .shaderLocation = 7}};
+            wgpu::VertexAttribute instanceAttributes[4] = {
+                {.format = wgpu::VertexFormat::Float32x4, .offset = 0, .shaderLocation = 3},
+                {.format = wgpu::VertexFormat::Float32x4, .offset = 4 * sizeof(float), .shaderLocation = 4},
+                {.format = wgpu::VertexFormat::Float32x4, .offset = 8 * sizeof(float), .shaderLocation = 5},
+                {.format = wgpu::VertexFormat::Float32x4, .offset = 12 * sizeof(float), .shaderLocation = 6}};
+
+            wgpu::VertexBufferLayout vertexLayout{.stepMode = wgpu::VertexStepMode::Vertex,
+                                                  .arrayStride = sizeof(mh::Vertex),
+                                                  .attributeCount = 4,
+                                                  .attributes = attributes};
+            // Stepping per instance rather than per vertex is the whole trick: one
+            // copy of the geometry, one matrix per placement.
+            wgpu::VertexBufferLayout instanceLayout{.stepMode = wgpu::VertexStepMode::Instance,
+                                                    .arrayStride = 16 * sizeof(float),
+                                                    .attributeCount = 4,
+                                                    .attributes = instanceAttributes};
+            wgpu::VertexBufferLayout bufferLayouts[2] = {vertexLayout, instanceLayout};
+
+            // An explicit layout shared by both pipelines. Letting each derive its
+            // own default layout makes bind groups built for one incompatible with
+            // the other, which fails at draw time rather than at creation.
+            wgpu::BindGroupLayoutEntry layoutEntries[3] = {};
+            layoutEntries[0].binding = 0;
+            layoutEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+            layoutEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
+            layoutEntries[1].binding = 1;
+            layoutEntries[1].visibility = wgpu::ShaderStage::Fragment;
+            layoutEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
+            layoutEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+            layoutEntries[2].binding = 2;
+            layoutEntries[2].visibility = wgpu::ShaderStage::Fragment;
+            layoutEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
+
+            wgpu::BindGroupLayoutDescriptor bindGroupLayoutDescriptor{.entryCount = 3, .entries = layoutEntries};
+            zoneBindGroupLayout = device.CreateBindGroupLayout(&bindGroupLayoutDescriptor);
+
+            wgpu::PipelineLayoutDescriptor pipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
+                                                                    .bindGroupLayouts = &zoneBindGroupLayout};
+            wgpu::PipelineLayout sharedLayout = device.CreatePipelineLayout(&pipelineLayoutDescriptor);
+
+            wgpu::ColorTargetState colorTarget{.format = surfaceFormat};
+            wgpu::FragmentState fragment{.module = module, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &colorTarget};
+            wgpu::DepthStencilState depthStencil{.format = kDepthFormat,
+                                                 .depthWriteEnabled = wgpu::OptionalBool::True,
+                                                 .depthCompare = wgpu::CompareFunction::Less};
+
+            wgpu::RenderPipelineDescriptor pipelineDescriptor{
+                .layout = sharedLayout,
+                .vertex = {.module = module, .entryPoint = "vertexMain", .bufferCount = 2, .buffers = bufferLayouts},
                 .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
-                .depthStencil = &waterDepth,
-                .fragment = &waterFragment};
-            waterPipeline = device.CreateRenderPipeline(&waterPipelineDescriptor);
+                .depthStencil = &depthStencil,
+                .fragment = &fragment};
+            pipeline = device.CreateRenderPipeline(&pipelineDescriptor);
 
-            wgpu::BindGroupEntry waterEntries[3] = {};
-            waterEntries[0].binding = 0;
-            waterEntries[0].buffer = uniformBuffer;
-            waterEntries[0].size = sizeof(Uniforms);
-            waterEntries[1].binding = 1;
-            waterEntries[1].textureView = waterView;
-            waterEntries[2].binding = 2;
-            waterEntries[2].sampler = sampler;
-            wgpu::BindGroupDescriptor waterBgDescriptor{.layout = waterBgl, .entryCount = 3, .entries = waterEntries};
-            waterBindGroup = device.CreateBindGroup(&waterBgDescriptor);
+            // Same pipeline, alpha-cutout fragment shader. Which one a batch uses
+            // comes from its mesh header rather than from one global choice.
+            wgpu::FragmentState cutoutFragment{
+                .module = module, .entryPoint = "fragmentCutout", .targetCount = 1, .targets = &colorTarget};
+            wgpu::RenderPipelineDescriptor cutoutDescriptor = pipelineDescriptor;
+            cutoutDescriptor.fragment = &cutoutFragment;
+            cutoutPipeline = device.CreateRenderPipeline(&cutoutDescriptor);
 
-            std::printf("water: %zu quads\n", zone->waterIndices.size() / 6);
-        }
+            // And once more for water: the same shader, blended, and not writing
+            // depth so a surface does not hide the one behind it. Bastok Markets
+            // has two water meshes stacked - a darker body with a lighter sheet
+            // over it - and with depth writes on, whichever drew first won.
+            wgpu::BlendState surfaceBlend{
+                .color = {.operation = wgpu::BlendOperation::Add,
+                          .srcFactor = wgpu::BlendFactor::SrcAlpha,
+                          .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
+                .alpha = {.operation = wgpu::BlendOperation::Add,
+                          .srcFactor = wgpu::BlendFactor::One,
+                          .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha}};
+            wgpu::ColorTargetState surfaceTarget{.format = surfaceFormat, .blend = &surfaceBlend};
+            wgpu::FragmentState surfaceFragment{
+                .module = module, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &surfaceTarget};
+            wgpu::DepthStencilState surfaceDepth{.format = kDepthFormat,
+                                                 .depthWriteEnabled = wgpu::OptionalBool::False,
+                                                 .depthCompare = wgpu::CompareFunction::Less};
+            wgpu::RenderPipelineDescriptor surfaceDescriptor = pipelineDescriptor;
+            surfaceDescriptor.fragment = &surfaceFragment;
+            surfaceDescriptor.depthStencil = &surfaceDepth;
+            translucentPipeline = device.CreateRenderPipeline(&surfaceDescriptor);
 
-        std::unordered_map<std::string, wgpu::TextureView> uploadedViews;
-        size_t uploaded = 0;
-        size_t untextured = 0;
-        // Counted apart from untextured. A mesh naming a texture the DAT does
-        // not hold and a mesh naming none at all both land on the white
-        // fallback and look identical on screen, but only the first is a
-        // lookup failure - and only the first was being counted. Bastok
-        // Markets' water meshes are the second kind, so the line said "0 with
-        // no texture" while the water rendered as a sheet of pure white.
-        size_t unnamed = 0;
-        for (const mh::InstancedDraw& batch : zone->draws)
-        {
-            if (batch.texture.empty())
+            // WebGPU has no bindless arrays, so each texture needs its own bind
+            // group and its own draw. Fine at a zone's few dozen textures; this is
+            // the thing that will need atlasing or caching at a larger scale.
+            wgpu::SamplerDescriptor samplerDescriptor{};
+            samplerDescriptor.addressModeU = wgpu::AddressMode::Repeat;
+            samplerDescriptor.addressModeV = wgpu::AddressMode::Repeat;
+            samplerDescriptor.magFilter = wgpu::FilterMode::Linear;
+            samplerDescriptor.minFilter = wgpu::FilterMode::Linear;
+            sampler = device.CreateSampler(&samplerDescriptor);
+
+            whiteTexture = mh::createWhiteTexture(device);
+            // Dark. Bastok's water is nearly black at night and a deep slate by
+            // day, and a cheerful mid-blue placeholder reads as a mistake in a
+            // city built out of grey stone.
+            waterFallbackTexture = mh::createSolidTexture(device, 26, 46, 54, 190);
+            const wgpu::TextureView whiteView = whiteTexture.CreateView();
+            const wgpu::TextureView waterFallbackView = waterFallbackTexture.CreateView();
+
+            if (!zone->waterIndices.empty())
             {
-                ++unnamed;
-            }
-            // Cached by name: instancing produces one draw per mesh, and many
-            // meshes share a texture. Uploading per draw meant 397 GPU textures
-            // for 46 distinct images.
-            wgpu::TextureView view = batch.water ? waterFallbackView : whiteView;
-            if (!batch.texture.empty())
-            {
-                auto cached = uploadedViews.find(batch.texture);
-                if (cached != uploadedViews.end())
+                waterVertexBuffer = createBuffer(device, zone->waterVertices.data(),
+                                                 zone->waterVertices.size() * sizeof(mh::Vertex), wgpu::BufferUsage::Vertex);
+                waterIndexBuffer = createBuffer(device, zone->waterIndices.data(),
+                                                zone->waterIndices.size() * sizeof(uint32_t), wgpu::BufferUsage::Index);
+                waterIndexCount = static_cast<uint32_t>(zone->waterIndices.size());
+
+                wgpu::ShaderSourceWGSL waterWgsl;
+                waterWgsl.code = mh::kWaterShader;
+                wgpu::ShaderModuleDescriptor waterModuleDescriptor{.nextInChain = &waterWgsl};
+                wgpu::ShaderModule waterModule = device.CreateShaderModule(&waterModuleDescriptor);
+
+                // Blended, and writing no depth: water is a surface you see through,
+                // and letting it write depth hides whatever is under it.
+                wgpu::BlendState waterBlend{};
+                waterBlend.color.operation = wgpu::BlendOperation::Add;
+                waterBlend.color.srcFactor = wgpu::BlendFactor::SrcAlpha;
+                waterBlend.color.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
+                waterBlend.alpha.operation = wgpu::BlendOperation::Add;
+                waterBlend.alpha.srcFactor = wgpu::BlendFactor::One;
+                waterBlend.alpha.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
+
+                wgpu::ColorTargetState waterTarget{.format = surfaceFormat, .blend = &waterBlend};
+                wgpu::FragmentState waterFragment{
+                    .module = waterModule, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &waterTarget};
+                wgpu::DepthStencilState waterDepth{.format = kDepthFormat,
+                                                   .depthWriteEnabled = wgpu::OptionalBool::False,
+                                                   .depthCompare = wgpu::CompareFunction::Less};
+
+                // FFXI's own water texture, scrolled, rather than an invented
+                // colour. The models nothing places - kw01 for rivers, ike for
+                // ponds, umi1 for sea - all carry one of these.
+                // Blue, not white. This looks for a texture by name and falls
+                // back when it finds none, and it finds none in Bastok Markets -
+                // so every pooled quad painted an opaque white patch over the
+                // floor it was sitting on. Read as missing floor, which is fair.
+                wgpu::TextureView waterView = waterFallbackTexture.CreateView();
+                for (const char* candidate : {"effect  kaw1", "effect  ike1", "effect  ike2", "effect  umna", "effect  nami"})
                 {
-                    view = cached->second;
-                }
-                else
-                {
-                    auto found = textures.find(batch.texture);
+                    auto found = textures.find(candidate);
                     if (found != textures.end())
                     {
                         wgpu::Texture gpu = mh::uploadTexture(device, found->second);
                         if (gpu)
                         {
                             batchTextures.push_back(gpu);
-                            view = batchTextures.back().CreateView();
-                            uploadedViews.emplace(batch.texture, view);
-                            ++uploaded;
+                            waterView = batchTextures.back().CreateView();
+                            std::printf("water texture: %s\n", candidate);
+                            break;
                         }
+                    }
+                }
+
+                wgpu::BindGroupLayoutEntry waterLayoutEntries[3] = {};
+                waterLayoutEntries[0].binding = 0;
+                waterLayoutEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+                waterLayoutEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
+                waterLayoutEntries[1].binding = 1;
+                waterLayoutEntries[1].visibility = wgpu::ShaderStage::Fragment;
+                waterLayoutEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
+                waterLayoutEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+                waterLayoutEntries[2].binding = 2;
+                waterLayoutEntries[2].visibility = wgpu::ShaderStage::Fragment;
+                waterLayoutEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
+                wgpu::BindGroupLayoutDescriptor waterBglDescriptor{.entryCount = 3, .entries = waterLayoutEntries};
+                wgpu::BindGroupLayout waterBgl = device.CreateBindGroupLayout(&waterBglDescriptor);
+                wgpu::PipelineLayoutDescriptor waterPlDescriptor{.bindGroupLayoutCount = 1, .bindGroupLayouts = &waterBgl};
+                wgpu::PipelineLayout waterPl = device.CreatePipelineLayout(&waterPlDescriptor);
+
+                wgpu::RenderPipelineDescriptor waterPipelineDescriptor{
+                    .layout = waterPl,
+                    .vertex = {.module = waterModule, .entryPoint = "vertexMain", .bufferCount = 1, .buffers = &vertexLayout},
+                    .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
+                    .depthStencil = &waterDepth,
+                    .fragment = &waterFragment};
+                waterPipeline = device.CreateRenderPipeline(&waterPipelineDescriptor);
+
+                wgpu::BindGroupEntry waterEntries[3] = {};
+                waterEntries[0].binding = 0;
+                waterEntries[0].buffer = uniformBuffer;
+                waterEntries[0].size = sizeof(Uniforms);
+                waterEntries[1].binding = 1;
+                waterEntries[1].textureView = waterView;
+                waterEntries[2].binding = 2;
+                waterEntries[2].sampler = sampler;
+                wgpu::BindGroupDescriptor waterBgDescriptor{.layout = waterBgl, .entryCount = 3, .entries = waterEntries};
+                waterBindGroup = device.CreateBindGroup(&waterBgDescriptor);
+
+                std::printf("water: %zu quads\n", zone->waterIndices.size() / 6);
+            }
+
+            std::unordered_map<std::string, wgpu::TextureView> uploadedViews;
+            size_t uploaded = 0;
+            size_t untextured = 0;
+            // Counted apart from untextured. A mesh naming a texture the DAT does
+            // not hold and a mesh naming none at all both land on the white
+            // fallback and look identical on screen, but only the first is a
+            // lookup failure - and only the first was being counted. Bastok
+            // Markets' water meshes are the second kind, so the line said "0 with
+            // no texture" while the water rendered as a sheet of pure white.
+            size_t unnamed = 0;
+            for (const mh::InstancedDraw& batch : zone->draws)
+            {
+                if (batch.texture.empty())
+                {
+                    ++unnamed;
+                }
+                // Cached by name: instancing produces one draw per mesh, and many
+                // meshes share a texture. Uploading per draw meant 397 GPU textures
+                // for 46 distinct images.
+                wgpu::TextureView view = batch.water ? waterFallbackView : whiteView;
+                if (!batch.texture.empty())
+                {
+                    auto cached = uploadedViews.find(batch.texture);
+                    if (cached != uploadedViews.end())
+                    {
+                        view = cached->second;
                     }
                     else
                     {
-                        ++untextured;
+                        auto found = textures.find(batch.texture);
+                        if (found != textures.end())
+                        {
+                            wgpu::Texture gpu = mh::uploadTexture(device, found->second);
+                            if (gpu)
+                            {
+                                batchTextures.push_back(gpu);
+                                view = batchTextures.back().CreateView();
+                                uploadedViews.emplace(batch.texture, view);
+                                ++uploaded;
+                            }
+                        }
+                        else
+                        {
+                            ++untextured;
+                        }
                     }
                 }
+
+                wgpu::BindGroupEntry entries[3] = {};
+                entries[0].binding = 0;
+                entries[0].buffer = uniformBuffer;
+                entries[0].size = sizeof(Uniforms);
+                entries[1].binding = 1;
+                entries[1].textureView = view;
+                entries[2].binding = 2;
+                entries[2].sampler = sampler;
+
+                wgpu::BindGroupDescriptor bindGroupDescriptor{
+                    .layout = zoneBindGroupLayout, .entryCount = 3, .entries = entries};
+                batchBindGroups.push_back(device.CreateBindGroup(&bindGroupDescriptor));
             }
-
-            wgpu::BindGroupEntry entries[3] = {};
-            entries[0].binding = 0;
-            entries[0].buffer = uniformBuffer;
-            entries[0].size = sizeof(Uniforms);
-            entries[1].binding = 1;
-            entries[1].textureView = view;
-            entries[2].binding = 2;
-            entries[2].sampler = sampler;
-
-            wgpu::BindGroupDescriptor bindGroupDescriptor{
-                .layout = zoneBindGroupLayout, .entryCount = 3, .entries = entries};
-            batchBindGroups.push_back(device.CreateBindGroup(&bindGroupDescriptor));
+            if (unnamed)
+            {
+                std::printf("  %zu draws name no texture at all - they render white\n", unnamed);
+            }
+            std::printf("%zu draws, %zu textures uploaded, %zu with no texture in this DAT\n", zone->draws.size(),
+                        uploaded, untextured);
         }
-        if (unnamed)
+
+        // --- the map ------------------------------------------------------------
+        // Baked once, straight down, through the pipeline that draws the zone - so
+        // the radar shows the world as it actually looks rather than a schematic
+        // redrawn from the same data.
+        if (zone && pipeline && !zone->draws.empty())
         {
-            std::printf("  %zu draws name no texture at all - they render white\n", unnamed);
-        }
-        std::printf("%zu draws, %zu textures uploaded, %zu with no texture in this DAT\n", zone->draws.size(),
-                    uploaded, untextured);
-    }
+            constexpr uint32_t kMapSize = 2048;
 
-    // --- the map ------------------------------------------------------------
-    // Baked once, straight down, through the pipeline that draws the zone - so
-    // the radar shows the world as it actually looks rather than a schematic
-    // redrawn from the same data.
-    wgpu::Texture mapTexture;
-    if (zone && pipeline && !zone->draws.empty())
+            wgpu::TextureDescriptor mapDescriptor{
+                .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding |
+                         wgpu::TextureUsage::CopySrc,
+                .dimension = wgpu::TextureDimension::e2D,
+                .size = {kMapSize, kMapSize, 1},
+                .format = surfaceFormat,
+                .mipLevelCount = 1,
+                .sampleCount = 1};
+            mapTexture = device.CreateTexture(&mapDescriptor);
+
+            wgpu::TextureDescriptor mapDepthDescriptor{.usage = wgpu::TextureUsage::RenderAttachment,
+                                                       .dimension = wgpu::TextureDimension::e2D,
+                                                       .size = {kMapSize, kMapSize, 1},
+                                                       .format = kDepthFormat,
+                                                       .mipLevelCount = 1,
+                                                       .sampleCount = 1};
+            wgpu::Texture mapDepth = device.CreateTexture(&mapDepthDescriptor);
+
+            // A square covering the zone, so the map keeps the world aspect and a
+            // step north is the same number of pixels as a step east.
+            const mh::Vec3 lo = zone->boundsMin;
+            const mh::Vec3 hi = zone->boundsMax;
+            const float half = std::max(hi.x - lo.x, hi.z - lo.z) * 0.5f;
+            const mh::Vec3 middle = zone->centre();
+
+            Uniforms mapUniforms{};
+            // Straight down, with +z up the screen and +x to the right.
+            //
+            // The left and right of this projection used to be swapped, to make the
+            // bake agree with rasteriseWalkable - 99.8% of walkable area covered
+            // against 52.6% without it. That score was the problem: it compared the
+            // bake against a mask nothing draws, rasteriseWalkable is referenced
+            // from no live code path at all, and two mirrored things agree with
+            // each other perfectly. The map came out reversed, so walking left slid
+            // it the wrong way, which is a hard thing to name and an easy thing to
+            // blame on yourself.
+            //
+            // mapUv reads u increasing with world x and the dots are found by
+            // comparing world positions, so an unswapped bake is what both of them
+            // already expect. The dots do not move either way - they never touch
+            // the map's sampling.
+            //
+            // Same lesson as the world frame's own half turn: validate against
+            // something you did not produce.
+            const mh::Mat4 mapView = mh::lookAt({middle.x, hi.y + 100.0f, middle.z}, middle, {0.0f, 0.0f, 1.0f});
+            const mh::Mat4 mapProjection = mh::orthographic(half, -half, -half, half, 1.0f, (hi.y - lo.y) + 400.0f);
+            const mh::Mat4 mapViewProjection = mapProjection * mapView;
+            std::memcpy(mapUniforms.viewProjection, mapViewProjection.m, sizeof(mapUniforms.viewProjection));
+
+            // Flat and unfogged. A map lit from an angle reads as terrain in
+            // shadow rather than as ground, and fog would erase the far half.
+            const mh::Vec3 down = mh::normalise(mh::Vec3{0.0f, 1.0f, 0.0f});
+            mapUniforms.lightDirection[0] = down.x;
+            mapUniforms.lightDirection[1] = down.y;
+            mapUniforms.lightDirection[2] = down.z;
+            mapUniforms.ambient[0] = mapUniforms.ambient[1] = mapUniforms.ambient[2] = 0.75f;
+            mapUniforms.sunlight[0] = mapUniforms.sunlight[1] = mapUniforms.sunlight[2] = 0.35f;
+            mapUniforms.fogRange[0] = 1e9f;
+            mapUniforms.fogRange[1] = 1e9f;
+            queue.WriteBuffer(uniformBuffer, 0, &mapUniforms, sizeof(mapUniforms));
+
+            wgpu::RenderPassColorAttachment mapColour{.view = mapTexture.CreateView(),
+                                                      .loadOp = wgpu::LoadOp::Clear,
+                                                      .storeOp = wgpu::StoreOp::Store,
+                                                      .clearValue = {0.0f, 0.0f, 0.0f, 0.0f}};
+            wgpu::RenderPassDepthStencilAttachment mapDepthAttachment{.view = mapDepth.CreateView(),
+                                                                      .depthLoadOp = wgpu::LoadOp::Clear,
+                                                                      .depthStoreOp = wgpu::StoreOp::Store,
+                                                                      .depthClearValue = 1.0f};
+            wgpu::RenderPassDescriptor mapPassDescriptor{.colorAttachmentCount = 1,
+                                                         .colorAttachments = &mapColour,
+                                                         .depthStencilAttachment = &mapDepthAttachment};
+
+            wgpu::CommandEncoder mapEncoder = device.CreateCommandEncoder();
+            wgpu::RenderPassEncoder mapPass = mapEncoder.BeginRenderPass(&mapPassDescriptor);
+            mapPass.SetVertexBuffer(0, vertexBuffer);
+            mapPass.SetVertexBuffer(1, instanceBuffer);
+            mapPass.SetIndexBuffer(indexBuffer, wgpu::IndexFormat::Uint32);
+            for (size_t i = 0; i < zone->draws.size() && i < batchBindGroups.size(); ++i)
+            {
+                const mh::InstancedDraw& draw = zone->draws[i];
+                mapPass.SetPipeline(draw.cutout ? cutoutPipeline : pipeline);
+                mapPass.SetBindGroup(0, batchBindGroups[i]);
+                mapPass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
+            }
+            if (waterIndexCount && waterPipeline)
+            {
+                mapPass.SetPipeline(waterPipeline);
+                mapPass.SetBindGroup(0, waterBindGroup);
+                mapPass.SetVertexBuffer(0, waterVertexBuffer);
+                mapPass.SetIndexBuffer(waterIndexBuffer, wgpu::IndexFormat::Uint32);
+                mapPass.DrawIndexed(waterIndexCount);
+            }
+            mapPass.End();
+            wgpu::CommandBuffer mapCommands = mapEncoder.Finish();
+            queue.Submit(1, &mapCommands);
+
+            std::printf("map: baked %ux%u covering %.0f units, centred on %.0f %.0f\n", kMapSize, kMapSize, half * 2.0f,
+                        middle.x, middle.z);
+
+            // mapPath writes the bake out so it can be looked at directly.
+            if (options.mapPath)
+            {
+                const uint32_t bytesPerRow = (kMapSize * 4 + 255) / 256 * 256;
+                wgpu::BufferDescriptor readDescriptor{.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead,
+                                                      .size = static_cast<uint64_t>(bytesPerRow) * kMapSize};
+                wgpu::Buffer readback = device.CreateBuffer(&readDescriptor);
+
+                wgpu::CommandEncoder copyEncoder = device.CreateCommandEncoder();
+                wgpu::TexelCopyTextureInfo source{.texture = mapTexture};
+                wgpu::TexelCopyBufferInfo destination{
+                    .layout = {.bytesPerRow = bytesPerRow, .rowsPerImage = kMapSize}, .buffer = readback};
+                const wgpu::Extent3D extent{kMapSize, kMapSize, 1};
+                copyEncoder.CopyTextureToBuffer(&source, &destination, &extent);
+                wgpu::CommandBuffer copyCommands = copyEncoder.Finish();
+                queue.Submit(1, &copyCommands);
+
+                // The mask over the same square, so the two can be checked against
+                // each other. They are only useful together, and an offset here
+                // would put every radar dot the same distance off the terrain it
+                // is meant to sit on.
+                {
+                    const std::vector<uint8_t> mask = collision.rasteriseWalkable(kMapSize, middle, half);
+                    const std::string maskPath = *options.mapPath + ".mask.pgm";
+                    if (std::FILE* file = std::fopen(maskPath.c_str(), "wb"))
+                    {
+                        std::fprintf(file, "P5\n%u %u\n255\n", kMapSize, kMapSize);
+                        std::fwrite(mask.data(), 1, mask.size(), file);
+                        std::fclose(file);
+                        std::printf("wrote %s\n", maskPath.c_str());
+                    }
+                }
+
+                bool mapped = false;
+                wgpu::Future future = readback.MapAsync(wgpu::MapMode::Read, 0, wgpu::kWholeMapSize,
+                                                        wgpu::CallbackMode::AllowProcessEvents,
+                                                        [&](wgpu::MapAsyncStatus status, wgpu::StringView)
+                                                        { mapped = status == wgpu::MapAsyncStatus::Success; });
+                instance.WaitAny(future, UINT64_MAX);
+                if (mapped)
+                {
+                    const auto* pixels = static_cast<const uint8_t*>(readback.GetConstMappedRange());
+                    if (pixels && writeBmp(options.mapPath->c_str(), pixels, kMapSize, kMapSize, bytesPerRow))
+                    {
+                        std::printf("wrote %s\n", options.mapPath->c_str());
+                    }
+                    readback.Unmap();
+                }
+            }
+        }
+        return 0;
+    };
+
+    if (const int failed = readZone())
     {
-        constexpr uint32_t kMapSize = 2048;
-
-        wgpu::TextureDescriptor mapDescriptor{
-            .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding |
-                     wgpu::TextureUsage::CopySrc,
-            .dimension = wgpu::TextureDimension::e2D,
-            .size = {kMapSize, kMapSize, 1},
-            .format = surfaceFormat,
-            .mipLevelCount = 1,
-            .sampleCount = 1};
-        mapTexture = device.CreateTexture(&mapDescriptor);
-
-        wgpu::TextureDescriptor mapDepthDescriptor{.usage = wgpu::TextureUsage::RenderAttachment,
-                                                   .dimension = wgpu::TextureDimension::e2D,
-                                                   .size = {kMapSize, kMapSize, 1},
-                                                   .format = kDepthFormat,
-                                                   .mipLevelCount = 1,
-                                                   .sampleCount = 1};
-        wgpu::Texture mapDepth = device.CreateTexture(&mapDepthDescriptor);
-
-        // A square covering the zone, so the map keeps the world aspect and a
-        // step north is the same number of pixels as a step east.
-        const mh::Vec3 lo = zone->boundsMin;
-        const mh::Vec3 hi = zone->boundsMax;
-        const float half = std::max(hi.x - lo.x, hi.z - lo.z) * 0.5f;
-        const mh::Vec3 middle = zone->centre();
-
-        Uniforms mapUniforms{};
-        // Straight down, with +z up the screen and +x to the right.
-        //
-        // The left and right of this projection used to be swapped, to make the
-        // bake agree with rasteriseWalkable - 99.8% of walkable area covered
-        // against 52.6% without it. That score was the problem: it compared the
-        // bake against a mask nothing draws, rasteriseWalkable is referenced
-        // from no live code path at all, and two mirrored things agree with
-        // each other perfectly. The map came out reversed, so walking left slid
-        // it the wrong way, which is a hard thing to name and an easy thing to
-        // blame on yourself.
-        //
-        // mapUv reads u increasing with world x and the dots are found by
-        // comparing world positions, so an unswapped bake is what both of them
-        // already expect. The dots do not move either way - they never touch
-        // the map's sampling.
-        //
-        // Same lesson as the world frame's own half turn: validate against
-        // something you did not produce.
-        const mh::Mat4 mapView = mh::lookAt({middle.x, hi.y + 100.0f, middle.z}, middle, {0.0f, 0.0f, 1.0f});
-        const mh::Mat4 mapProjection = mh::orthographic(half, -half, -half, half, 1.0f, (hi.y - lo.y) + 400.0f);
-        const mh::Mat4 mapViewProjection = mapProjection * mapView;
-        std::memcpy(mapUniforms.viewProjection, mapViewProjection.m, sizeof(mapUniforms.viewProjection));
-
-        // Flat and unfogged. A map lit from an angle reads as terrain in
-        // shadow rather than as ground, and fog would erase the far half.
-        const mh::Vec3 down = mh::normalise(mh::Vec3{0.0f, 1.0f, 0.0f});
-        mapUniforms.lightDirection[0] = down.x;
-        mapUniforms.lightDirection[1] = down.y;
-        mapUniforms.lightDirection[2] = down.z;
-        mapUniforms.ambient[0] = mapUniforms.ambient[1] = mapUniforms.ambient[2] = 0.75f;
-        mapUniforms.sunlight[0] = mapUniforms.sunlight[1] = mapUniforms.sunlight[2] = 0.35f;
-        mapUniforms.fogRange[0] = 1e9f;
-        mapUniforms.fogRange[1] = 1e9f;
-        queue.WriteBuffer(uniformBuffer, 0, &mapUniforms, sizeof(mapUniforms));
-
-        wgpu::RenderPassColorAttachment mapColour{.view = mapTexture.CreateView(),
-                                                  .loadOp = wgpu::LoadOp::Clear,
-                                                  .storeOp = wgpu::StoreOp::Store,
-                                                  .clearValue = {0.0f, 0.0f, 0.0f, 0.0f}};
-        wgpu::RenderPassDepthStencilAttachment mapDepthAttachment{.view = mapDepth.CreateView(),
-                                                                  .depthLoadOp = wgpu::LoadOp::Clear,
-                                                                  .depthStoreOp = wgpu::StoreOp::Store,
-                                                                  .depthClearValue = 1.0f};
-        wgpu::RenderPassDescriptor mapPassDescriptor{.colorAttachmentCount = 1,
-                                                     .colorAttachments = &mapColour,
-                                                     .depthStencilAttachment = &mapDepthAttachment};
-
-        wgpu::CommandEncoder mapEncoder = device.CreateCommandEncoder();
-        wgpu::RenderPassEncoder mapPass = mapEncoder.BeginRenderPass(&mapPassDescriptor);
-        mapPass.SetVertexBuffer(0, vertexBuffer);
-        mapPass.SetVertexBuffer(1, instanceBuffer);
-        mapPass.SetIndexBuffer(indexBuffer, wgpu::IndexFormat::Uint32);
-        for (size_t i = 0; i < zone->draws.size() && i < batchBindGroups.size(); ++i)
-        {
-            const mh::InstancedDraw& draw = zone->draws[i];
-            mapPass.SetPipeline(draw.cutout ? cutoutPipeline : pipeline);
-            mapPass.SetBindGroup(0, batchBindGroups[i]);
-            mapPass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
-        }
-        if (waterIndexCount && waterPipeline)
-        {
-            mapPass.SetPipeline(waterPipeline);
-            mapPass.SetBindGroup(0, waterBindGroup);
-            mapPass.SetVertexBuffer(0, waterVertexBuffer);
-            mapPass.SetIndexBuffer(waterIndexBuffer, wgpu::IndexFormat::Uint32);
-            mapPass.DrawIndexed(waterIndexCount);
-        }
-        mapPass.End();
-        wgpu::CommandBuffer mapCommands = mapEncoder.Finish();
-        queue.Submit(1, &mapCommands);
-
-        std::printf("map: baked %ux%u covering %.0f units, centred on %.0f %.0f\n", kMapSize, kMapSize, half * 2.0f,
-                    middle.x, middle.z);
-
-        // mapPath writes the bake out so it can be looked at directly.
-        if (options.mapPath)
-        {
-            const uint32_t bytesPerRow = (kMapSize * 4 + 255) / 256 * 256;
-            wgpu::BufferDescriptor readDescriptor{.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead,
-                                                  .size = static_cast<uint64_t>(bytesPerRow) * kMapSize};
-            wgpu::Buffer readback = device.CreateBuffer(&readDescriptor);
-
-            wgpu::CommandEncoder copyEncoder = device.CreateCommandEncoder();
-            wgpu::TexelCopyTextureInfo source{.texture = mapTexture};
-            wgpu::TexelCopyBufferInfo destination{
-                .layout = {.bytesPerRow = bytesPerRow, .rowsPerImage = kMapSize}, .buffer = readback};
-            const wgpu::Extent3D extent{kMapSize, kMapSize, 1};
-            copyEncoder.CopyTextureToBuffer(&source, &destination, &extent);
-            wgpu::CommandBuffer copyCommands = copyEncoder.Finish();
-            queue.Submit(1, &copyCommands);
-
-            // The mask over the same square, so the two can be checked against
-            // each other. They are only useful together, and an offset here
-            // would put every radar dot the same distance off the terrain it
-            // is meant to sit on.
-            {
-                const std::vector<uint8_t> mask = collision.rasteriseWalkable(kMapSize, middle, half);
-                const std::string maskPath = *options.mapPath + ".mask.pgm";
-                if (std::FILE* file = std::fopen(maskPath.c_str(), "wb"))
-                {
-                    std::fprintf(file, "P5\n%u %u\n255\n", kMapSize, kMapSize);
-                    std::fwrite(mask.data(), 1, mask.size(), file);
-                    std::fclose(file);
-                    std::printf("wrote %s\n", maskPath.c_str());
-                }
-            }
-
-            bool mapped = false;
-            wgpu::Future future = readback.MapAsync(wgpu::MapMode::Read, 0, wgpu::kWholeMapSize,
-                                                    wgpu::CallbackMode::AllowProcessEvents,
-                                                    [&](wgpu::MapAsyncStatus status, wgpu::StringView)
-                                                    { mapped = status == wgpu::MapAsyncStatus::Success; });
-            instance.WaitAny(future, UINT64_MAX);
-            if (mapped)
-            {
-                const auto* pixels = static_cast<const uint8_t*>(readback.GetConstMappedRange());
-                if (pixels && writeBmp(options.mapPath->c_str(), pixels, kMapSize, kMapSize, bytesPerRow))
-                {
-                    std::printf("wrote %s\n", options.mapPath->c_str());
-                }
-                readback.Unmap();
-            }
-        }
+        return failed;
     }
+
 
     // --- the radar -----------------------------------------------------------
     wgpu::Texture maskTexture;
