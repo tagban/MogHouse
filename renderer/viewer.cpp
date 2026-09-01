@@ -1285,6 +1285,15 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         // keep lighting boxes for buildings that are no longer anywhere.
         zone.reset();
         textures.clear();
+
+        // These are appended to, and the draw list indexes them by position.
+        // Left alone, a second zone's draws pick up the first zone's bind
+        // groups - so the world renders as nothing at all while the water and
+        // the characters, which do not use them, carry on drawing.
+        batchTextures.clear();
+        batchBindGroups.clear();
+        indexCount = 0;
+        waterIndexCount = 0;
         lighting = ffxi::Lighting{};
         interiors.clear();
         collision = mh::Collision{};
@@ -3093,6 +3102,10 @@ constexpr float kGravity = 26.0f;
     /// while it is on is harmless - it is the same direction.
     bool autoRun = false;
 
+    /// A zone change waiting for the loading screen to be shown first.
+    mh::ViewerLink::ZoneRequest pending;
+    bool pendingZone = false;
+
     /// The zone being read, drawn over everything while it happens.
     std::string loadingZone;
 
@@ -4153,36 +4166,19 @@ constexpr float kGravity = 26.0f;
             // The frame drawn just before this one is still on screen while the
             // read happens, so what the player sees during it is whatever the
             // loading pass put there rather than a window that has gone.
-            mh::ViewerLink::ZoneRequest wanted;
-            if (link->takeZoneRequest(wanted))
+            // Taken now, read after this frame has been shown.
+            //
+            // Reading a zone blocks this loop for as long as it takes, so a
+            // loading screen has to already be on screen before it starts -
+            // there is no frame to draw one in during. Deferring the read by
+            // exactly one frame means what a player looks at while the world
+            // is replaced is the loading pass, not the last frame of the zone
+            // they have left.
+            if (!pendingZone && link->takeZoneRequest(pending))
             {
-                currentZonePath = wanted.datPath;
-                currentZoneName = wanted.zoneName;
-                loadingZone = wanted.zoneName;
+                pendingZone = true;
+                loadingZone = pending.zoneName;
                 link->setLoading(true);
-
-                // Nothing from the zone being left belongs to the one being
-                // entered: names are per-zone, and so is every entity in the
-                // pose table.
-                entityNames = ffxi::EntityNames{};
-                entityPoses.clear();
-                radarEntities.clear();
-
-                if (readZone() == 0)
-                {
-                    characterAt = {wanted.x, wanted.y, wanted.z};
-                    characterFacing = wanted.heading;
-                    placeCharacter(characterAt, 60.0f);
-                    breadcrumbs.clear();
-                    std::printf("zoned into %s\n", wanted.zoneName.c_str());
-                }
-                else
-                {
-                    std::printf("could not read %s\n", wanted.datPath.c_str());
-                }
-
-                link->setLoading(false);
-                loadingZone.clear();
             }
 
             // Preferences the last session left behind, taken once.
@@ -4892,6 +4888,27 @@ constexpr float kGravity = 26.0f;
                     southY = radarCentreY - ringY - half;
                 }
 
+                // Loading, across the middle, over everything.
+                //
+                // Drawn in this window rather than handed back to the launcher:
+                // the launcher is a different window, and swapping to it and
+                // back is the flicker this whole change exists to remove.
+                if (!loadingZone.empty())
+                {
+                    std::string name = loadingZone;
+                    for (char& letter : name)
+                    {
+                        if (letter == '_')
+                        {
+                            letter = ' ';
+                        }
+                    }
+
+                    constexpr float kLoadingScale = 1.6f;
+                    label(name, 0.0f, 0.02f, kLoadingScale, kHudBright, 0.85f);
+                    label("Loading", 0.0f, 0.02f - line * kLoadingScale - gap, 0.7f, kHudDim, 0.85f);
+                }
+
                 // Somewhere to send a bug from, top left, without leaving
                 // the world.
                 //
@@ -4977,11 +4994,15 @@ constexpr float kGravity = 26.0f;
                 // them either side of the compass read as two unrelated
                 // things.
                 const float zoneNameBottom = southY + line * 1.15f;
-                if (options.zoneName)
+                if (currentZoneName)
                 {
                     // Underscores are how the zone tables spell a space, and
                     // nobody wants to read Bastok_Markets.
-                    std::string zone = *options.zoneName;
+                    //
+                    // The current zone rather than the one this window was
+                    // opened with: after zoning in place the label kept naming
+                    // where the player used to be.
+                    std::string zone = *currentZoneName;
                     for (char& letter : zone)
                     {
                         if (letter == '_')
@@ -5512,6 +5533,35 @@ constexpr float kGravity = 26.0f;
         wgpu::CommandBuffer commands = encoder.Finish();
         queue.Submit(1, &commands);
         surface.Present();
+
+        // The loading screen is on screen now, so the world can be replaced
+        // underneath it. Everything belonging to the zone being left goes
+        // first: names are per-zone, and so is every entity in the pose table.
+        if (pendingZone)
+        {
+            pendingZone = false;
+            currentZonePath = pending.datPath;
+            currentZoneName = pending.zoneName;
+            entityNames = ffxi::EntityNames{};
+            entityPoses.clear();
+            radarEntities.clear();
+
+            if (readZone() == 0)
+            {
+                characterAt = {pending.x, pending.y, pending.z};
+                characterFacing = pending.heading;
+                placeCharacter(characterAt, 60.0f);
+                breadcrumbs.clear();
+                std::printf("zoned into %s\n", pending.zoneName.c_str());
+            }
+            else
+            {
+                std::printf("could not read %s\n", pending.datPath.c_str());
+            }
+
+            link->setLoading(false);
+            loadingZone.clear();
+        }
         instance.ProcessEvents();
 
         if (takingShot)

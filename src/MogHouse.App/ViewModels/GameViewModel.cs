@@ -397,15 +397,14 @@ public partial class GameViewModel : ViewModelBase
             return;
         }
 
-        // Somewhere to look while the world is gone.
-        //
-        // Tearing the window down without this left nothing on screen at all -
-        // the launcher hides itself while the world is up, so a zone change
-        // that failed to reopen produced a running, logged-in, invisible
-        // client. Which is exactly what "!zone 235 and it closed" was.
         ZoningTo = FfxiZoneNames.Get(zone)?.Replace('_', ' ') ?? $"zone {zone}";
+        Console.WriteLine($"zoning to {zone} ({ZoningTo})");
         IsZoning = true;
-        WorldVisibilityChanged?.Invoke(false);
+
+        // The launcher is deliberately not shown. The world window draws its
+        // own loading screen now, and swapping to another window and back is
+        // the flicker keeping the window alive was meant to remove. It is only
+        // brought back below, if there turns out to be no world window to zone.
 
         // Target indices are only unique within a zone, so carrying one across
         // would put an old entity's name and kind on whatever now holds that
@@ -425,11 +424,11 @@ public partial class GameViewModel : ViewModelBase
         // windows.
         if (_world is null)
         {
-            _shell.Status = "No world window to zone; opening one.";
+            Console.WriteLine("  no world window to zone; opening one");
         }
         else if (_world.Closed)
         {
-            _shell.Status = "The world window had already closed; opening another.";
+            Console.WriteLine("  the world window had already closed; opening another");
         }
 
         if (_world is { Closed: false } &&
@@ -448,7 +447,6 @@ public partial class GameViewModel : ViewModelBase
             await HoldLoadingScreen();
 
             IsZoning = false;
-            WorldVisibilityChanged?.Invoke(true);
             _world.ShowZoneLines(session.ZoneLines);
             OnMusicChanged(session.CurrentTrack);
             WorldStatus = $"In {ZoningTo}.";
@@ -456,7 +454,10 @@ public partial class GameViewModel : ViewModelBase
         }
 
         // No window to reuse, or no DAT for that zone: fall back to opening a
-        // fresh one, and say so if even that fails.
+        // fresh one, and say so if even that fails. This is the only path that
+        // needs the launcher, because it is the only one with nothing to look
+        // at while it works.
+        WorldVisibilityChanged?.Invoke(false);
         _feeding?.Cancel();
         _world?.Dispose();
         _world = null;
