@@ -51,6 +51,7 @@ public sealed record FfxiEntityUpdate(
     float X,
     float Vertical,
     float Depth,
+    uint EntityFlags = 0,
     string? Name = null,
     byte? ModelSize = null,
     uint? RawFlags1 = null,
@@ -243,6 +244,18 @@ public sealed record FfxiEntityUpdate(
 
     /// xi::NameVis. Doors, zone lines and the like carry HideName: they have a
     /// name, and the game shows it only once you target them.
+    /// xi::EntityFlags, as a u32 - entity_update.cpp writes
+    /// `ref&lt;uint32&gt;(0x21) = PNpc-&gt;m_flags`. The bits are named in
+    /// LandSandBoat's scripts/enum/entity_flags.codegen.lua.
+    ///
+    /// These change while you play: an event can reveal something that was
+    /// hidden, so they are read on every update rather than remembered.
+    private const int OffsetEntityFlags = 0x21;
+
+    private const uint EntityFlagHideName = 0x00000008;
+    private const uint EntityFlagHideModel = 0x00000080;
+    private const uint EntityFlagUntargetable = 0x00000800;
+
     private const int OffsetNameVis = 0x2B;
 
     private const byte NameVisHideName = 0x08;
@@ -329,6 +342,11 @@ public sealed record FfxiEntityUpdate(
         FfxiEntityLook? look = (subPacket[OffsetSendFlags] & UpdateStatus) == 0 ? null
             : id == PlayerPacketId                                             ? ReadPlayerLook(subPacket)
                                                                                : ReadLook(subPacket);
+        uint? entityFlags = (subPacket[OffsetSendFlags] & UpdateStatus) != 0 &&
+                            subPacket.Length >= OffsetEntityFlags + 4 && id == NpcPacketId
+            ? BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(OffsetEntityFlags, 4))
+            : null;
+
         byte? nameVis = (subPacket[OffsetSendFlags] & UpdateStatus) != 0 && subPacket.Length > OffsetNameVis
             ? subPacket[OffsetNameVis]
             : null;
@@ -346,6 +364,7 @@ public sealed record FfxiEntityUpdate(
             ModelSize: modelSize,
             RawFlags1: rawFlags1,
             RawFlags0: rawFlags0,
+            EntityFlags: entityFlags ?? 0,
             Allegiance: allegiance,
             HealthPercent: healthPercent,
             BattleFlags: battleFlags,
@@ -359,7 +378,17 @@ public sealed record FfxiEntityUpdate(
     /// targeted. Doors, zone lines and scenery carry it - they are named, and
     /// the game shows the name only on target.
     /// </summary>
-    public bool IsNameHidden => (NameVis & NameVisHideName) != 0;
+    public bool IsNameHidden =>
+        (NameVis & NameVisHideName) != 0 || (EntityFlags & EntityFlagHideName) != 0;
+
+    /// <summary>
+    /// The server says not to draw this at all - a trigger, or something an
+    /// event has yet to reveal.
+    /// </summary>
+    public bool IsModelHidden => (EntityFlags & EntityFlagHideModel) != 0;
+
+    /// <summary>Nothing the player can click. Warp triggers carry this.</summary>
+    public bool IsUntargetable => (EntityFlags & EntityFlagUntargetable) != 0;
 
     /// <summary>
     /// The look_t at 0x30, as much of it as this packet actually carries.
