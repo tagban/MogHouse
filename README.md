@@ -49,6 +49,8 @@ The world window takes the keyboard directly. Nothing here is configurable yet.
 | key | what it does |
 |---|---|
 | `Return` | open the chat line. Only when there is a server to say it to - offline there is nothing to type into. |
+| `/` | open the chat line with `/` already in it, for the client's own commands |
+| `!` | open the chat line with `!` already in it, for the server's GM commands |
 | click | target whatever is under the pointer |
 
 ### Getting unstuck

@@ -173,7 +173,7 @@ public partial class GameViewModel : ViewModelBase
 
                 while (_world?.TakeChat() is { Length: > 0 } typed)
                 {
-                    await session.SayAsync(typed);
+                    await TypedAsync(typed);
                 }
 
                 // Space: a jump on your feet, a wave lying down - see
@@ -431,6 +431,38 @@ public partial class GameViewModel : ViewModelBase
         }
 
         Input = "";
+        await TypedAsync(text);
+    }
+
+    /// <summary>
+    /// What a typed line means, wherever it was typed.
+    ///
+    /// The world window and the box in this panel both end up here, and the
+    /// client's own commands are answered rather than said: typing /logout was
+    /// broadcast to the zone as the words "/logout" and did nothing else,
+    /// because only the console client ever ran a line past the parser.
+    /// </summary>
+    private async Task TypedAsync(string text)
+    {
+        FfxiClientCommand command = FfxiClientCommands.Parse(text);
+        switch (command.Kind)
+        {
+            case FfxiClientCommandKind.Logout:
+                await LeaveAsync();
+                return;
+
+            case FfxiClientCommandKind.Shutdown:
+                await _shell.Session.LogoutAsync(FfxiLogoutKind.Shutdown);
+                _shell.Status = "Shut down.";
+                return;
+
+            case FfxiClientCommandKind.HomePoint:
+                await _shell.Session.ReturnToHomePointAsync();
+                return;
+
+            // /talk is deliberately not here. It needs a target, and in this
+            // window you get one by clicking an NPC, which already talks to it.
+        }
 
         // "/tell name message" is the one form worth special-casing; anything
         // starting with '!' is a GM command, which the server routes off the

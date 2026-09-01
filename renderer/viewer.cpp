@@ -2406,6 +2406,10 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // Typing a line. While this is open the movement keys are letters again,
     // which is the whole reason it is a mode rather than always-on capture.
     bool typing = false;
+
+    /// The keystroke that opened the chat line, which the text-input event for
+    /// that same press would otherwise add a second time.
+    std::string swallowText;
     std::string typed;
 
     // Where the character is drawn. Everything that moves them has to call
@@ -3088,6 +3092,15 @@ constexpr float kGravity = 26.0f;
             }
             else if (event.type == SDL_EVENT_TEXT_INPUT && typing)
             {
+                if (!swallowText.empty())
+                {
+                    const bool sameKey = event.text.text && swallowText == event.text.text;
+                    swallowText.clear();
+                    if (sameKey)
+                    {
+                        continue;
+                    }
+                }
                 typed += event.text.text;
             }
             else if (event.type == SDL_EVENT_KEY_DOWN && typing)
@@ -3129,6 +3142,20 @@ constexpr float kGravity = 26.0f;
                         typed.clear();
                         SDL_StartTextInput(window);
                     }
+                }
+                else if (link && (event.key.key == SDLK_SLASH || event.key.key == SDLK_EXCLAIM))
+                {
+                    // Almost everything typed here starts with one of these -
+                    // / for the client's own commands, ! for the server's - so
+                    // they open the line and put themselves in it rather than
+                    // opening an empty one to type them into.
+                    typing = true;
+                    typed = event.key.key == SDLK_SLASH ? "/" : "!";
+                    SDL_StartTextInput(window);
+
+                    // The character that opened the line arrives again as text
+                    // input a moment later, and would be doubled.
+                    swallowText = typed;
                 }
                 else if (event.key.key == SDLK_ESCAPE)
                 {

@@ -190,9 +190,15 @@ public sealed record FfxiEntityUpdate(
     /// real values is what stripped a GM's level, a player's name and a
     /// character's whole appearance on every step they took.
     private const byte UpdatePosition = 0x01;
-    private const byte UpdateStatus = 0x02;
-    private const byte UpdateHealth = 0x04;
+    // sendflags_t, named as the server names it. char_update.cpp and
+    // entity_update.cpp declare the same bitfield, and which block a field
+    // lives in decides whether reading it means anything: a flag that is not
+    // set is a block the server never wrote, so the bytes are whatever the
+    // buffer happened to hold.
+    private const byte UpdateClaimStatus = 0x02;
+    private const byte UpdateGeneral = 0x04;
     private const byte UpdateName = 0x08;
+    private const byte UpdateModel = 0x10;
     private const int OffsetDirection = Body + 7;
     private const int OffsetX = Body + 8;
     private const int OffsetVertical = Body + 12; // engine Y - see FfxiPositionPacket
@@ -314,7 +320,7 @@ public sealed record FfxiEntityUpdate(
             // NPC is, so a Carrion Crow came out the same colour as a
             // shopkeeper. Long enough to hold the byte is not the same
             // question as the server having written it.
-            if ((subPacket[OffsetSendFlags] & UpdateHealth) != 0)
+            if ((subPacket[OffsetSendFlags] & UpdateGeneral) != 0)
             {
                 healthPercent = subPacket[OffsetHealthPercent];
                 battleFlags = subPacket[OffsetBattleFlags];
@@ -322,32 +328,43 @@ public sealed record FfxiEntityUpdate(
             }
         }
 
-        if (id == PlayerPacketId && (subPacket[OffsetSendFlags] & UpdateStatus) != 0 &&
+        // Flags1 - which carries HideFlag - is written under General, not
+        // under ClaimStatus. ClaimStatus writes one field, BtTargetID, and
+        // nothing else. Reading Flags1 whenever ClaimStatus was set meant
+        // reading a block the server had not touched, and a HideFlag that came
+        // back set from whatever was in the buffer hid a player permanently:
+        // they appeared on spawn, when every flag is set, and vanished on the
+        // first ordinary update afterwards.
+        if (id == PlayerPacketId && (subPacket[OffsetSendFlags] & UpdateGeneral) != 0 &&
             subPacket.Length >= OffsetFlags1 + 4)
         {
             uint flags1 = BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(OffsetFlags1, 4));
             rawFlags1 = flags1;
             rawFlags0 = BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(24, 4));
             modelSize = (byte)((flags1 >> GraphSizeBitOffset) & GraphSizeMask);
-
-            if ((subPacket[OffsetSendFlags] & UpdateName) != 0 && subPacket.Length >= OffsetName + 1)
-            {
-                int available = Math.Min(NameLength, subPacket.Length - OffsetName);
-                name = ReadFixedString(subPacket.Slice(OffsetName, available));
-            }
         }
 
-        // The look rides with the status fields; a position-only update holds
-        // zeros where it would be.
-        FfxiEntityLook? look = (subPacket[OffsetSendFlags] & UpdateStatus) == 0 ? null
-            : id == PlayerPacketId                                             ? ReadPlayerLook(subPacket)
-                                                                               : ReadLook(subPacket);
-        uint? entityFlags = (subPacket[OffsetSendFlags] & UpdateStatus) != 0 &&
+        // And the name stands on its own flag rather than inside another one.
+        if (id == PlayerPacketId && (subPacket[OffsetSendFlags] & UpdateName) != 0 &&
+            subPacket.Length >= OffsetName + 1)
+        {
+            int available = Math.Min(NameLength, subPacket.Length - OffsetName);
+            name = ReadFixedString(subPacket.Slice(OffsetName, available));
+        }
+
+        // A player's GrapIDTbl is written under Model; an NPC's look_t rides
+        // with the status block. Different packets, different questions, and
+        // a position-only update holds zeros where either would be.
+        FfxiEntityLook? look =
+            id == PlayerPacketId
+                ? ((subPacket[OffsetSendFlags] & UpdateModel) != 0 ? ReadPlayerLook(subPacket) : null)
+                : ((subPacket[OffsetSendFlags] & UpdateClaimStatus) != 0 ? ReadLook(subPacket) : null);
+        uint? entityFlags = (subPacket[OffsetSendFlags] & UpdateClaimStatus) != 0 &&
                             subPacket.Length >= OffsetEntityFlags + 4 && id == NpcPacketId
             ? BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(OffsetEntityFlags, 4))
             : null;
 
-        byte? nameVis = (subPacket[OffsetSendFlags] & UpdateStatus) != 0 && subPacket.Length > OffsetNameVis
+        byte? nameVis = (subPacket[OffsetSendFlags] & UpdateClaimStatus) != 0 && subPacket.Length > OffsetNameVis
             ? subPacket[OffsetNameVis]
             : null;
 
