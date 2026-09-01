@@ -939,6 +939,13 @@ void mh::ViewerLink::setVitals(uint32_t hp, uint32_t mp, uint32_t tp, uint8_t hp
     vitalsKnown_ = true;
 }
 
+void mh::ViewerLink::chooseLink(Link which) { link_ = static_cast<int>(which); }
+
+mh::ViewerLink::Link mh::ViewerLink::takeLink()
+{
+    return static_cast<Link>(link_.exchange(static_cast<int>(Link::None)));
+}
+
 mh::ViewerLink::Vitals mh::ViewerLink::vitals() const
 {
     return Vitals{hp_.load(), mp_.load(), tp_.load(), hpPercent_.load(), mpPercent_.load(), vitalsKnown_.load()};
@@ -1022,7 +1029,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         return 1;
     }
 
-    SDL_Window* window = SDL_CreateWindow("MogHouse renderer", kWidth, kHeight,
+    SDL_Window* window = SDL_CreateWindow(mh::kWindowTitle, kWidth, kHeight,
                                           SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!window)
     {
@@ -2954,6 +2961,22 @@ constexpr float kGravity = 26.0f;
     float deathPanel[4]{};
     DialogButton deathButtons[mh::kDialogButtons]{};
 
+    /// The two chips in the top left corner, as the last frame drew them.
+    ///
+    /// Somewhere to send a bug from inside the game, rather than from the
+    /// launcher the player cannot see while the world is up.
+    struct CornerLink
+    {
+        float left{}, bottom{}, width{}, height{};
+        mh::ViewerLink::Link target{mh::ViewerLink::Link::None};
+
+        bool holds(float x, float y) const
+        {
+            return width > 0.0f && x >= left && x < left + width && y >= bottom && y < bottom + height;
+        }
+    };
+    CornerLink cornerLinks[2]{};
+
     // Which button the mouse went down on, so releasing somewhere else is a
     // change of mind rather than a press. -1 is none.
     int deathPressed = -1;
@@ -3388,6 +3411,19 @@ constexpr float kGravity = 26.0f;
                 // cursor happened to land on.
                 float upX = 0.0f;
                 float upY = 0.0f;
+                if (!dragMoved && link && pointerNdc(event.button.x, event.button.y, upX, upY))
+                {
+                    for (const CornerLink& chip : cornerLinks)
+                    {
+                        if (chip.target != mh::ViewerLink::Link::None && chip.holds(upX, upY))
+                        {
+                            link->chooseLink(chip.target);
+                            dragging = false;
+                            break;
+                        }
+                    }
+                }
+
                 if (dragging && !dragMoved && link && pointerNdc(event.button.x, event.button.y, upX, upY))
                 {
                     if (uint32_t clicked = pickAt(upX, upY))
@@ -4391,6 +4427,22 @@ constexpr float kGravity = 26.0f;
                 }
             }
 
+            // Water goes here: after the world it sits in, and before
+            // everything drawn on top of the world.
+            //
+            // It was last, which put a translucent sheet over the radar, the
+            // clock and the nameplates - the HUD is drawn in the same pass and
+            // does not write depth, so whatever comes after it simply wins. A
+            // canal at the edge of the screen tinted the compass.
+            if (waterIndexCount && waterPipeline)
+            {
+                pass.SetPipeline(waterPipeline);
+                pass.SetBindGroup(0, waterBindGroup);
+                pass.SetVertexBuffer(0, waterVertexBuffer);
+                pass.SetIndexBuffer(waterIndexBuffer, wgpu::IndexFormat::Uint32);
+                pass.DrawIndexed(waterIndexCount);
+            }
+
             if (radarPipeline && radarBindGroup)
             {
                 RadarUniforms radar{};
@@ -4488,6 +4540,19 @@ constexpr float kGravity = 26.0f;
 
                 // centred = the x given is the middle, otherwise it is the
                 // left edge. Chat reads down a column and has to line up.
+                // How wide some text will be once placed. The same sum of
+                // advances place() walks, so a box sized from this and the text
+                // drawn into it cannot disagree.
+                const auto measure = [&](const std::string& text, float scale) {
+                    float pen = 0.0f;
+                    const float cellSize = static_cast<float>(textFont.cell);
+                    for (char raw : text)
+                    {
+                        pen += textFont.advanceOf(raw) / cellSize;
+                    }
+                    return pen * ((hud.counts[1] * scale) / windowAspect);
+                };
+
                 const auto place = [&](const std::string& text, float x, float bottomY, float scale,
                                        const float* tint, float background, bool centred) {
                     if (labels >= mh::kHudStrings || text.empty() || textFont.empty())
@@ -4566,6 +4631,41 @@ constexpr float kGravity = 26.0f;
                     label("S", radarCentreX, southY, compass, kHudDim, 0.0f);
                     label("E", radarCentreX + ringX, radarCentreY - half, compass, kHudDim, 0.0f);
                     label("W", radarCentreX - ringX, radarCentreY - half, compass, kHudDim, 0.0f);
+                }
+
+                // Somewhere to send a bug from, top left, without leaving
+                // the world.
+                //
+                // The launcher has the same two links, but the launcher hides
+                // itself while the world is up - which is exactly when a
+                // player finds something worth reporting.
+                //
+                // Measured as they are drawn: the text is proportional and the
+                // chip is sized to fit it, so working out where one is means
+                // doing most of the work of drawing it. The same reason the
+                // death box does this.
+                {
+                    constexpr float kCornerScale = 0.7f;
+                    const float chipHeight = line * kCornerScale + gap * 0.6f;
+                    float cornerX = -0.97f;
+                    const float cornerY = 0.93f;
+
+                    const char* names[2] = {"Discord", "Report a bug"};
+                    const mh::ViewerLink::Link targets[2] = {mh::ViewerLink::Link::Discord,
+                                                             mh::ViewerLink::Link::Issues};
+                    for (int i = 0; i < 2; ++i)
+                    {
+                        const float width = measure(names[i], kCornerScale);
+                        place(names[i], cornerX, cornerY, kCornerScale, kHudDim, 0.55f, false);
+
+                        cornerLinks[i].left = cornerX;
+                        cornerLinks[i].bottom = cornerY;
+                        cornerLinks[i].width = width;
+                        cornerLinks[i].height = chipHeight;
+                        cornerLinks[i].target = targets[i];
+
+                        cornerX += width + gap * 2.0f;
+                    }
                 }
 
                 // HP, MP and TP, bottom left, above the chat log.
@@ -4889,14 +4989,6 @@ constexpr float kGravity = 26.0f;
                 }
             }
 
-            if (waterIndexCount && waterPipeline)
-            {
-                pass.SetPipeline(waterPipeline);
-                pass.SetBindGroup(0, waterBindGroup);
-                pass.SetVertexBuffer(0, waterVertexBuffer);
-                pass.SetIndexBuffer(waterIndexBuffer, wgpu::IndexFormat::Uint32);
-                pass.DrawIndexed(waterIndexCount);
-            }
         }
 
         // The box a dead character gets, drawn over everything else.

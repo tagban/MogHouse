@@ -137,6 +137,14 @@ public enum NativeDeathChoice
     AcceptRaise = 2,
 }
 
+/// <summary>A link clicked in the world window's top corner.</summary>
+public enum NativeLink
+{
+    None = 0,
+    Discord = 1,
+    Issues = 2,
+}
+
 /// <summary>What to open the viewer on.</summary>
 public sealed record NativeViewerOptions
 {
@@ -358,6 +366,12 @@ public sealed partial class NativeViewer : IDisposable
     public uint TakeTalk() => _disposed || _handle == IntPtr.Zero ? 0 : mh_viewer_take_talk(_handle);
 
     /// <summary>
+    /// Which link the player clicked in the world window, or None.
+    /// </summary>
+    public NativeLink TakeLink() =>
+        _disposed || _handle == IntPtr.Zero ? NativeLink.None : (NativeLink)mh_viewer_take_link(_handle);
+
+    /// <summary>
     /// The player's own HP, MP and TP, drawn as a panel in the world window.
     ///
     /// Without it the only sign of being dead is being unable to move, which
@@ -501,6 +515,9 @@ public sealed partial class NativeViewer : IDisposable
     [LibraryImport(LibraryName)]
     private static partial void mh_viewer_set_vitals(IntPtr viewer, uint hp, uint mp, uint tp,
                                                      byte hpPercent, byte mpPercent);
+
+    [LibraryImport(LibraryName)]
+    private static partial int mh_viewer_take_link(IntPtr viewer);
 
     [LibraryImport(LibraryName)]
     private static partial int mh_viewer_take_death_choice(IntPtr viewer);

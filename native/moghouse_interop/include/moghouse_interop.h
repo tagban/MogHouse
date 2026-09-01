@@ -178,6 +178,11 @@ MH_API void mh_viewer_set_death(MhViewerHandle viewer, int32_t dead, int32_t rai
 MH_API void mh_viewer_set_vitals(MhViewerHandle viewer, uint32_t hp, uint32_t mp, uint32_t tp,
                                  uint8_t hp_percent, uint8_t mp_percent);
 
+/// Which link the player clicked in the world window, taken once: 0 none,
+/// 1 Discord, 2 the issue tracker. The renderer knows a corner was pressed and
+/// nothing about browsers, so opening it is the caller's job.
+MH_API int32_t mh_viewer_take_link(MhViewerHandle viewer);
+
 /// What the player pressed there, as one of MH_DEATH_*, consumed by the read.
 /// Both answers are packets only the caller can send, the same way a jump is.
 MH_API int32_t mh_viewer_take_death_choice(MhViewerHandle viewer);

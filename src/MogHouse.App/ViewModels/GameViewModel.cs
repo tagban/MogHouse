@@ -196,6 +196,20 @@ public partial class GameViewModel : ViewModelBase
                         break;
                 }
 
+                // Somewhere to send a bug from inside the world. The window
+                // knows a corner was clicked; opening a browser is this side's
+                // job, and works the same on three operating systems.
+                switch (_world?.TakeLink())
+                {
+                    case NativeLink.Discord:
+                        Links.Open(Links.Discord);
+                        break;
+
+                    case NativeLink.Issues:
+                        Links.Open(Links.Issues);
+                        break;
+                }
+
                 // Pushed rather than raised on change: hit points move
                 // constantly, and the panel wants the current number, not a
                 // notification that it moved.

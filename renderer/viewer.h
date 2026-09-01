@@ -57,6 +57,12 @@ struct InteriorLighting
     }
 };
 
+/// What the world window calls itself.
+///
+/// One place, because it is the name a player sees and a version they will
+/// quote in a bug report.
+inline constexpr const char* kWindowTitle = "MogHouse XI - Alpha 0.1.2";
+
 struct ZoneLineMarker
 {
     float x{};
@@ -361,6 +367,21 @@ public:
     /// straight through rather than kept anywhere clever.
     void setVitals(uint32_t hp, uint32_t mp, uint32_t tp, uint8_t hpPercent, uint8_t mpPercent);
 
+    /// A link the player clicked in the world window, taken once.
+    ///
+    /// The renderer knows a button was pressed and nothing about browsers;
+    /// opening a URL portably is the managed side's job, so this hands the
+    /// choice over rather than acting on it.
+    enum class Link
+    {
+        None = 0,
+        Discord = 1,
+        Issues = 2,
+    };
+
+    void chooseLink(Link which);
+    Link takeLink();
+
     struct Vitals
     {
         uint32_t hp{};
@@ -406,6 +427,7 @@ private:
     std::atomic<uint8_t> hpPercent_{0};
     std::atomic<uint8_t> mpPercent_{0};
     std::atomic<bool> vitalsKnown_{false};
+    std::atomic<int> link_{0};
     std::atomic<int> deathChoice_{0};
 };
 

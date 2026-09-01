@@ -4,6 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- The taskbar and the .exe itself. -->
+    <ApplicationIcon>Assets\moghouse.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

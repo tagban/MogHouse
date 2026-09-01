@@ -208,6 +208,9 @@ public sealed class LiveRadar : IDisposable
         _viewer.SetDeath(dead, raiseOffered);
     }
 
+    /// <summary>Which link the player clicked in the world window, or None.</summary>
+    public NativeLink TakeLink() => _closed ? NativeLink.None : _viewer.TakeLink();
+
     /// <summary>The player's own hit points, magic and TP, for the world window.</summary>
     public void ShowVitals(FfxiCharacterHealth health)
     {

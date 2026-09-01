@@ -166,6 +166,11 @@ void mh_viewer_set_vitals(MhViewerHandle viewer, uint32_t hp, uint32_t mp, uint3
     }
 }
 
+int32_t mh_viewer_take_link(MhViewerHandle viewer)
+{
+    return viewer ? static_cast<int32_t>(viewer->link.takeLink()) : 0;
+}
+
 int32_t mh_viewer_take_death_choice(MhViewerHandle viewer)
 {
     return viewer ? static_cast<int32_t>(viewer->link.takeDeathChoice()) : MH_DEATH_NONE;
