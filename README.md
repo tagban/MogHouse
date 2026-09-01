@@ -33,14 +33,18 @@ pass with it.
 
 The world window takes the keyboard directly. Nothing here is configurable yet.
 
+Where a key exists twice on a keyboard this says which one is meant, because
+two of them do different things: `numpad -` swaps walk and run, and the `-` on
+the number row turns the music down.
+
 ### Moving
 
 | key | what it does |
 |---|---|
 | `W` `A` `S` `D` | walk and strafe |
 | `R` | **auto-run** - keep going forward without holding the key. Press again, or press back, to stop. |
-| `Shift` | run, or walk if you have toggled the default the other way |
-| `numpad -` | swap which of walk and run is the default; `Shift` still inverts whichever it is |
+| `Shift` | run, or walk if you have swapped the default |
+| `numpad -` | swap which of walk and run is the default. `Shift` still inverts whichever it is. |
 | `numpad 8` `2` | forward and back |
 | `numpad 4` `6` | turn |
 | `Space` | jump. Lying down it waves instead, which is the only thing a corpse can do to be noticed. |
@@ -52,9 +56,24 @@ The world window takes the keyboard directly. Nothing here is configurable yet.
 | mouse drag | turn the camera |
 | wheel, or `numpad 9` `3` | zoom |
 | `Tab` | orbit |
-| `M` | swap the minimap between turning with you and holding north up. `MOGHOUSE_RADAR_NORTH` picks which you start with. |
-| `-` `=` | music quieter and louder. `MOGHOUSE_MUSIC_VOLUME` sets where it starts, 0 to 1. |
 | `F` | swap between driving the character and flying the camera |
+| `M` | swap the minimap between turning with you and holding north up |
+
+The minimap starts turning with you. `MOGHOUSE_RADAR_NORTH` starts it the other
+way. You are the orange dot in the middle, other players are blue, everything
+else is green.
+
+### Sound
+
+| key | what it does |
+|---|---|
+| `-` (number row) | music quieter, 5% a press |
+| `+` or `=` (number row) | music louder |
+
+**The number row, not the numpad** - `numpad -` swaps walk and run. `=` works as
+well as `+` because nobody holds shift to turn the music up.
+
+Music starts at 35%. `MOGHOUSE_MUSIC_VOLUME` sets that, 0 to 1.
 
 ### Talking and targeting
 
@@ -63,6 +82,10 @@ The world window takes the keyboard directly. Nothing here is configurable yet.
 | `Return` | open the chat line. Only when there is a server to say it to - offline there is nothing to type into. |
 | `/` | open the chat line with `/` already in it, for the client's own commands |
 | `!` | open the chat line with `!` already in it, for the server's GM commands |
+| click | target whatever is under the pointer |
+
+A link in the chat log is clickable, and hovering says where it goes. The two
+chips in the top left corner open the Discord and the issue tracker.
 
 ### Chat channels
 
@@ -85,18 +108,19 @@ And the client's own: `/logout`, `/shutdown` (`/quit`), `/homepoint` (`/hp`,
 `/return`). Anything else beginning with `/` says so rather than being shouted
 across the zone, which is what used to happen.
 
-| click | target whatever is under the pointer |
-
 ### Getting unstuck
 
-Three keys exist because collision can trap you, and each fails differently.
+Four keys exist because collision can trap you, and each fails differently.
 
 | key | what it does |
 |---|---|
-| `U` | back up along the trail you walked in on. If that trail crossed somewhere that has no ground under it now, you will end up hanging there - `C` fixes that. |
+| `U` | back up along the trail you walked in on. If that trail crossed somewhere with no ground under it now, you will hang there - `C` fixes that. |
 | `N` | no collision. Walk through everything, including the floor. Press again to put it back. |
-| `C` | place the character on the ground beneath them |
+| `C` | put the character back on the ground |
 | `P` | print the position to the console |
+
+Falling through the floor recovers on its own now, but `C` is still the quick
+answer to being somewhere you should not be.
 
 `Escape` quits.
 
