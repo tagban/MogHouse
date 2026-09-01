@@ -55,6 +55,19 @@ public sealed class FfxiGameSession : IDisposable
     private FfxiDialogueTable _dialogue = FfxiDialogueTable.Empty;
     private uint _dialogueZone = uint.MaxValue;
 
+    /// <summary>Our own health, as the server last reported it.</summary>
+    public FfxiCharacterHealth? Health { get; private set; }
+
+    /// <summary>
+    /// Whether the character is dead. Movement is refused while it is true:
+    /// the server will not accept it, and walking a corpse around is the
+    /// most obvious way for a client to be lying to the person using it.
+    /// </summary>
+    public bool IsDead => Health?.IsDead ?? false;
+
+    /// <summary>Raised when the character dies, and again when they get up.</summary>
+    public event Action<bool>? DeathChanged;
+
     /// <summary>Raised for every chat message received.</summary>
     public event Action<FfxiChatLine>? ChatReceived;
 
@@ -195,6 +208,13 @@ public sealed class FfxiGameSession : IDisposable
     /// </summary>
     public void PlaceAt(float x, float vertical, float depth, sbyte facing)
     {
+        // Nor while dead. The server ignores it, and the renderer would
+        // otherwise walk a corpse around the zone.
+        if (IsDead)
+        {
+            return;
+        }
+
         // Not while we are between zones.
         //
         // The renderer showing the zone we are leaving keeps reporting a
@@ -550,6 +570,7 @@ public sealed class FfxiGameSession : IDisposable
     /// </summary>
     private bool _placementSuspended;
 
+
     /// <summary>
     /// Completes a zone change: rotate the key the way the server just did,
     /// restart the counters, and introduce ourselves to the new zone server
@@ -824,6 +845,18 @@ public sealed class FfxiGameSession : IDisposable
                 ChatReceived?.Invoke(new FfxiChatLine(DateTimeOffset.Now, chat.Kind, chat.Sender, chat.Text));
             }
 
+            // Our own hit points. Nothing else carries them.
+            FfxiCharacterHealth? health = FfxiCharacterHealth.TryParse(reply.Plaintext.AsSpan(offset, size));
+            if (health is not null && health.UniqueNo == (ZoneState?.UniqueNo ?? 0))
+            {
+                bool wasDead = IsDead;
+                Health = health;
+                if (wasDead != health.IsDead)
+                {
+                    DeathChanged?.Invoke(health.IsDead);
+                }
+            }
+
             // What an NPC said, which arrives as a line id to look up.
             FfxiNpcMessage? spoken = FfxiNpcMessage.TryParse(reply.Plaintext.AsSpan(offset, size));
             if (spoken is not null)
@@ -880,6 +913,24 @@ public sealed class FfxiGameSession : IDisposable
         }
 
         await _zone.SendActionAsync(_zoneEndpoint, uniqueNo, actIndex);
+    }
+
+    /// <summary>
+    /// Accepts the home point after dying, which is the only way back up.
+    ///
+    /// A character at zero HP is not going anywhere on their own: the server
+    /// waits to be told, and until it is told the character lies there while
+    /// this client happily keeps walking them around.
+    /// </summary>
+    public async Task ReturnToHomePointAsync()
+    {
+        if (_zone is null || _zoneEndpoint is null || ZoneState is null)
+        {
+            return;
+        }
+
+        await _zone.SendActionAsync(_zoneEndpoint, ZoneState.UniqueNo, ZoneState.ActIndex,
+                                    FfxiActionPacket.ActionHomePointMenu);
     }
 
     public async Task SayAsync(string message, FfxiChatKind kind = FfxiChatKind.Say)

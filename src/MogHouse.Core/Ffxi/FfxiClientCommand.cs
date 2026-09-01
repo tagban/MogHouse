@@ -18,6 +18,9 @@ public enum FfxiClientCommandKind
     /// <summary>Say something to one person.</summary>
     Tell,
 
+    /// <summary>Accept the home point after dying.</summary>
+    HomePoint,
+
     /// <summary>Recognised, but the line was missing something it needed.</summary>
     Incomplete,
 
@@ -67,6 +70,7 @@ public static class FfxiClientCommands
         {
             "logout" => new FfxiClientCommand(FfxiClientCommandKind.Logout, name, rest),
             "shutdown" or "quit" => new FfxiClientCommand(FfxiClientCommandKind.Shutdown, name, rest),
+            "homepoint" or "hp" or "return" => new FfxiClientCommand(FfxiClientCommandKind.HomePoint, name, rest),
 
             // The channels, under the names the real client answers to. Every
             // one has a short form because nobody types /linkshell twice.

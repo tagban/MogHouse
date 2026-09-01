@@ -2,6 +2,7 @@
 
 // Uploading FFXI textures to the GPU.
 
+#include <cstdio>
 #include "ffxi/texture.h"
 
 #include <webgpu/webgpu_cpp.h>
@@ -16,6 +17,22 @@ namespace mh
 inline wgpu::Texture uploadTexture(const wgpu::Device& device, const ffxi::Texture& source)
 {
     const bool compressed = source.format == ffxi::TextureFormat::Bc2;
+
+    // A block-compressed texture has to be a whole number of 4x4 blocks.
+    //
+    // Some models carry tiny placeholder textures - a 2x1 turned up on a stub
+    // creature model - and asking for one as BC2 does not fail politely. The
+    // texture comes back invalid, the bind group built from it is invalid, and
+    // every command buffer that references it is refused from then on: the
+    // window keeps its last frame and the renderer looks hung, several
+    // thousand identical validation errors later. Returning nothing here
+    // leaves the caller to fall back to the white texture, which costs one
+    // untextured mesh instead of the whole device.
+    if (compressed && (source.width % 4 != 0 || source.height % 4 != 0))
+    {
+        std::printf("skipping %ux%u compressed texture: not whole 4x4 blocks\n", source.width, source.height);
+        return {};
+    }
 
     wgpu::TextureDescriptor descriptor{};
     descriptor.usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst;

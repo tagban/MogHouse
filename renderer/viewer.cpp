@@ -1959,6 +1959,13 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 
     std::map<uint64_t, std::optional<DrawableCharacter>> npcModels;
 
+    /// Creatures, in a map of their own.
+    ///
+    /// Not folded into npcModels under a tagged key: lookKey multiplies the
+    /// race by 4096 five times, so a Galka reaches 8 * 2^60 - exactly the top
+    /// bit, so any tag up there collides with a real look. Two maps cannot.
+    std::map<uint16_t, std::optional<DrawableCharacter>> creatureModels;
+
     /// One entity's animation, and the vertices it is skinned into.
     ///
     /// The model cache is keyed by look, so a row of identical NPCs shares a
@@ -2115,9 +2122,8 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     /// idl0/wlk0/run0 the rest of the renderer looks for is a rabbit sitting,
     /// hopping and running without any special case.
     const auto creatureFor = [&](uint16_t modelId) -> const DrawableCharacter* {
-        const uint64_t key = 0x8000000000000000ull | modelId;
-        auto found = npcModels.find(key);
-        if (found != npcModels.end())
+        auto found = creatureModels.find(modelId);
+        if (found != creatureModels.end())
         {
             return found->second ? &*found->second : nullptr;
         }
@@ -2141,7 +2147,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 
         std::printf("creature model %s: id %u -> file %zu\n", built ? "built" : "failed", modelId,
                     mh::creatureFileId(modelId));
-        auto inserted = npcModels.emplace(key, std::move(built)).first;
+        auto inserted = creatureModels.emplace(modelId, std::move(built)).first;
         return inserted->second ? &*inserted->second : nullptr;
     };
 
@@ -3136,8 +3142,10 @@ constexpr float kGravity = 26.0f;
             queue.WriteBuffer(state.vertices, 0, state.geometry.vertices.data(),
                               state.geometry.vertices.size() * sizeof(mh::Vertex));
 
-            // Where the top of it ended up, for the name to sit above.
-            float top = 0.0f;
+            // Where the mesh ended up this frame. The top is where the name
+            // goes; the bottom says whether the feet are on the ground, which
+            // the rest pose cannot answer once a clip has moved the body.
+            float top = state.geometry.vertices.empty() ? 0.0f : state.geometry.vertices[0].position[1];
             for (const mh::Vertex& vertex : state.geometry.vertices)
             {
                 top = std::max(top, vertex.position[1]);

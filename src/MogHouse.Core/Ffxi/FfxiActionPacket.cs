@@ -27,6 +27,14 @@ public static class FfxiActionPacket
     /// <summary>Interact with an NPC. The rest of the enum is combat.</summary>
     public const ushort ActionTalk = 0x00;
 
+    /// <summary>
+    /// Answer the menu a dead character gets. The buffer's StatusId picks
+    /// which answer and Accept is zero, so a zeroed buffer is 'yes, send me
+    /// to my home point' - which is the whole of what this client can do
+    /// about dying so far.
+    /// </summary>
+    public const ushort ActionHomePointMenu = 0x0B;
+
     private const int OffsetIdAndSize = 0;
     private const int OffsetSync = 2;
     private const int OffsetUniqueNo = 4;

@@ -1086,7 +1086,6 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
     // out about what an entity looks like and whether it should be drawn, and
     // the session only reports the updates.
     bool countedNames = false;
-    var seenOnce = new HashSet<uint>();
 
     var tracker = new FfxiEntityTracker { SelfUniqueNo = session.ZoneState.UniqueNo };
     session.EntitiesChanged += updates =>
@@ -1095,17 +1094,6 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
         foreach (FfxiEntityUpdate update in updates)
         {
             tracker.Observe(update, now);
-
-            // One line the first time each entity is seen, while working
-            // out why mobs read as NPCs.
-            if (seenOnce.Add(update.UniqueNo))
-            {
-                string hp = update.HealthPercent?.ToString() ?? "-";
-                string battle = update.BattleFlags?.ToString("X2") ?? "-";
-                string alleg = update.Allegiance?.ToString() ?? "-";
-                Console.WriteLine($"  seen {update.UniqueNo:X8} pkt={update.PacketId:X3} mask={update.SendFlags:X2}"
-                                  + $" hp={hp} battle={battle} alleg={alleg} kind={update.Kind}");
-            }
         }
 
         // Why a nameplate is missing: no name at all, or a name we were
@@ -1136,6 +1124,33 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
     }
 
     session.ChatReceived += line => radar?.Say(line.Sender, line.Text);
+
+    // Dying is a decision, not just a state. FFXI gives a dead character
+    // the choice of going to their home point or waiting for someone to
+    // raise them, and a client that does not offer it leaves them on the
+    // floor with no way up - which is the whole game stopped, not a
+    // cosmetic gap.
+    void SayDeathPrompt()
+    {
+        // Also to the terminal: dying is the one state where the client
+        // going quiet is indistinguishable from the client being broken.
+        Console.WriteLine($"  {selected.Name} is dead - /homepoint to return, or wait for a raise.");
+        radar?.Say("", "You fall to the ground.");
+        radar?.Say("", "Type /homepoint to return to your home point,");
+        radar?.Say("", "or wait here for someone to raise you.");
+    }
+
+    session.DeathChanged += dead =>
+    {
+        if (dead)
+        {
+            SayDeathPrompt();
+        }
+        else
+        {
+            radar?.Say("", "You are back on your feet.");
+        }
+    };
     radar.ShowZoneLines(session.ZoneLines);
 
     // Zoning. The renderer holds one zone's geometry, collision and name table,
@@ -1166,6 +1181,17 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
             radar.ShowZoneLines(session.ZoneLines);
         }
     };
+
+    // Already dead when we arrived.
+    //
+    // The health packet lands in the burst the server sends at zone-in,
+    // before any of this is listening, so someone who logs in on a corpse
+    // gets no event at all - and that is exactly the person who most needs
+    // to be told there is a way up.
+    if (session.IsDead)
+    {
+        SayDeathPrompt();
+    }
 
     Console.WriteLine($"Playing as {selected.Name} in zone {currentZone}. Close the window to stop.");
 
@@ -1212,6 +1238,11 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
                         radar?.Say("", "Shutting down...");
                         await session.LogoutAsync(FfxiLogoutKind.Shutdown);
                         leaving = true;
+                        break;
+
+                    case FfxiClientCommandKind.HomePoint:
+                        radar?.Say("", "Returning to your home point...");
+                        await session.ReturnToHomePointAsync();
                         break;
 
                     case FfxiClientCommandKind.Chat:
