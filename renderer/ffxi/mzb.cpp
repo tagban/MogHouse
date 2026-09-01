@@ -20,6 +20,11 @@ constexpr size_t kPlacementsOffset = 32;
 constexpr uint16_t kIndexMask = 0x3FFF;
 constexpr uint8_t kFirstEncryptedVersion = 0x1B;
 
+/// Counts of each candidate material field, when MOGHOUSE_TRI_META is set.
+/// Three candidates: the fourth word's low nibble, its high nibble, and the
+/// six bits the three indices do not use.
+size_t (*materialTally)[16] = nullptr;
+
 template <typename T> T read(const std::vector<uint8_t>& buffer, size_t offset);
 
 /// How wide a placement record is in this file.
@@ -151,6 +156,23 @@ CollisionMesh readMesh(const std::vector<uint8_t>& buffer, size_t entry, size_t&
         {
             mesh.indices.push_back(read<uint16_t>(buffer, base + corner * 2) & kIndexMask);
         }
+
+        // The fourth word, and the bits the indices do not use. One of them is
+        // the surface material - LandSandBoat's mesh format keeps material:4
+        // and barrier:1 per triangle, and its TerrainType has ShallowWater at
+        // 8 and DeepWater at 9, which is where a zone's water actually lives.
+        if (materialTally)
+        {
+            const uint16_t fourth = read<uint16_t>(buffer, base + 6);
+            uint16_t spare = 0;
+            for (size_t corner = 0; corner < 3; ++corner)
+            {
+                spare |= static_cast<uint16_t>((read<uint16_t>(buffer, base + corner * 2) >> 14) << (corner * 2));
+            }
+            ++materialTally[0][fourth & 0x0F];
+            ++materialTally[1][(fourth >> 4) & 0x0F];
+            ++materialTally[2][spare & 0x0F];
+        }
     }
 
     next = triangleOffset + static_cast<size_t>(triangleCount) * 8;
@@ -180,6 +202,13 @@ Zone parseMzb(const Chunk& chunk, const KeyTable& keys)
     Zone zone;
     zone.id.assign(chunk.id, chunk.id + 4);
     zone.version = buffer.size() > 3 ? buffer[3] : 0;
+
+    static size_t tally[3][16];
+    if (std::getenv("MOGHOUSE_TRI_META"))
+    {
+        std::memset(tally, 0, sizeof(tally));
+        materialTally = tally;
+    }
 
     const uint32_t placementCount = read<uint32_t>(buffer, 4) & 0x00FFFFFF;
     const size_t kPlacementSize = placementStride(buffer, placementCount);
@@ -346,6 +375,24 @@ Zone parseMzb(const Chunk& chunk, const KeyTable& keys)
                 zone.instances.push_back(instance);
             }
         }
+    }
+
+    if (materialTally)
+    {
+        static const char* kNames[3] = { "fourth word, low nibble", "fourth word, high nibble",
+                                         "the bits the indices do not use" };
+        for (int which = 0; which < 3; ++which)
+        {
+            std::printf("  %s:\n", kNames[which]);
+            for (int value = 0; value < 16; ++value)
+            {
+                if (materialTally[which][value])
+                {
+                    std::printf("    %2d -> %zu\n", value, materialTally[which][value]);
+                }
+            }
+        }
+        materialTally = nullptr;
     }
 
     return zone;

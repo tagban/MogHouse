@@ -1,10 +1,38 @@
-# Water models: what is drawn, and what might be missing
+# Water: solved
 
-Water is placed geometry recognised by model name (`isWaterModel`, in
-`renderer/scene.cpp`), not derived from the MZB's per-cell height. The height
-field is read but deliberately not drawn - see the comment there: the values
-track each cell's own floor at a constant offset, and the cells that looked like
-the Bastok Markets fountain turn out to be concrete barriers in the real client.
+**Water is a material on each collision triangle.** Not a model you can
+recognise by name, and not the MZB's per-cell height field - both were tried
+and both were wrong, and the rest of this file is the record of those attempts.
+
+LandSandBoat keeps `material:4` and `barrier:1` per collision triangle
+(`src/map/ximesh/ximesh_structs.h`), and its `TerrainType` puts ShallowWater at
+8 and DeepWater at 9. That is what `!pos` prints as `Terrain: Deep Water`, and
+what `zone:getTerrainType(pos)` answers. The decoded meshes ship with the
+server as zlib-compressed `.ximesh` files, one per zone.
+
+Read with `tools/ximesh.py <zone>`. Checked across four zones, and the numbers
+are what a city should look like:
+
+| zone | triangles | water | and the rest |
+|---|---|---|---|
+| Windurst Waters | 67,079 | **5,360 (8.0%)** | Wood 28.6%, Stone 24.8%, Grass 16.6% |
+| Windurst Woods | 52,132 | 432 (0.8%) | Stone, Wood, Object, Grass |
+| Bastok Markets | 40,998 | 697 (1.7%) | Stone 77%, Wood, Object, Metal |
+| Southern San d'Oria | 55,762 | 32 (0.1%) | Stone 64%, Wood 27% |
+
+Windurst Waters is far and away the wettest, which is what anyone who has stood
+in it would tell you.
+
+## What is left to do
+
+The triangles are in each block's local space; the block's placement transform
+(a 3x3 rotation and a translation, in the same file) still has to be applied
+before they are world geometry. After that they are ordinary surfaces and can
+be drawn the way the named water models already are.
+
+## Why the earlier attempts failed
+
+Kept because both are easy to have again, and the second one nearly shipped.
 
 ## What matches today
 
