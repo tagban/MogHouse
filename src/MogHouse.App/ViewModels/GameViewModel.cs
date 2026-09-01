@@ -206,9 +206,18 @@ public partial class GameViewModel : ViewModelBase
 
             // Closing the world window is leaving, not a glitch to recover
             // from - say so rather than looking like nothing happened.
+            //
+            // And bring the launcher back. It hides itself while the world is
+            // up, so without this the world closing leaves nothing on screen
+            // at all: the app is still running, still logged in, and entirely
+            // invisible. Which looks exactly like logging out having failed.
             if (!token.IsCancellationRequested)
             {
-                Dispatcher.UIThread.Post(() => WorldStatus = "Closed. Reopen it, or leave.");
+                Dispatcher.UIThread.Post(() =>
+                {
+                    WorldStatus = "Closed. Reopen it, or leave.";
+                    WorldVisibilityChanged?.Invoke(false);
+                });
             }
         }, token);
     }
