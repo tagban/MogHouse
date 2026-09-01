@@ -42,3 +42,6 @@ build-dawn
 /keys/
 
 __pycache__/
+
+# scratch file written by tools/subrooms.py
+tools/_mzb.tmp

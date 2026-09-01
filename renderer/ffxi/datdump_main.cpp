@@ -112,6 +112,18 @@ int main(int argc, char** argv)
                                     m.name.c_str(), m.meshes.size(), m.vertexCount(), m.triangleCount(),
                                     m.meshes.empty() ? "-" : m.meshes.front().texture.c_str());
                     }
+                    if (const char* only = std::getenv("MOGHOUSE_MODEL_MESHES"))
+                    {
+                        if (m.name.rfind(only, 0) == 0)
+                        {
+                            std::printf("  %s: %zu meshes\n", m.name.c_str(), m.meshes.size());
+                            for (const ffxi::ModelMesh& mesh : m.meshes)
+                            {
+                                std::printf("      %6zu tris  blend %u  tex [%s]\n",
+                                            mesh.indices.size() / 3, unsigned(mesh.blending), mesh.texture.c_str());
+                            }
+                        }
+                    }
                     meshes += m.meshes.size();
                     verts += m.vertexCount();
                     tris += m.triangleCount();
