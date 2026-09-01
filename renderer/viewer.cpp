@@ -1460,11 +1460,16 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         wgpu::FragmentState plateFragment{
             .module = plateModule, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &plateTarget};
 
-        // Names sit over the world, not in it: a body behind a wall still has
-        // a readable name, which is what makes them useful for finding things.
+        // Names sit in the world, not over it.
+        //
+        // Drawing them with the depth test off makes every NPC in the zone
+        // readable through the walls between, which is a map rather than a
+        // view - the real client hides a name the moment its owner goes behind
+        // something, and so does this now. Depth is still not written, so two
+        // names that overlap blend rather than cutting each other up.
         wgpu::DepthStencilState plateDepth{.format = kDepthFormat,
                                            .depthWriteEnabled = false,
-                                           .depthCompare = wgpu::CompareFunction::Always};
+                                           .depthCompare = wgpu::CompareFunction::LessEqual};
 
         wgpu::RenderPipelineDescriptor platePipelineDescriptor{
             .layout = platePipelineLayout,
