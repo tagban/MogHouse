@@ -48,7 +48,11 @@ fn fragmentMain(in : WaterOut) -> @location(0) vec4<f32> {
     // The tint is deliberately light. effect umna measures (12,15,29), but that
     // is the sea; taken literally for a river, with the bed hidden behind an
     // opaque sheet, it renders as a black void.
-    let body = vec3<f32>(0.16, 0.29, 0.30);
+    // Greener and darker than it was, from a side-by-side against a retail
+    // client standing in the same spot in Windurst Waters: theirs is a deep
+    // green-teal that reads as depth, ours was a pale blue-grey that read as a
+    // slab laid on the ground.
+    let body = vec3<f32>(0.09, 0.20, 0.17);
 
     // The ripple sheet, sampled twice drifting at different speeds and angles so
     // it does not read as one sheet sliding.
@@ -60,7 +64,10 @@ fn fragmentMain(in : WaterOut) -> @location(0) vec4<f32> {
     // letting that through once turned the river white.
     let ambient = min(uniforms.ambient.rgb, vec3<f32>(1.0, 1.0, 1.0));
     var colour = body * (0.55 + 0.45 * ambient);
-    colour = colour + ambient * foam * 0.40;
+    // The foam was most of why it looked washed out: at 0.40 a bright ripple
+    // sheet lifted the whole surface toward grey, which is a lake in overcast
+    // daylight rather than a canal.
+    colour = colour + ambient * foam * 0.16;
 
     let distance = length(in.worldPosition - uniforms.eye.xyz);
     let fogStart = uniforms.fogRange.x;
@@ -70,7 +77,7 @@ fn fragmentMain(in : WaterOut) -> @location(0) vec4<f32> {
 
     // Clear enough to see the bed through it, which is most of what makes water
     // read as water rather than as a coloured lid.
-    let alpha = clamp(0.42 + foam * 0.30, 0.0, 0.85);
+    let alpha = clamp(0.50 + foam * 0.22, 0.0, 0.86);
     return vec4<f32>(colour, alpha);
 }
 )";

@@ -71,6 +71,10 @@ public partial class GameViewModel : ViewModelBase
         // Dying, and being offered a way back up. Both are pushed at the
         // renderer rather than shown here: the box belongs in the window the
         // character is lying in, not in a panel beside it.
+        // A GM teleport, a homepoint return, anything the server decides.
+        // Without this the character stays where the renderer last drew them.
+        shell.Session.MovedByServer += OnMovedByServer;
+
         shell.Session.DeathChanged += OnDeathChanged;
         shell.Session.RaiseOfferChanged += OnRaiseOfferChanged;
 
@@ -263,6 +267,13 @@ public partial class GameViewModel : ViewModelBase
     /// <summary>Someone has cast Raise, which is what lights the second button.</summary>
     private void OnRaiseOfferChanged(bool offered) =>
         _world?.ShowDeath(_shell.Session.IsDead, offered);
+
+    private void OnMovedByServer() => Dispatcher.UIThread.Post(() =>
+    {
+        FfxiGameSession session = _shell.Session;
+        _world?.PlaceCharacter(session.PosX, session.PosVertical, session.PosDepth, session.Facing);
+        PositionText = $"x {session.PosX:F1}  y {session.PosVertical:F1}  z {session.PosDepth:F1}";
+    });
 
     private void OnChat(FfxiChatLine line) => Dispatcher.UIThread.Post(() =>
     {

@@ -561,7 +561,18 @@ public sealed class FfxiGameSession : IDisposable
 
         Status?.Invoke($"Moved by the server to x {PosX:F1}  y {PosVertical:F1}  z {PosDepth:F1}.");
         Moved?.Invoke();
+        MovedByServer?.Invoke();
     }
+
+    /// <summary>
+    /// The server has put us somewhere, and the renderer has to be told.
+    ///
+    /// Separate from <see cref="Moved"/> on purpose. Moved fires for our own
+    /// walking too, and the renderer is where that walking came from - feeding
+    /// it back would have the character fighting itself every frame. This
+    /// fires only when the move came from the other end.
+    /// </summary>
+    public event Action? MovedByServer;
 
     /// <summary>Raised when the server moves us to a different zone.</summary>
     public event Action<uint>? ZoneChanged;
@@ -889,6 +900,24 @@ public sealed class FfxiGameSession : IDisposable
             if (chat is not null && chat.Text.Length > 0)
             {
                 ChatReceived?.Invoke(new FfxiChatLine(DateTimeOffset.Now, chat.Kind, chat.Sender, chat.Text));
+            }
+
+            // Being put somewhere. GP_SERV_COMMAND_POS, which is what every
+            // GM teleport arrives as - !pos, !goto, !bring - and what a
+            // homepoint return uses. Going unread meant those commands moved
+            // the character on the server and nowhere else: the renderer kept
+            // drawing them where they were and kept telling the server so,
+            // fifty milliseconds later, which put them back.
+            FfxiServerPosition? placed = FfxiServerPosition.TryParse(reply.Plaintext.AsSpan(offset, size));
+            if (placed is not null && placed.UniqueNo == (ZoneState?.UniqueNo ?? 0))
+            {
+                PosX = placed.X;
+                PosVertical = placed.Vertical;
+                PosDepth = placed.Depth;
+                Facing = placed.Direction;
+                Status?.Invoke($"Placed by the server at x {PosX:F1}  y {PosVertical:F1}  z {PosDepth:F1}.");
+                Moved?.Invoke();
+                MovedByServer?.Invoke();
             }
 
             // Our own hit points. Nothing else carries them.
