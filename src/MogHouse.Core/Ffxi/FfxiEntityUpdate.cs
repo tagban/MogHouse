@@ -378,8 +378,17 @@ public sealed record FfxiEntityUpdate(
     /// targeted. Doors, zone lines and scenery carry it - they are named, and
     /// the game shows the name only on target.
     /// </summary>
-    public bool IsNameHidden =>
-        (NameVis & NameVisHideName) != 0 || (EntityFlags & EntityFlagHideName) != 0;
+    /// <summary>
+    /// Only the namevis byte decides this.
+    ///
+    /// EntityFlags bit 0x08 is called HIDE_NAME in LandSandBoat's enum, and
+    /// acting on it hid almost every NPC in the zone: 203 of Windurst Waters'
+    /// NPCs carry flags 0x1B, which contains it, and they are ordinary
+    /// shopkeepers whose names the game shows. So either the field at 0x21 is
+    /// not what arrives, or that bit means something else once it is on the
+    /// wire. Parsed and left alone until something can say which.
+    /// </summary>
+    public bool IsNameHidden => (NameVis & NameVisHideName) != 0;
 
     /// <summary>
     /// The server says not to draw this at all - a trigger, or something an
