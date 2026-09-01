@@ -31,7 +31,7 @@ fi
 # Which DAT files hold each zone's building interiors. Found relative to the
 # working directory otherwise, and a zone loads perfectly well without it -
 # just with every building an empty shell.
-: "${MOGHOUSE_SUBROOMS:=$here/assets/subrooms.txt}"
+: "${MOGHOUSE_SUBROOMS:=$here/renderer/assets/subrooms.txt}"
 
 : "${MOGHOUSE_FFXI_ZONEDATA:=C:/Users/Gaming/Desktop/LandSandBoat/data/zones}"
 : "${MOGHOUSE_FFXI_NAVMESHES:=C:/Users/Gaming/Desktop/LandSandBoat/navmeshes}"

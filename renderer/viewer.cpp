@@ -381,12 +381,35 @@ std::vector<std::filesystem::path> subroomsFor(const std::filesystem::path& zone
         return {};
     }
 
-    std::filesystem::path manifest = std::filesystem::path{"assets"} / "subrooms.txt";
+    // Looked for in every place the renderer gets launched from. It runs as a
+    // DLL inside the app, as a standalone exe from the build directory, and
+    // from the source tree under tools/play.sh, and only the first of those has
+    // a working directory with an assets/ beside it.
+    std::vector<std::filesystem::path> candidates;
     if (const char* fromEnv = std::getenv("MOGHOUSE_SUBROOMS"))
     {
-        manifest = fromEnv;
+        candidates.emplace_back(fromEnv);
     }
-    std::ifstream file{manifest};
+    if (const char* nativeDir = std::getenv("MOGHOUSE_NATIVE_DIR"))
+    {
+        candidates.push_back(std::filesystem::path{nativeDir} / "assets" / "subrooms.txt");
+    }
+    if (const char* fontDir = std::getenv("MOGHOUSE_FONT"))
+    {
+        candidates.push_back(std::filesystem::path{fontDir} / "subrooms.txt");
+    }
+    candidates.push_back(std::filesystem::path{"assets"} / "subrooms.txt");
+
+    std::ifstream file;
+    for (const std::filesystem::path& candidate : candidates)
+    {
+        file.open(candidate);
+        if (file)
+        {
+            break;
+        }
+        file.clear();
+    }
     if (!file)
     {
         return {};
