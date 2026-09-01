@@ -1067,7 +1067,7 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
             await session.ConnectToZoneAsync(selected, login.SessionHash, profile.Host);
             break;
         }
-        catch (FfxiLoginErrorException e) when (e.Code == 201 && attempt < 6)
+        catch (FfxiLoginErrorException e) when (e.Code == 201 && attempt < 15)
         {
             Console.WriteLine($"  {selected.Name} is still logged in on the server; waiting for it to clear...");
             await Task.Delay(TimeSpan.FromSeconds(10));
