@@ -418,6 +418,20 @@ public partial class GameViewModel : ViewModelBase
         // shutting down: for as long as the new zone took to read there was
         // nothing on screen at all.
         FfxiGameSession session = _shell.Session;
+
+        // Why, when it declines. Falling back opens a second window and closes
+        // the first, which is the behaviour this replaced - so it should be
+        // obvious that it happened rather than something to deduce from the
+        // windows.
+        if (_world is null)
+        {
+            _shell.Status = "No world window to zone; opening one.";
+        }
+        else if (_world.Closed)
+        {
+            _shell.Status = "The world window had already closed; opening another.";
+        }
+
         if (_world is { Closed: false } &&
             _world.LoadZone((int)zone, ZoningTo, session.PosX, session.PosVertical, session.PosDepth, session.Facing))
         {

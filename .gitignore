@@ -45,3 +45,4 @@ __pycache__/
 
 # scratch file written by tools/subrooms.py
 tools/_mzb.tmp
+moghouse.log

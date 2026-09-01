@@ -35,6 +35,12 @@ fi
 export MOGHOUSE_FFXI_RES MOGHOUSE_FFXI_KEYTABLE MOGHOUSE_FFXI_KEYTABLE2 MOGHOUSE_FONT
 export MOGHOUSE_FFXI_ZONEDATA MOGHOUSE_FFXI_NAVMESHES MOGHOUSE_SUBROOMS
 
+# Where the client writes down what it did. It is a windowed application with
+# no console, so without this everything it says goes nowhere and a bug reported
+# from inside the game leaves nothing to read afterwards.
+: "${MOGHOUSE_LOG:=$here/moghouse.log}"
+export MOGHOUSE_LOG
+
 # Git Bash rewrites an argument that looks like a Unix path into a Windows one.
 export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL="*"

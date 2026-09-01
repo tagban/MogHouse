@@ -1275,6 +1275,20 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     wgpu::Texture mapTexture;
 
     const auto readZone = [&]() -> int {
+        // Everything a zone contributes is added to, not replaced, so a second
+        // zone has to start from nothing.
+        //
+        // Left alone, the times of day of both zones end up in one set and get
+        // interpolated together - which is why the second zone came out white -
+        // and both zones' textures compete for the same names, so meshes bind
+        // whichever was inserted first and the rest render black. The interiors
+        // keep lighting boxes for buildings that are no longer anywhere.
+        zone.reset();
+        textures.clear();
+        lighting = ffxi::Lighting{};
+        interiors.clear();
+        collision = mh::Collision{};
+
         if (!currentZonePath.empty())
         {
             const char* keyPath = options.keyTablePath.empty() ? nullptr : options.keyTablePath.c_str();

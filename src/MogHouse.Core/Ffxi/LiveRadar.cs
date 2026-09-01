@@ -230,12 +230,14 @@ public sealed class LiveRadar : IDisposable
         {
             path = new FfxiFileTable(FfxiFileTable.DefaultInstallRoot()).ZonePath(zoneId);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Console.WriteLine($"  cannot reach the file table for zone {zoneId}: {ex.Message}");
             return false;
         }
         if (path is null)
         {
+            Console.WriteLine($"  this install has no DAT for zone {zoneId}");
             return false;
         }
 
