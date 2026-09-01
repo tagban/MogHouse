@@ -1460,16 +1460,14 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         wgpu::FragmentState plateFragment{
             .module = plateModule, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &plateTarget};
 
-        // Names sit in the world, not over it.
-        //
-        // Drawing them with the depth test off makes every NPC in the zone
-        // readable through the walls between, which is a map rather than a
-        // view - the real client hides a name the moment its owner goes behind
-        // something, and so does this now. Depth is still not written, so two
-        // names that overlap blend rather than cutting each other up.
+        // Always, because the depth test cannot help here: the whole pass is
+        // one fullscreen triangle at depth zero and each label is projected in
+        // the fragment shader, so there is no per-label depth to compare.
+        // Whether a name is behind a wall is decided on the CPU, with the same
+        // raycast the camera uses - see where the plates are laid out.
         wgpu::DepthStencilState plateDepth{.format = kDepthFormat,
                                            .depthWriteEnabled = false,
-                                           .depthCompare = wgpu::CompareFunction::LessEqual};
+                                           .depthCompare = wgpu::CompareFunction::Always};
 
         wgpu::RenderPipelineDescriptor platePipelineDescriptor{
             .layout = platePipelineLayout,
@@ -3792,8 +3790,23 @@ constexpr float kGravity = 26.0f;
                             : (plateModel ? plateModel->loaded.geometry.height()
                                           : (character ? character->geometry.height() : 1.8f));
 
+                    const float headY = entity.y + bodyHeight + kPlateClearance;
+
+                    // Behind a wall, so not shown.
+                    //
+                    // The depth test cannot do this: the plates are drawn as one
+                    // fullscreen triangle at depth zero with the projection done
+                    // per fragment, so every label passes any depth comparison
+                    // there is. The same wall raycast the camera uses to avoid
+                    // orbiting through a house answers it directly instead, and
+                    // a handful of entities is a handful of rays.
+                    if (collision.firstWallAlong(camera.eye(), mh::Vec3{entity.x, headY, entity.z}))
+                    {
+                        continue;
+                    }
+
                     plate.positions[named][0] = entity.x;
-                    plate.positions[named][1] = entity.y + bodyHeight + kPlateClearance;
+                    plate.positions[named][1] = headY;
                     plate.positions[named][2] = entity.z;
 
                     // Colour by what the entity is. The rest of the palette -
