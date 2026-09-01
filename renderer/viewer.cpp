@@ -1975,6 +1975,13 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         float clipStart = 0.0f;
         float lastX = 0.0f;
         float lastZ = 0.0f;
+        /// The top of the mesh in this frame's pose.
+        ///
+        /// The model's own bounds are the rest pose and are computed once, so
+        /// a clip that lifts the whole body - which is what a bird's flight is
+        /// - leaves them describing something on the ground. The nameplate
+        /// then sits under a hovering crow instead of over it.
+        float posedTop = 0.0f;
         float lastMoveTime = 0.0f;
         float movingUntil = 0.0f;
         float speed = 0.0f;
@@ -3128,6 +3135,14 @@ constexpr float kGravity = 26.0f;
                        model->loaded.meshes);
             queue.WriteBuffer(state.vertices, 0, state.geometry.vertices.data(),
                               state.geometry.vertices.size() * sizeof(mh::Vertex));
+
+            // Where the top of it ended up, for the name to sit above.
+            float top = 0.0f;
+            for (const mh::Vertex& vertex : state.geometry.vertices)
+            {
+                top = std::max(top, vertex.position[1]);
+            }
+            state.posedTop = top;
             state.drawn = true;
         }
 
@@ -3754,9 +3769,15 @@ constexpr float kGravity = 26.0f;
                     // A galka and a tarutaru standing together want quite
                     // different numbers, and the shared body is the fallback
                     // for anyone we could not build.
+                    // The pose this frame if there is one, because a clip can
+                    // carry the body well away from where the rest pose put it.
                     const DrawableCharacter* plateModel = modelForEntity(entity);
-                    const float bodyHeight = plateModel ? plateModel->loaded.geometry.height()
-                                                        : (character ? character->geometry.height() : 1.8f);
+                    auto posedPlate = entityPoses.find(entity.id);
+                    const float bodyHeight =
+                        posedPlate != entityPoses.end() && posedPlate->second.drawn && posedPlate->second.posedTop > 0.0f
+                            ? posedPlate->second.posedTop
+                            : (plateModel ? plateModel->loaded.geometry.height()
+                                          : (character ? character->geometry.height() : 1.8f));
 
                     plate.positions[named][0] = entity.x;
                     plate.positions[named][1] = entity.y + bodyHeight + kPlateClearance;
