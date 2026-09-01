@@ -13,6 +13,24 @@
     <TextBlock TextWrapping="Wrap" Opacity="0.45" FontSize="11"
                Text="Picking the ROM folder, or one of the numbered folders inside it, is fine - it will work out what you meant."/>
 
+    <!-- What we found without being asked, shown before it is relied on.
+         Absent when nothing was found, which is when the only thing to do is
+         browse. -->
+    <Border IsVisible="{Binding Detected, Converter={x:Static ObjectConverters.IsNotNull}}"
+            Background="#1A2A3A44" CornerRadius="4" Padding="12,10" Margin="0,6,0,0">
+      <StackPanel Spacing="6">
+        <TextBlock Text="Found a copy here" Opacity="0.6" FontSize="11"/>
+        <TextBlock Text="{Binding Detected}" TextWrapping="Wrap" FontSize="12"/>
+      </StackPanel>
+    </Border>
+
+    <Button Content="Use this folder"
+            Command="{Binding UseDetectedCommand}"
+            IsVisible="{Binding Detected, Converter={x:Static ObjectConverters.IsNotNull}}"
+            HorizontalAlignment="Stretch"
+            HorizontalContentAlignment="Center"
+            Classes="accent"/>
+
     <Button Content="Choose the folder..."
             Command="{Binding BrowseCommand}"
             HorizontalAlignment="Stretch"

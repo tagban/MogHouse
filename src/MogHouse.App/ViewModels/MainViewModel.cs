@@ -51,6 +51,14 @@ public partial class MainViewModel : ViewModelBase
 
     public MainViewModel()
     {
+        // Found before anything is built from it. This used to sit further
+        // down, after the session was constructed with
+        // `InstallPath is null ? null : new FfxiFileTable(InstallPath)` - and
+        // InstallPath was still null on that line, so the session never got a
+        // file table at all and NPC dialogue had nothing to look line ids up
+        // in. The initialiser read correctly and ran too early.
+        InstallPath = FfxiInstall.Find();
+
         Tables = FfxiHuffmanTables.TryLoadDefault();
         // Navmeshes come from the same place as the compression tables by
         // default, since both are server-side data the project does not ship.
@@ -79,10 +87,14 @@ public partial class MainViewModel : ViewModelBase
         // Without the game's files there is nothing this can do, so finding
         // them comes before anything else rather than failing later with a
         // missing DAT.
-        InstallPath = FfxiInstall.Find();
-        if (InstallPath is null)
+        // The screen appears when the game was not found *or* when what we
+        // found has never been confirmed by the person running this. A guess
+        // is worth showing before it is relied on, and outside Windows it is
+        // usually a guess: there is no registry key to read, and the game
+        // normally lives inside a Wine or CrossOver prefix.
+        if (InstallPath is null || FfxiInstall.Confirmed() is null)
         {
-            CurrentPage = new InstallViewModel(this);
+            CurrentPage = new InstallViewModel(this) { Detected = InstallPath };
         }
         else
         {
@@ -90,11 +102,24 @@ public partial class MainViewModel : ViewModelBase
             CurrentPage = new LoginViewModel(this);
         }
 
+        // Said out loud either way. This is the one thing whose absence stops
+        // the client talking to any server at all, and a packaged build that
+        // shipped without it would otherwise fail at the login screen with
+        // nothing in the log to say why.
         if (Tables is null)
         {
             Status = "Compression tables not found - set MOGHOUSE_FFXI_RES to a directory containing " +
                      $"{FfxiHuffmanTables.EncodeFileName} and {FfxiHuffmanTables.DecodeFileName}.";
+            Console.WriteLine($"startup: {Status}");
         }
+        else
+        {
+            Console.WriteLine("startup: compression tables loaded.");
+        }
+
+        Console.WriteLine($"startup: game files at {InstallPath ?? "(not found - asking)"}");
+        Console.WriteLine($"startup: navmeshes {(NavMeshDirectory ?? "(none - the flat map will be empty)")}");
+        Console.WriteLine($"startup: zone data {(ZoneDataDirectory ?? "(none - no zone lines)")}");
     }
 
     public void Navigate(ViewModelBase page) => CurrentPage = page;

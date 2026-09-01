@@ -30,6 +30,29 @@ public partial class InstallViewModel : ViewModelBase
     [ObservableProperty]
     public partial string? Chosen { get; set; }
 
+    /// <summary>
+    /// Where the game was found without being asked, if it was. Shown so the
+    /// player can see what is about to be used rather than discovering it
+    /// later - and so a wrong guess can be corrected before it is relied on.
+    /// </summary>
+    [ObservableProperty]
+    public partial string? Detected { get; set; }
+
+    /// <summary>Accepts the detected install, and stops asking about it.</summary>
+    [RelayCommand]
+    private void UseDetected()
+    {
+        if (Detected is null)
+        {
+            return;
+        }
+
+        FfxiInstall.Remember(Detected);
+        _shell.InstallPath = Detected;
+        _shell.Status = $"Using the game files at {Detected}.";
+        _shell.Navigate(new LoginViewModel(_shell));
+    }
+
     [RelayCommand]
     private async Task BrowseAsync()
     {

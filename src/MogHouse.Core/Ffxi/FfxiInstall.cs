@@ -124,6 +124,21 @@ public static class FfxiInstall
         }
     }
 
+    /// <summary>
+    /// The install the player has confirmed before, if any.
+    ///
+    /// Distinct from <see cref="Find"/>, which will happily guess. This is
+    /// what decides whether the first-run screen appears: a guess should be
+    /// shown to someone before it is relied on, and on macOS and Linux the
+    /// guess is far more likely to be wrong, because the game usually lives
+    /// inside a Wine or CrossOver prefix rather than anywhere predictable.
+    /// </summary>
+    public static string? Confirmed()
+    {
+        string? remembered = LoadRemembered();
+        return remembered is not null && IsInstall(remembered) ? remembered : null;
+    }
+
     private static string? LoadRemembered()
     {
         try

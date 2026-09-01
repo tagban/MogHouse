@@ -37,11 +37,33 @@ public sealed class LiveRadar : IDisposable
     /// the server reported. Returns null, with a reason, if anything needed is
     /// missing - a radar is not worth failing a login over.
     /// </summary>
+    /// <summary>
+    /// Where a key table lives: what the environment says, or beside the
+    /// executable. An empty string means "not found", which the renderer
+    /// already reports for itself.
+    /// </summary>
+    private static string KeyTable(string variable, string fileName)
+    {
+        if (Environment.GetEnvironmentVariable(variable) is { Length: > 0 } configured)
+        {
+            return configured;
+        }
+
+        string beside = Path.Combine(AppContext.BaseDirectory, "keys", fileName);
+        return File.Exists(beside) ? beside : "";
+    }
+
     public static LiveRadar? Open(int zoneId, float x, float vertical, float depth, uint serverClock = 0,
                                   string? playerName = null, string? playerLook = null)
     {
-        string keys = Environment.GetEnvironmentVariable("MOGHOUSE_FFXI_KEYTABLE") ?? "";
-        string keys2 = Environment.GetEnvironmentVariable("MOGHOUSE_FFXI_KEYTABLE2") ?? "";
+        // Beside the executable when nothing points elsewhere, so a copied
+        // folder runs with no environment set - the same portability the
+        // compression tables, the glyph atlas and the water already have. A
+        // development checkout keeps these in keys/ at the repository root and
+        // a packaged build puts them in keys/ next to the exe, so one relative
+        // path serves both.
+        string keys = KeyTable("MOGHOUSE_FFXI_KEYTABLE", "mzb_key_table.bin");
+        string keys2 = KeyTable("MOGHOUSE_FFXI_KEYTABLE2", "mmb_key_table2.bin");
         if (keys.Length == 0)
         {
             Console.WriteLine("--view needs MOGHOUSE_FFXI_KEYTABLE; run tools/keytables.py");
