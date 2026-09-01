@@ -25,6 +25,19 @@ public sealed class MogHouseSettings
     [JsonPropertyName("radarTurnsWithPlayer")]
     public bool RadarTurnsWithPlayer { get; set; } = true;
 
+    /// <summary>
+    /// How far away another character is still drawn, in world units. Zero
+    /// draws everyone the renderer has room for.
+    ///
+    /// Each body costs a mesh reposed on the processor and uploaded every
+    /// frame, so this is what a machine short of headroom should turn down -
+    /// and what a machine with room to spare should leave alone. It does not
+    /// affect the radar or nameplates, which are cheap: someone too far to be
+    /// drawn is still a dot.
+    /// </summary>
+    [JsonPropertyName("bodyDrawDistance")]
+    public float BodyDrawDistance { get; set; }
+
     public static string FilePath =>
         Path.Combine(Path.GetDirectoryName(FfxiServerProfileStore.FilePath)!, "moghouse-settings.json");
 
@@ -61,6 +74,7 @@ public sealed class MogHouseSettings
                 JsonSerializer.Deserialize<MogHouseSettings>(File.ReadAllText(FilePath)) is { } loaded)
             {
                 loaded.MusicVolume = Math.Clamp(loaded.MusicVolume, 0.0f, 1.0f);
+                loaded.BodyDrawDistance = Math.Max(0.0f, loaded.BodyDrawDistance);
                 return loaded;
             }
         }

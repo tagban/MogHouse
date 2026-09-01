@@ -2545,6 +2545,31 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     /// How many entity bodies the instance buffer currently holds.
     int drawnBodies = 0;
 
+    /// How far away a body is still worth drawing, in world units.
+    ///
+    /// The cap on bodies is a ceiling on buffers; this is the knob a player
+    /// actually wants. Zero means no limit beyond that ceiling - draw
+    /// everyone, which is what a machine with room to spare should do. A
+    /// smaller number is how a slower one keeps up.
+    ///
+    /// Read once: it is a preference, not something that changes mid-zone.
+    const float bodyDistance = [] {
+        if (const char* set = std::getenv("MOGHOUSE_BODY_DISTANCE"))
+        {
+            const float given = static_cast<float>(std::atof(set));
+            if (given > 0.0f)
+            {
+                return given;
+            }
+        }
+        return 0.0f;
+    }();
+
+    /// How many of the sorted entities are close enough to draw. The list is
+    /// nearest first, so those are always a prefix of it and every index the
+    /// draw loops use stays meaningful.
+    int bodiesInRange = mh::kMaxDrawnBodies;
+
     /// Where each entity is being drawn, as opposed to where it was last
     /// reported.
     ///
@@ -2837,7 +2862,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         drawnBodies = 0;
         for (const mh::RadarEntity& entity : radarEntities)
         {
-            if (drawnBodies >= mh::kMaxDrawnBodies)
+            if (drawnBodies >= bodiesInRange)
             {
                 break;
             }
@@ -4176,6 +4201,51 @@ constexpr float kGravity = 26.0f;
         {
             radarEntities = link->entities();
 
+            // Nearest first, and deterministically so.
+            //
+            // The list arrives in the order a Dictionary happened to enumerate
+            // it, which is unspecified and reshuffles whenever an entry is
+            // removed and re-added - which happens constantly as entities go
+            // stale and come back. Instance slots and posed bodies are handed
+            // out by position in this list, and only the first
+            // kMaxDrawnBodies of them are drawn, so in a city with more
+            // entities than that the *set* of bodies drawn changed every time
+            // the order churned. They blinked in and out, worst while moving,
+            // because that is when entities come and go fastest.
+            //
+            // Sorting by distance makes the cap mean what it should - the
+            // nearest bodies are the ones drawn - and the id breaks ties so
+            // two entities at the same distance cannot swap places frame to
+            // frame.
+            std::sort(radarEntities.begin(), radarEntities.end(),
+                      [&](const mh::RadarEntity& a, const mh::RadarEntity& b) {
+                          const float ax = a.x - characterAt.x;
+                          const float az = a.z - characterAt.z;
+                          const float bx = b.x - characterAt.x;
+                          const float bz = b.z - characterAt.z;
+                          const float near = ax * ax + az * az;
+                          const float far = bx * bx + bz * bz;
+                          return near != far ? near < far : a.id < b.id;
+                      });
+
+            bodiesInRange = static_cast<int>(radarEntities.size());
+            if (bodyDistance > 0.0f)
+            {
+                const float reach = bodyDistance * bodyDistance;
+                bodiesInRange = 0;
+                for (const mh::RadarEntity& entity : radarEntities)
+                {
+                    const float dx = entity.x - characterAt.x;
+                    const float dz = entity.z - characterAt.z;
+                    if (dx * dx + dz * dz > reach)
+                    {
+                        break;              // sorted, so the rest are further
+                    }
+                    ++bodiesInRange;
+                }
+            }
+            bodiesInRange = std::min(bodiesInRange, mh::kMaxDrawnBodies);
+
             // Eased towards where the server says they are.
             //
             // Done here, before anything reads a position, so the instance
@@ -4359,7 +4429,7 @@ constexpr float kGravity = 26.0f;
             // expensive half - a mesh reposed on the CPU and uploaded every
             // frame - and doing it for a body past the instance cap is work
             // whose result is never submitted.
-            if (posedCount >= mh::kMaxDrawnBodies)
+            if (posedCount >= bodiesInRange)
             {
                 break;
             }

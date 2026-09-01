@@ -158,8 +158,18 @@ inline size_t creatureFileId(uint16_t modelId) { return kCreatureModelBase + mod
 /// monsters can pass it - so it is seventy-five.
 ///
 /// Whoever misses out should be whoever is furthest away, which is a matter of
-/// the order slots are handed out in rather than of this number.
-inline constexpr int kMaxDrawnBodies = 75;
+/// the order slots are handed out in rather than of this number. That was the
+/// intent here for a long time and was not actually true: the list arrived in
+/// whatever order a Dictionary enumerated it, so in a zone with more entities
+/// than this the *set* of bodies drawn reshuffled whenever an entity went
+/// stale and came back, and they blinked in and out. The frame loop now sorts
+/// by distance before slots are handed out, so this number is once again only
+/// about how many are worth drawing.
+///
+/// Raised from seventy-five, which a city passes easily. Each body costs a
+/// mesh reposed on the CPU and uploaded every frame, so this is the expensive
+/// number in a crowd - if a busy zone drags, it is the first thing to try.
+inline constexpr int kMaxDrawnBodies = 192;
 
 /// Everything the viewer needs to start. Fields that were environment
 /// variables keep their meaning; an unset optional means the variable was

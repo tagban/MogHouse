@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using MogHouse.Core.Ffxi;
 
 namespace MogHouse.Core.Interop;
 
@@ -254,6 +256,16 @@ public sealed partial class NativeViewer : IDisposable
     public NativeViewer(NativeViewerOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+
+        // Passed through the environment rather than the options struct: the
+        // renderer already reads its preferences that way, and widening the
+        // interop struct is a change worth making deliberately rather than for
+        // one float. Set before the create call, which is when it is read.
+        Environment.SetEnvironmentVariable(
+            "MOGHOUSE_BODY_DISTANCE",
+            MogHouseSettings.Current.BodyDrawDistance > 0.0f
+                ? MogHouseSettings.Current.BodyDrawDistance.ToString(CultureInfo.InvariantCulture)
+                : null);
 
         // Every string is copied on the native side during the create call, so
         // these can be freed the moment it returns.
