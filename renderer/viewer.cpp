@@ -2761,10 +2761,16 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // The zone's music. Opened here rather than at startup so a client
     // that cannot make a sound still draws.
     mh::Music music;
+
+    /// Kept here as well as in the device so the keys have something to step.
+    /// Starts low: music you have to turn down is worse than music you have to
+    /// turn up, and this one starts the moment you log in.
+    float musicVolume = 0.35f;
     if (const char* volume = std::getenv("MOGHOUSE_MUSIC_VOLUME"))
     {
-        music.setVolume(static_cast<float>(std::atof(volume)));
+        musicVolume = std::clamp(static_cast<float>(std::atof(volume)), 0.0f, 1.0f);
     }
+    music.setVolume(musicVolume);
 
     bool dragging = false;
 
@@ -3221,6 +3227,16 @@ constexpr float kGravity = 26.0f;
                 else if (event.key.key == SDLK_TAB)
                 {
                     camera.orbiting = !camera.orbiting;
+                }
+                else if (event.key.key == SDLK_MINUS || event.key.key == SDLK_EQUALS ||
+                         event.key.key == SDLK_PLUS)
+                {
+                    // Minus and equals, because equals is the unshifted plus
+                    // and nobody holds shift to turn music up.
+                    const float step = event.key.key == SDLK_MINUS ? -0.05f : 0.05f;
+                    musicVolume = std::clamp(musicVolume + step, 0.0f, 1.0f);
+                    music.setVolume(musicVolume);
+                    std::printf("music volume %.0f%%\n", musicVolume * 100.0f);
                 }
                 else if (event.key.key == SDLK_M)
                 {

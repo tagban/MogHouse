@@ -53,6 +53,7 @@ The world window takes the keyboard directly. Nothing here is configurable yet.
 | wheel, or `numpad 9` `3` | zoom |
 | `Tab` | orbit |
 | `M` | swap the minimap between turning with you and holding north up. `MOGHOUSE_RADAR_NORTH` picks which you start with. |
+| `-` `=` | music quieter and louder. `MOGHOUSE_MUSIC_VOLUME` sets where it starts, 0 to 1. |
 | `F` | swap between driving the character and flying the camera |
 
 ### Talking and targeting

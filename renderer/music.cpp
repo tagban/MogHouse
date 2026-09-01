@@ -15,7 +15,7 @@ struct Music::State
     SDL_AudioStream* stream{};
     ffxi::BgwStream source;
     std::string playing;
-    float volume{0.7f};
+    float volume{0.35f};
 
     /// Guards `source` and `playing`, which the audio thread reads and the
     /// game thread writes when the zone changes.

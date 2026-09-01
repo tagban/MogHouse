@@ -196,14 +196,18 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
     // is where am I, and a white dot among white range rings answers it more
     // slowly than a colour nothing else uses.
     let facing = select(vec2<f32>(sin(heading), cos(heading)), vec2<f32>(0.0, 1.0), turning);
-    let self = vec3<f32>(1.00, 0.58, 0.13);
+    // Not `self`: that is a reserved word in WGSL, and naming a variable
+    // with one fails the whole module rather than the line - which takes the
+    // pipeline, and every pass that shares it, down to a black window. The
+    // same trap as `target`, which cost an evening once already.
+    let ownDot = vec3<f32>(1.00, 0.58, 0.13);
     if (distance < 0.075) {
         colour = mix(colour, vec3<f32>(0.0, 0.0, 0.0), smoothstep(0.075, 0.060, distance));
     }
     if (distance < 0.055) {
-        colour = self;
+        colour = ownDot;
     } else if (distance < 0.13 && dot2(normalize(offset), facing) > 0.86) {
-        colour = self;
+        colour = ownDot;
     }
 
     // A rim around the whole thing, so it reads as an instrument rather than a
