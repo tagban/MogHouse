@@ -460,6 +460,30 @@ public partial class GameViewModel : ViewModelBase
                 await _shell.Session.ReturnToHomePointAsync();
                 return;
 
+            // Every channel the real client answers to, and the short forms
+            // nobody types the long version of: /s /sh /y /p /l /ls /l2 /u /em.
+            case FfxiClientCommandKind.Chat:
+                ChatLines.Add(new FfxiChatLine(DateTimeOffset.Now, ToMessageType(command.Channel),
+                                               CharacterName, command.Rest));
+                _world?.Say(CharacterName, command.Rest);
+                await _shell.Session.SayAsync(command.Rest, command.Channel);
+                return;
+
+            case FfxiClientCommandKind.Tell:
+                await _shell.Session.TellAsync(command.Recipient, command.Rest);
+                // A tell is not echoed back to whoever sent it, so without this
+                // the only evidence it went anywhere is the reply.
+                Note(FfxiChatMessageType.Tell, ">> " + command.Recipient, command.Rest);
+                return;
+
+            case FfxiClientCommandKind.Incomplete:
+                Note(FfxiChatMessageType.System1, "", $"/{command.Name} needs more than that.");
+                return;
+
+            case FfxiClientCommandKind.Unsupported:
+                Note(FfxiChatMessageType.System1, "", $"/{command.Name} is not something this client does yet.");
+                return;
+
             // /talk is deliberately not here. It needs a target, and in this
             // window you get one by clicking an NPC, which already talks to it.
         }
@@ -483,6 +507,25 @@ public partial class GameViewModel : ViewModelBase
         ChatLines.Add(new FfxiChatLine(DateTimeOffset.Now, FfxiChatMessageType.Say, CharacterName, text));
         await _shell.Session.SayAsync(text);
     }
+
+    /// <summary>Says something in both places a player might be looking.</summary>
+    private void Note(FfxiChatMessageType kind, string who, string what)
+    {
+        ChatLines.Add(new FfxiChatLine(DateTimeOffset.Now, kind, who, what));
+        _world?.Say(who, what);
+    }
+
+    /// <summary>Which colour the log gives a channel.</summary>
+    private static FfxiChatMessageType ToMessageType(FfxiChatKind channel) => channel switch
+    {
+        // Yell has no type of its own in the log; it is a shout that carries
+        // further, and the server sends it back as one.
+        FfxiChatKind.Shout or FfxiChatKind.Yell => FfxiChatMessageType.Shout,
+        FfxiChatKind.Party => FfxiChatMessageType.Party,
+        FfxiChatKind.Linkshell1 or FfxiChatKind.Linkshell2 => FfxiChatMessageType.Linkshell,
+        FfxiChatKind.Emote => FfxiChatMessageType.Emotion,
+        _ => FfxiChatMessageType.Say,
+    };
 
     /// <summary>How far one key press moves the character, in game units.</summary>
     [ObservableProperty]

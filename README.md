@@ -51,6 +51,28 @@ The world window takes the keyboard directly. Nothing here is configurable yet.
 | `Return` | open the chat line. Only when there is a server to say it to - offline there is nothing to type into. |
 | `/` | open the chat line with `/` already in it, for the client's own commands |
 | `!` | open the chat line with `!` already in it, for the server's GM commands |
+
+### Chat channels
+
+Typed into the chat line. Every one has the short form the real client takes,
+because nobody types `/linkshell` twice.
+
+| command | short | goes to |
+|---|---|---|
+| `/say` | `/s` | everyone nearby |
+| `/shout` | `/sh` | the zone |
+| `/yell` | `/y` | further than that |
+| `/party` | `/p` | your party |
+| `/linkshell` | `/l`, `/ls` | your linkshell |
+| `/linkshell2` | `/l2`, `/ls2` | the second one |
+| `/unity` | `/u` | your unity |
+| `/emote` | `/em`, `/me` | an emote |
+| `/tell <name> <what>` | `/t`, `/w` | one person |
+
+And the client's own: `/logout`, `/shutdown` (`/quit`), `/homepoint` (`/hp`,
+`/return`). Anything else beginning with `/` says so rather than being shouted
+across the zone, which is what used to happen.
+
 | click | target whatever is under the pointer |
 
 ### Getting unstuck
