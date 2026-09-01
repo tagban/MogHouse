@@ -16,7 +16,7 @@ misleading:
 > only actual player objects use it as size in client, for everything else size
 > is handled by flags and that byte is an index instead. SE just happened to use
 > a separate index for multiple types of models.
-> — TeoTwawki
+> — LandSandBoat
 
 So it selects **which model table an id belongs to**. The same number means a
 different model under a different value, which is why one lookup rule cannot
@@ -36,7 +36,7 @@ serve all of them.
 Two notes worth having:
 
 - **1 is how you dress a monster.** Giving a mob an equipped look is how a Fomor
-  gets visible gear. (TeoTwawki)
+  gets visible gear.
 - **5 and 6 are not what their LSB names suggest.** `misc` is used by Fomors;
   `automaton` covers trolls, lamia and mamool ja. LSB's own schema says so.
 
@@ -195,7 +195,11 @@ is BC1 at 8 - and `0x81`/`0xB1` are paletted.
 
 ## Credits
 
-TeoTwawki (LandSandBoat) for the look byte and what the client really does with
-it. AltanaViewer for `List/Zones/zones.csv`, which named the first ten subrooms
-and made the rest findable. LandSandBoat's own source is the reference for
-everything on the wire.
+**LandSandBoat**, for the look byte and for what the client really does with it,
+and for being the reference for everything on the wire. Much of this page is
+their knowledge written down, not ours.
+
+**AltanaViewer**, for `List/Zones/zones.csv`, which named the first ten subrooms
+and made the other twelve findable.
+
+Thank you Teo!!!
