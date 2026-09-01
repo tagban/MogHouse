@@ -4299,6 +4299,21 @@ constexpr float kGravity = 26.0f;
 
             lastFrameSeconds = nowSeconds;
 
+            // Now that the list is final - refreshed, sorted and eased - write
+            // the instance transforms from it.
+            //
+            // They were written earlier in the frame, before any of that, so
+            // slot i held the transform of whoever was i'th *last* frame while
+            // the draw loops looked up radarEntities[i] as it is *now*. When
+            // the order changed - which sorting by distance makes happen every
+            // time you walk past somebody - a body was drawn with another
+            // entity's model at another entity's position. It read as one NPC
+            // turning into a Galka and back as you ran past them.
+            //
+            // The comment on the easing above already claims this ordering is
+            // what it is for. It is true now.
+            writeCharacterInstance();
+
             // Nearest first, so the ones that miss out are the ones furthest
             // away.
             //

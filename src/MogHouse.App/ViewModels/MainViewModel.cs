@@ -65,7 +65,16 @@ public partial class MainViewModel : ViewModelBase
             // dialogue lives; the server only sends line ids.
             InstallPath is null ? null : new FfxiFileTable(InstallPath));
 
-        Session.Status += message => Dispatcher.UIThread.Post(() => Status = message);
+        Session.Status += message =>
+        {
+            // To the log as well as the screen. These lines are the session
+            // explaining itself - "Placed by the server at...", "Ignored a
+            // placement for..." - and they were the one place that said why a
+            // teleport did or did not happen, visible for a moment in a status
+            // bar and then gone.
+            Console.WriteLine($"session: {message}");
+            Dispatcher.UIThread.Post(() => Status = message);
+        };
 
         // Without the game's files there is nothing this can do, so finding
         // them comes before anything else rather than failing later with a
