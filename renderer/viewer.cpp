@@ -55,6 +55,8 @@
 #include <stdexcept>
 #include <unordered_map>
 #include <string>
+#include <fstream>
+#include <sstream>
 
 namespace
 {
@@ -361,6 +363,59 @@ std::optional<LoadedCharacter> loadCharacter(const std::vector<std::string>& dat
     return loaded;
 }
 
+/// The interior DATs that belong with a zone file, from assets/subrooms.txt.
+///
+/// A city zone's own DAT is only its shell - the insides of its buildings are
+/// separate files. They are built exactly the same way and their placements are
+/// already in zone coordinates, so they need loading and no alignment at all.
+///
+/// Keyed by the zone's own path relative to the install root, which is what
+/// this has to hand; nothing here needs to know a zone id.
+std::vector<std::filesystem::path> subroomsFor(const std::filesystem::path& zonePath)
+{
+    const std::filesystem::path root = ffxi::defaultInstallRoot();
+    std::error_code ignored;
+    std::string key = std::filesystem::relative(zonePath, root, ignored).generic_string();
+    if (key.empty())
+    {
+        return {};
+    }
+
+    std::filesystem::path manifest = std::filesystem::path{"assets"} / "subrooms.txt";
+    if (const char* fromEnv = std::getenv("MOGHOUSE_SUBROOMS"))
+    {
+        manifest = fromEnv;
+    }
+    std::ifstream file{manifest};
+    if (!file)
+    {
+        return {};
+    }
+
+    std::vector<std::filesystem::path> found;
+    std::string line;
+    while (std::getline(file, line))
+    {
+        if (line.empty() || line[0] == '#')
+        {
+            continue;
+        }
+        const size_t colon = line.find(':');
+        if (colon == std::string::npos || line.compare(0, colon, key) != 0)
+        {
+            continue;
+        }
+        std::istringstream rest{line.substr(colon + 1)};
+        std::string one;
+        while (rest >> one)
+        {
+            found.push_back(root / one);
+        }
+        break;
+    }
+    return found;
+}
+
 std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, const char* key2Path, std::string& zoneId,
                                      std::unordered_map<std::string, ffxi::Texture>& textures, ffxi::Lighting& lighting,
                                      mh::Collision& collision)
@@ -449,6 +504,77 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
             // The same chunk that produced the visible world produces the
             // ground to stand on, so they cannot disagree.
             collision = mh::Collision{zone};
+        }
+    }
+
+    // The buildings' insides. Each is a whole little scene of its own - its own
+    // models, its own textures, its own placements - so it is loaded the same
+    // way the zone was and appended. Windurst Waters is twenty-two of these on
+    // top of one zone file, and without them its rooms are empty shells.
+    if (best)
+    {
+        size_t rooms = 0;
+        size_t added = 0;
+        for (const std::filesystem::path& roomPath : subroomsFor(datPath))
+        {
+            try
+            {
+                ffxi::DatFile room{roomPath};
+                for (const ffxi::Chunk& chunk : room.chunksOfType(ffxi::kChunkTexture))
+                {
+                    try
+                    {
+                        ffxi::Texture texture = ffxi::parseTexture(chunk);
+                        std::string key = texture.name;
+                        textures.emplace(std::move(key), std::move(texture));
+                    }
+                    catch (const std::exception&)
+                    {
+                    }
+                }
+
+                std::unordered_map<std::string, ffxi::Model> roomModels;
+                if (key2Path)
+                {
+                    if (auto keys2 = ffxi::KeyTable::load(key2Path))
+                    {
+                        for (const ffxi::Chunk& chunk : room.chunksOfType(ffxi::kChunkMmb))
+                        {
+                            try
+                            {
+                                ffxi::Model model = ffxi::parseMmb(chunk, *keys, *keys2);
+                                std::string key = model.name;
+                                roomModels.emplace(std::move(key), std::move(model));
+                            }
+                            catch (const std::exception&)
+                            {
+                            }
+                        }
+                    }
+                }
+
+                for (const ffxi::Chunk& chunk : room.chunksOfType(ffxi::kChunkMzb))
+                {
+                    ffxi::Zone inside = ffxi::parseMzb(chunk, *keys);
+                    size_t resolved = 0;
+                    size_t missing = 0;
+                    mh::Scene scene = mh::buildScene(inside, roomModels, textures, resolved, missing);
+                    if (!scene.vertices.empty())
+                    {
+                        mh::append(*best, scene);
+                        added += resolved;
+                        ++rooms;
+                    }
+                }
+            }
+            catch (const std::exception& e)
+            {
+                std::printf("  interior %s did not load: %s\n", roomPath.filename().string().c_str(), e.what());
+            }
+        }
+        if (rooms)
+        {
+            std::printf("  %zu building interiors, %zu placements\n", rooms, added);
         }
     }
     return best;

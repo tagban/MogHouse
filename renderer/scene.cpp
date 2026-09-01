@@ -343,4 +343,52 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
     scene.boundsMax = hi;
     return scene;
 }
+
+void append(Scene& into, const Scene& extra)
+{
+    if (extra.vertices.empty() && extra.waterVertices.empty())
+    {
+        return;
+    }
+
+    // An empty target has no bounds to grow from - starting at (0,0,0) would
+    // drag the box to the origin and put the camera outside the world.
+    const bool wasEmpty = into.vertices.empty() && into.waterVertices.empty();
+    if (wasEmpty)
+    {
+        into.boundsMin = extra.boundsMin;
+        into.boundsMax = extra.boundsMax;
+    }
+    else
+    {
+        into.boundsMin = {std::min(into.boundsMin.x, extra.boundsMin.x), std::min(into.boundsMin.y, extra.boundsMin.y),
+                          std::min(into.boundsMin.z, extra.boundsMin.z)};
+        into.boundsMax = {std::max(into.boundsMax.x, extra.boundsMax.x), std::max(into.boundsMax.y, extra.boundsMax.y),
+                          std::max(into.boundsMax.z, extra.boundsMax.z)};
+    }
+
+    const auto vertexBase = static_cast<uint32_t>(into.vertices.size());
+    const auto indexBase = static_cast<uint32_t>(into.indices.size());
+    const auto instanceBase = static_cast<uint32_t>(into.instances.size() / 16);
+
+    into.vertices.insert(into.vertices.end(), extra.vertices.begin(), extra.vertices.end());
+    for (uint32_t index : extra.indices)
+    {
+        into.indices.push_back(index + vertexBase);
+    }
+    into.instances.insert(into.instances.end(), extra.instances.begin(), extra.instances.end());
+    for (InstancedDraw draw : extra.draws)
+    {
+        draw.indexOffset += indexBase;
+        draw.instanceOffset += instanceBase;
+        into.draws.push_back(std::move(draw));
+    }
+
+    const auto waterBase = static_cast<uint32_t>(into.waterVertices.size());
+    into.waterVertices.insert(into.waterVertices.end(), extra.waterVertices.begin(), extra.waterVertices.end());
+    for (uint32_t index : extra.waterIndices)
+    {
+        into.waterIndices.push_back(index + waterBase);
+    }
+}
 } // namespace mh

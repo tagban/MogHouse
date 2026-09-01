@@ -74,4 +74,12 @@ struct Scene
 Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, ffxi::Model>& models,
                  const std::unordered_map<std::string, ffxi::Texture>& textures, size_t& placementsResolved,
                  size_t& placementsMissing);
+
+/// Adds one scene's geometry to another.
+///
+/// A city zone is more than one file: its buildings' interiors are separate
+/// DATs, built the same way and already in the same coordinates, so a zone is
+/// assembled by appending them. Indices and instance offsets are rebased as
+/// they are copied, and the bounds grow to cover both.
+void append(Scene& into, const Scene& extra);
 } // namespace mh

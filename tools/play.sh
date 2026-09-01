@@ -28,11 +28,16 @@ fi
 # Server-side data the project does not ship. Without the zone directory there
 # are no zone lines, so walking to the edge of a zone does nothing at all - the
 # client is the only side that can start a zone change.
+# Which DAT files hold each zone's building interiors. Found relative to the
+# working directory otherwise, and a zone loads perfectly well without it -
+# just with every building an empty shell.
+: "${MOGHOUSE_SUBROOMS:=$here/assets/subrooms.txt}"
+
 : "${MOGHOUSE_FFXI_ZONEDATA:=C:/Users/Gaming/Desktop/LandSandBoat/data/zones}"
 : "${MOGHOUSE_FFXI_NAVMESHES:=C:/Users/Gaming/Desktop/LandSandBoat/navmeshes}"
 
 export MOGHOUSE_FFXI_RES MOGHOUSE_FFXI_KEYTABLE MOGHOUSE_FFXI_KEYTABLE2 MOGHOUSE_FONT
-export MOGHOUSE_FFXI_ZONEDATA MOGHOUSE_FFXI_NAVMESHES
+export MOGHOUSE_FFXI_ZONEDATA MOGHOUSE_FFXI_NAVMESHES MOGHOUSE_SUBROOMS
 
 # Git Bash rewrites an argument that looks like a Unix path into a Windows one,
 # so `--say /talk` arrives as `C:/Program Files/Git/talk` and the client says
