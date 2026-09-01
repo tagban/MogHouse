@@ -108,14 +108,35 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
     // the map and everything on it turn together by construction.
     let heading = radar.viewer.z;
     let turning = radar.counts.z > 0.5;
-    var sampled = offset;
+
+    // Screen-right is -x, not +x.
+    //
+    // With y up and a right-handed world, facing north (+z) puts the camera's
+    // right at -x: lookAt builds it as cross(forward, up), which for a forward
+    // of (sin h, 0, cos h) gives (-cos h, 0, sin h). The radar was
+    // reconstructing screen-right as (cos h, -sin h) - exactly negated - so
+    // everything it drew was mirrored against the world the player was looking
+    // at. Walking down a path and turning left showed the path turning right.
+    //
+    // Every check this survived compared the bake, mapUv and the dots against
+    // each other, and they share the mirror: the dots are placed by comparing
+    // world positions against this same reconstruction, so all three agree
+    // perfectly and all three are flipped together. Only the 3D camera
+    // disagreed, and it is the one that is right.
+    //
+    // Flipped here, before the rotation, so the map and the dots move together
+    // by construction. The compass and the heading notch below use `offset`
+    // rather than this, and stay as they were - they were already reading
+    // correctly against a retail client.
+    var sampled = vec2<f32>(-offset.x, offset.y);
     if (turning) {
         // Sends screen-up to the direction faced, so what is ahead is at the
         // top of the circle.
         let c = cos(heading);
         let s = sin(heading);
-        sampled = vec2<f32>(offset.x * c + offset.y * s,
-                            -offset.x * s + offset.y * c);
+        let flat = sampled;
+        sampled = vec2<f32>(flat.x * c + flat.y * s,
+                            -flat.x * s + flat.y * c);
     }
 
     let range = radar.viewer.w;

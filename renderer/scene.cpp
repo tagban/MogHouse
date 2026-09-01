@@ -237,6 +237,30 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
                                                 static_cast<uint32_t>(scene.indices.size()) - indexStart,
                                                 instanceOffset, static_cast<uint32_t>(transforms.size())});
 
+            // Where a water model actually ends up, which is not where its
+            // placement sits: the mesh carries its own heights and the
+            // transform moves them. Asked because a basin can be drawn with
+            // its surface under its own floor, and the placement alone will
+            // not say so.
+            if (water && std::getenv("MOGHOUSE_WATER_HEIGHTS"))
+            {
+                float lowest = std::numeric_limits<float>::max();
+                float highest = std::numeric_limits<float>::lowest();
+                for (const Mat4& transform : transforms)
+                {
+                    for (const ffxi::ModelVertex& vertex : mesh.vertices)
+                    {
+                        const Vec3 at = transformPoint(
+                            transform.m,
+                            Vec3{vertex.position[0], vertex.position[1], vertex.position[2]});
+                        lowest = std::min(lowest, at.y);
+                        highest = std::max(highest, at.y);
+                    }
+                }
+                std::printf("  water model %-10s %zu placements, world y %.2f .. %.2f\n",
+                            name.c_str(), transforms.size(), lowest, highest);
+            }
+
             // Bounds have to account for where the instances put things, so
             // each mesh's corners are run through every transform.
             for (const Mat4& transform : transforms)

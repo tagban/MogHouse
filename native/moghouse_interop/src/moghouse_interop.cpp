@@ -26,18 +26,24 @@ std::string borrowOr(const char* text, const char* fallback)
     return text ? std::string{text} : std::string{fallback};
 }
 
-/// Sends this library's stdout and stderr to the file the app logs to.
+/// Sends this library's stdout and stderr to a file beside the app's log.
 ///
 /// The app is a windowed executable with no console, and redirecting
-/// Console.Out on the managed side does nothing for the C runtime in here -
-/// so every printf the renderer makes was being written to a handle that goes
-/// nowhere. Zone loads, texture counts, the reason a model failed to build:
-/// all of it existed and none of it was readable, which meant bugs in here
-/// could only be guessed at from what appeared on screen.
+/// Console.Out on the managed side does nothing for the C runtime in here - so
+/// every printf the renderer makes goes to a handle that leads nowhere. Zone
+/// loads, texture counts, the reason a model failed to build: all of it exists
+/// and none of it is readable.
 ///
-/// Appending rather than truncating, because the managed side owns the file
-/// and is already writing to it. Unbuffered, because the interesting lines are
-/// the ones printed just before something goes wrong.
+/// Its own file, not the app's. The managed side holds MOGHOUSE_LOG open with
+/// a StreamWriter, which shares for reading only, so opening it for writing
+/// here fails - and two writers on one file would tread on each other in any
+/// case, because each keeps its own idea of where the end is.
+///
+/// The probe matters more than it looks. freopen closes the stream *before* it
+/// tries to open the new target, so a failed freopen leaves stdout shut and
+/// every later printf writing to a dead handle - which is exactly what stopped
+/// the world window from opening at all. Nothing is redirected unless a plain
+/// open has already proved it can be done.
 void redirectOutputToLog()
 {
     static bool done = false;
@@ -47,20 +53,36 @@ void redirectOutputToLog()
     }
     done = true;
 
-    const char* path = std::getenv("MOGHOUSE_LOG");
-    if (!path || !*path)
+    const char* base = std::getenv("MOGHOUSE_RENDERER_LOG");
+    std::string path = base ? std::string{base} : std::string{};
+    if (path.empty())
     {
-        return;
+        const char* appLog = std::getenv("MOGHOUSE_LOG");
+        if (!appLog || !*appLog)
+        {
+            return;
+        }
+        path = std::string{appLog} + ".renderer";
     }
-    if (std::freopen(path, "a", stdout))
+
+    if (FILE* probe = std::fopen(path.c_str(), "w"))
+    {
+        std::fclose(probe);
+    }
+    else
+    {
+        return;                      // cannot write there; leave stdout alone
+    }
+
+    if (std::freopen(path.c_str(), "w", stdout))
     {
         std::setvbuf(stdout, nullptr, _IONBF, 0);
+        std::printf("renderer: output attached to %s\n", path.c_str());
     }
-    if (std::freopen(path, "a", stderr))
+    if (std::freopen(path.c_str(), "a", stderr))
     {
         std::setvbuf(stderr, nullptr, _IONBF, 0);
     }
-    std::printf("renderer: output attached to the log\n");
 }
 } // namespace
 

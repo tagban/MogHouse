@@ -122,18 +122,67 @@ def water_triangles(data):
 POOL_CELL = 4.0
 WATERLINE_PERCENTILE = 0.05
 
+# How far apart two neighbouring cells' beds may be and still count as the same
+# body of water.
+#
+# Without this, adjacency alone decides, and adjacency is not enough: in Bastok
+# Markets the moat around the city runs beside a small canal cut into the
+# streets, and every water triangle in the zone - 12,467 of 12,697 - flooded
+# into one pool spanning three bed heights. One waterline was then chosen for
+# all of it and the canal was drawn at the moat's level, several units under
+# the street it belongs to.
+#
+# Water that is ten units lower than the water beside it is a different body of
+# water, whatever the map does. At 2.0 Bastok separates into seven pools and
+# the canal takes its own line.
+POOL_JOIN_HEIGHT = 2.0
+
+# How far around a cell the waterline is measured, in cells.
+#
+# Water is level only if it is standing. Most of FFXI's is not: canals and
+# rivers run downhill, and Bastok's central canal drops two units over its
+# length. One height for a whole pool draws that flat, which leaves the upper
+# end's surface *below its own bed* - the water is still there, buried under
+# the channel it belongs to, which is exactly how it reads as missing.
+#
+# So the line is measured near each cell rather than across the whole pool. A
+# standing pool gives the same answer everywhere and stays level; a channel
+# gives an answer that follows its grade. Measured on Bastok Markets: the canal
+# comes out sloping 1.68 down to 0.03 while the moat beside it holds -8.00
+# across all 5,163 of its cells.
+WATERLINE_RADIUS = 6
+
+# How far above its own bed a surface sits when the shape cannot say.
+#
+# A channel with a flat stone floor has no bank inside its water for the line
+# to find, so the best the shape can offer is the floor itself - and a surface
+# laid exactly on its own bed is coplanar with the stone, which z-fights and
+# reads as patchy water barely coming through the ground.
+#
+# This is a judgement call and should be read as one: the real level is not in
+# any data we have. The MZB's per-cell height says 2.00 for Bastok's central
+# basin, whose floor is also 2.00, and every water model in that zone sits at
+# world -8.0 or 0.0 - at or below the floor. Retail plainly fills it well
+# higher. Against a side-by-side of that basin, the water reaches roughly a
+# third of the way up a wall about four units tall.
+WATERLINE_MIN_DEPTH = 1.0
+
 
 def waterlines(triangles):
-    """A surface height for each connected body of water.
+    """A surface height for each water triangle.
 
     The MZB's per-cell height is the obvious source and is not usable: Windurst
     Waters writes 0.0010 into every water cell, which is a flag rather than a
     height, and lifting to it drags surfaces below their own bed. The shape
-    answers instead. Water pools into connected regions, and a pool's surface
-    is where its bed meets the bank - the highest ground in it.
+    answers instead - water meets its bank at the highest ground it touches.
 
     DAT space has y increasing downward, so the highest ground is the smallest
-    y, and a pool's waterline is near the bottom of its sorted heights.
+    y, and a waterline is near the bottom of the sorted heights.
+
+    Two things the obvious version gets wrong, both found in Bastok Markets:
+    pools must not merge across a height step (see POOL_JOIN_HEIGHT), and the
+    line has to be local (see WATERLINE_RADIUS), because most of this game's
+    water is running rather than standing.
     """
     cells = collections.defaultdict(list)
     owner = {}
@@ -143,8 +192,12 @@ def waterlines(triangles):
         cells[(cx, cz)].append(min(c[1] for c in corners))
         owner[index] = (cx, cz)
 
+    # A cell's own level is its highest bed point, which in DAT space is its
+    # smallest y. Two cells only join a pool if theirs are close.
+    level = {cell: min(tops) for cell, tops in cells.items()}
+
+    pool_of = {}
     seen = set()
-    height = {}
     for start in cells:
         if start in seen:
             continue
@@ -156,15 +209,37 @@ def waterlines(triangles):
             for dx in (-1, 0, 1):
                 for dz in (-1, 0, 1):
                     near = (cx + dx, cz + dz)
-                    if near in cells and near not in seen:
+                    if (near in cells and near not in seen and
+                            abs(level[near] - level[(cx, cz)]) <= POOL_JOIN_HEIGHT):
                         seen.add(near)
                         stack.append(near)
-        tops = sorted(y for cell in pool for y in cells[cell])
-        line = tops[min(len(tops) - 1, int(len(tops) * WATERLINE_PERCENTILE))]
         for cell in pool:
-            height[cell] = line
+            pool_of[cell] = start
 
-    return [height[owner[i]] for i in range(len(triangles))]
+    # The local bank, as a separable minimum over each pool - along x, then
+    # along z. Separable so this stays linear in the radius rather than square
+    # in it; there are zones here with tens of thousands of water cells.
+    def sweep(source, axis):
+        out = {}
+        for cell in source:
+            best = source[cell]
+            for step in range(-WATERLINE_RADIUS, WATERLINE_RADIUS + 1):
+                near = (cell[0] + step, cell[1]) if axis == 0 else (cell[0], cell[1] + step)
+                if near in source and pool_of[near] == pool_of[cell]:
+                    best = min(best, source[near])
+            out[cell] = best
+        return out
+
+    local = sweep(sweep(level, 0), 1)
+
+    # Never below the triangle's own highest corner, and never resting exactly
+    # on it. Below means water buried in the channel it belongs to - invisible,
+    # and the bug this whole file exists to fix. Exactly on it means coplanar
+    # with the stone, which z-fights and reads as patchy.
+    #
+    # Subtracting raises it: DAT y increases downward.
+    return [min(local[owner[i]], min(c[1] for c in triangles[i]) - WATERLINE_MIN_DEPTH)
+            for i in range(len(triangles))]
 
 
 def emit(zone, data, path):

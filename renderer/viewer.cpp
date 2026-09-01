@@ -5025,26 +5025,19 @@ constexpr float kGravity = 26.0f;
                     southY = radarCentreY - ringY - half;
                 }
 
-                // Loading, across the middle, over everything.
+                // Nothing is drawn while a zone loads.
                 //
-                // Drawn in this window rather than handed back to the launcher:
-                // the launcher is a different window, and swapping to it and
-                // back is the flicker this whole change exists to remove.
-                if (!loadingZone.empty())
-                {
-                    std::string name = loadingZone;
-                    for (char& letter : name)
-                    {
-                        if (letter == '_')
-                        {
-                            letter = ' ';
-                        }
-                    }
-
-                    constexpr float kLoadingScale = 1.6f;
-                    label(name, 0.0f, 0.02f, kLoadingScale, kHudBright, 0.85f);
-                    label("Loading", 0.0f, 0.02f - line * kLoadingScale - gap, 0.7f, kHudDim, 0.85f);
-                }
+                // There was a name and the word "Loading" here, and a three
+                // second floor under it so it could be seen. Both are gone:
+                // swapping the zone inside the live window turned out to take
+                // about a frame, so the screen was covering nothing and the
+                // wait was the only slow part of zoning. `loadingZone` is still
+                // tracked, because position reporting has to stay quiet while
+                // the zone underneath it is being replaced.
+                //
+                // Worth putting back when there is something worth showing -
+                // the destination zone's own baked map, which would give every
+                // zone its own screen without any art being drawn.
 
                 // Somewhere to send a bug from, top left, without leaving
                 // the world.
