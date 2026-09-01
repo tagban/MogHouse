@@ -1279,6 +1279,17 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
         });
     }
 
+    // What the zone wants playing. Nothing plays it yet - see the music
+    // slots on the login reply - but knowing which track a zone asks for is
+    // the half of the problem that is not a codec.
+    if (session.ZoneState?.Music is { Count: > 1 } opening)
+    {
+        string? track = FfxiMusicFile.Resolve(FfxiFileTable.DefaultInstallRoot(), opening[0]);
+        Console.WriteLine($"  music: day {opening[0]}, night {opening[1]}" +
+                          (opening.Count > 4 ? $", mount {opening[4]}" : "") +
+                          (track is null ? " (no file for the day track)" : $" -> {Path.GetFileName(track)}"));
+    }
+
     Console.WriteLine($"Playing as {selected.Name} in zone {currentZone}. Close the window to stop.");
 
     // /logout and /shutdown both end this loop; the server needs a few seconds

@@ -663,6 +663,12 @@ public sealed class FfxiGameSession : IDisposable
             // the zone we are now actually in.
             ZoneChanged?.Invoke(ZoneState.ZoneNo);
             _placementSuspended = false;
+            if (ZoneState.Music is { Count: > 1 } tracks)
+            {
+                Status?.Invoke($"music: day {tracks[0]}, night {tracks[1]}" +
+                               (tracks.Count > 4 ? $", mount {tracks[4]}" : ""));
+            }
+
             Status?.Invoke($"Now in zone {ZoneState.ZoneNo}.");
         }
     }

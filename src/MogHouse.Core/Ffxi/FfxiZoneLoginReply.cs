@@ -35,7 +35,8 @@ public sealed record FfxiZoneLoginReply(
     ushort EventNum = 0,
     ushort EventPara = 0,
     ushort EventMode = 0,
-    uint LoginState = 0)
+    uint LoginState = 0,
+    IReadOnlyList<ushort>? Music = null)
 {
     public const ushort PacketId = 0x00A;
     public const int PacketSize = 260;
@@ -56,6 +57,16 @@ public sealed record FfxiZoneLoginReply(
     // being in a cutscene, and cutscene players are not rendered to others -
     // so a non-zero EventNo on a character nobody can see is a strong signal,
     // not a curiosity.
+    /// <summary>
+    /// The five music slots the zone starts with - day, night, combat solo,
+    /// combat party, mount - in xi::MusicSlot order.
+    ///
+    /// Sitting between GrapIDTbl and the event fields, and skipping them is
+    /// what put the event id ten bytes early for months.
+    /// </summary>
+    private const int OffsetMusic = Body + 82;
+    private const int MusicSlots = 5;
+
     private const int OffsetEventNo = Body + 60;
     //
     // Counted past GrapIDTbl[9] at 64 and MusicNum[5] at 82. Skipping the
@@ -115,7 +126,20 @@ public sealed record FfxiZoneLoginReply(
             EventNum: BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(OffsetEventNum, 2)),
             EventPara: BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(OffsetEventPara, 2)),
             EventMode: BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(OffsetEventMode, 2)),
-            LoginState: BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(OffsetLoginState, 4)));
+            LoginState: BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(OffsetLoginState, 4)),
+            Music: ReadMusic(subPacket));
+    }
+
+    /// <summary>The zone's opening music, one track per slot.</summary>
+    private static IReadOnlyList<ushort> ReadMusic(ReadOnlySpan<byte> subPacket)
+    {
+        var music = new ushort[MusicSlots];
+        for (int slot = 0; slot < MusicSlots; slot++)
+        {
+            music[slot] = BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(OffsetMusic + slot * 2, 2));
+        }
+
+        return music;
     }
 
     private static string ReadFixedString(ReadOnlySpan<byte> field)
