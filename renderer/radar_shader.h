@@ -26,7 +26,8 @@ struct RadarUniforms {
     mapExtent : vec4<f32>,
     // Who we are: world x, world z, heading in radians, radar range in units.
     viewer : vec4<f32>,
-    // How many entity slots are in use, then how many label characters.
+    // How many entity slots are in use, how many label characters, and
+    // whether the map turns with the player rather than holding north up.
     counts : vec4<f32>,
     // The zone name, one character per vec4 - a uniform array strides by 16
     // bytes whatever is in it, so packing them tighter would buy nothing.
@@ -99,10 +100,27 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
         discard;
     }
 
-    // Radar space to world. y on screen is up, which is +z (north).
+    // Radar space to world. y on screen is up, which is +z (north) with the
+    // map held still, or the way the player is facing when it turns with them.
+    //
+    // Turning it here rather than anywhere else is what keeps the dots
+    // honest: they are found by comparing world positions against this one, so
+    // the map and everything on it turn together by construction.
+    let heading = radar.viewer.z;
+    let turning = radar.counts.z > 0.5;
+    var sampled = offset;
+    if (turning) {
+        // Sends screen-up to the direction faced, so what is ahead is at the
+        // top of the circle.
+        let c = cos(heading);
+        let s = sin(heading);
+        sampled = vec2<f32>(offset.x * c + offset.y * s,
+                            -offset.x * s + offset.y * c);
+    }
+
     let range = radar.viewer.w;
-    let world = vec2<f32>(radar.viewer.x + offset.x * range,
-                          radar.viewer.y + offset.y * range);
+    let world = vec2<f32>(radar.viewer.x + sampled.x * range,
+                          radar.viewer.y + sampled.y * range);
 
     let uv = mapUv(world);
     var colour = vec3<f32>(0.04, 0.05, 0.07);
@@ -161,9 +179,9 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
         colour = mix(colour * 0.25, dot, edge);
     }
 
-    // Us, at the centre, with a notch showing which way we face.
-    let heading = radar.viewer.z;
-    let facing = vec2<f32>(sin(heading), cos(heading));
+    // Us, at the centre, with a notch showing which way we face. With the
+    // map turning, that is always straight up - which is the point of it.
+    let facing = select(vec2<f32>(sin(heading), cos(heading)), vec2<f32>(0.0, 1.0), turning);
     if (distance < 0.055) {
         colour = vec3<f32>(0.98, 0.98, 1.0);
     } else if (distance < 0.13 && dot2(normalize(offset), facing) > 0.86) {

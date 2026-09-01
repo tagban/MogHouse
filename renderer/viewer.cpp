@@ -2978,6 +2978,13 @@ constexpr float kGravity = 26.0f;
     /// while it is on is harmless - it is the same direction.
     bool autoRun = false;
 
+    /// Whether the radar turns with the player or holds north at the top.
+    ///
+    /// Both are defensible and people are firm about which they want, so it is
+    /// a toggle rather than a decision. M switches it; MOGHOUSE_RADAR_NORTH
+    /// picks the one you start with.
+    bool radarTurns = std::getenv("MOGHOUSE_RADAR_NORTH") == nullptr;
+
     // The death box, as the last frame left it.
     //
     // Immediate mode: the box is laid out while it is drawn and the rectangles
@@ -3214,6 +3221,11 @@ constexpr float kGravity = 26.0f;
                 else if (event.key.key == SDLK_TAB)
                 {
                     camera.orbiting = !camera.orbiting;
+                }
+                else if (event.key.key == SDLK_M)
+                {
+                    radarTurns = !radarTurns;
+                    std::printf(radarTurns ? "radar turns with you\n" : "radar holds north up\n");
                 }
                 else if (event.key.key == SDLK_R)
                 {
@@ -4505,6 +4517,7 @@ constexpr float kGravity = 26.0f;
 
                 const size_t shown = std::min(radarEntities.size(), static_cast<size_t>(mh::kRadarMaxEntities));
                 radar.counts[0] = static_cast<float>(shown);
+                radar.counts[2] = radarTurns ? 1.0f : 0.0f;
                 // The radar's own zone label is off. It was drawn from the
                 // 4x6 bitmap font across the bottom of the map, and the HUD
                 // now sets the same name in a real typeface underneath - two
@@ -4662,11 +4675,32 @@ constexpr float kGravity = 26.0f;
                     const float ringY = radarRadius * 1.16f;
                     const float compass = 0.5f;
                     const float half = hud.counts[1] * compass * 0.5f;
-                    label("N", radarCentreX, radarCentreY + ringY - half, compass, kHudBright, 0.0f);
+
+                    // The letters ride the ring rather than sitting at fixed
+                    // corners, because with the map turning they have to. A
+                    // compass that says north is up while the map has turned
+                    // under it is worse than no compass.
+                    //
+                    // Screen direction for a world bearing is the inverse of
+                    // the turn the map made, so north goes to (-sin, cos).
+                    const float turn = radarTurns ? characterFacing : 0.0f;
+                    const float turnCos = std::cos(turn);
+                    const float turnSin = std::sin(turn);
+                    const auto onRing = [&](const char* letter, float worldX, float worldY, const float* tint) {
+                        const float screenX = worldX * turnCos - worldY * turnSin;
+                        const float screenY = worldX * turnSin + worldY * turnCos;
+                        label(letter, radarCentreX + screenX * ringX, radarCentreY + screenY * ringY - half,
+                              compass, tint, 0.0f);
+                    };
+
+                    onRing("N", 0.0f, 1.0f, kHudBright);
+                    onRing("S", 0.0f, -1.0f, kHudDim);
+                    onRing("E", 1.0f, 0.0f, kHudDim);
+                    onRing("W", -1.0f, 0.0f, kHudDim);
+
+                    // The zone name still hangs below the circle, so it needs
+                    // somewhere fixed regardless of where south ended up.
                     southY = radarCentreY - ringY - half;
-                    label("S", radarCentreX, southY, compass, kHudDim, 0.0f);
-                    label("E", radarCentreX + ringX, radarCentreY - half, compass, kHudDim, 0.0f);
-                    label("W", radarCentreX - ringX, radarCentreY - half, compass, kHudDim, 0.0f);
                 }
 
                 // Somewhere to send a bug from, top left, without leaving
