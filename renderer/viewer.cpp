@@ -495,6 +495,12 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
     }
 
     std::optional<mh::Scene> best;
+
+    // Held because the collision is built from all of them at the end: the
+    // zone's shell plus the floors and walls inside each building.
+    ffxi::Zone outside;
+    std::vector<ffxi::Zone> insides;
+
     for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkMzb))
     {
         ffxi::Zone zone = ffxi::parseMzb(chunk, *keys);
@@ -526,7 +532,7 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
             zoneId = zone.id;
             // The same chunk that produced the visible world produces the
             // ground to stand on, so they cannot disagree.
-            collision = mh::Collision{zone};
+            outside = std::move(zone);
         }
     }
 
@@ -593,6 +599,12 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
                     mh::Scene scene = mh::buildScene(inside, roomModels, textures, resolved, missing);
                     if (!scene.vertices.empty())
                     {
+                        // Its floors and walls, which the zone's own collision
+                        // does not have: without them a player inside a
+                        // building stands on the outdoor ground beneath it and
+                        // is stopped by walls that on screen are a doorway.
+                        insides.push_back(inside);
+
                         if (!inner.empty())
                         {
                             // Grown a little, so standing in a doorway does not
@@ -614,6 +626,13 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
                 std::printf("  interior %s did not load: %s\n", roomPath.filename().string().c_str(), e.what());
             }
         }
+        std::vector<const ffxi::Zone*> all{&outside};
+        for (const ffxi::Zone& one : insides)
+        {
+            all.push_back(&one);
+        }
+        collision = mh::Collision{all};
+
         if (rooms)
         {
             std::printf("  %zu building interiors, %zu placements, %zu with their own lighting\n", rooms, added,

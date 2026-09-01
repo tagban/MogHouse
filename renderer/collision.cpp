@@ -90,11 +90,23 @@ bool crossesFlat(const Vec3& from, const Vec3& to, const Vec3& a, const Vec3& b)
 } // namespace
 
 Collision::Collision(const ffxi::Zone& zone)
+    : Collision(std::vector<const ffxi::Zone*>{&zone})
+{
+}
+
+Collision::Collision(const std::vector<const ffxi::Zone*>& zones)
 {
     Vec3 lo{std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
     Vec3 hi{std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest(),
             std::numeric_limits<float>::lowest()};
 
+    for (const ffxi::Zone* one : zones)
+    {
+    if (!one)
+    {
+        continue;
+    }
+    const ffxi::Zone& zone = *one;
     for (const ffxi::CollisionInstance& instance : zone.instances)
     {
         if (instance.mesh >= zone.collision.size())
@@ -137,6 +149,7 @@ Collision::Collision(const ffxi::Zone& zone)
             }
             triangles_.push_back(triangle);
         }
+    }
     }
 
     if (triangles_.empty())

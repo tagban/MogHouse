@@ -31,6 +31,15 @@ public:
     Collision() = default;
     explicit Collision(const ffxi::Zone& zone);
 
+    /// Several zones as one surface.
+    ///
+    /// A city zone's collision is its outside. The rooms behind its doors
+    /// carry their own floors and walls in their own files, and without them a
+    /// player walking into a building is still colliding against the shell -
+    /// standing on the outdoor ground under the room, and stopped by walls
+    /// that on screen are a doorway.
+    explicit Collision(const std::vector<const ffxi::Zone*>& zones);
+
     bool empty() const { return triangles_.empty(); }
     size_t triangleCount() const { return triangles_.size(); }
     size_t wallCount() const;
