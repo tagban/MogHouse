@@ -329,6 +329,22 @@ public sealed class FfxiGameSession : IDisposable
     public FfxiZoneHandoff? Handoff { get; private set; }
     public uint OwnCharId => Handoff?.ContentId ?? 0;
 
+    /// <summary>
+    /// Whether an id in a packet means us.
+    ///
+    /// There are three answers to "who am I" and they are not always the same
+    /// number: the content id from the handoff, the unique id the zone login
+    /// reply gave back, and the server id. Which one a packet carries depends
+    /// on the packet, so asking about one of them and getting it wrong makes
+    /// the whole message look like it is about somebody else - which is how a
+    /// GM teleport arrived, matched nothing, and moved nobody.
+    /// </summary>
+    public bool IsSelf(uint uniqueNo) =>
+        uniqueNo != 0 &&
+        (uniqueNo == OwnCharId ||
+         uniqueNo == (ZoneState?.UniqueNo ?? 0) ||
+         uniqueNo == (Handoff?.ServerId ?? 0));
+
     /// <summary>Everything we have been told about, for drawing or listing.</summary>
     public IReadOnlyList<FfxiEntityUpdate> KnownEntities() => _zone?.KnownEntities() ?? [];
 
@@ -919,7 +935,13 @@ public sealed class FfxiGameSession : IDisposable
             // drawing them where they were and kept telling the server so,
             // fifty milliseconds later, which put them back.
             FfxiServerPosition? placed = FfxiServerPosition.TryParse(reply.Plaintext.AsSpan(offset, size));
-            if (placed is not null && placed.UniqueNo == (ZoneState?.UniqueNo ?? 0))
+            if (placed is not null && !IsSelf(placed.UniqueNo))
+            {
+                // Worth saying rather than dropping: if a teleport ever stops
+                // working again, this is the line that says why.
+                Status?.Invoke($"Ignored a placement for {placed.UniqueNo:X8}, which is not us.");
+            }
+            else if (placed is not null)
             {
                 PosX = placed.X;
                 PosVertical = placed.Vertical;
@@ -988,7 +1010,7 @@ public sealed class FfxiGameSession : IDisposable
                 // be, adopt its answer; otherwise our next heartbeat would
                 // simply assert the old position and undo the teleport.
                 FfxiEntityUpdate? self = FfxiEntityUpdate.TryParse(reply.Plaintext.AsSpan(offset, size));
-                if (self is not null && self.UniqueNo == OwnCharId)
+                if (self is not null && IsSelf(self.UniqueNo))
                 {
                     AdoptServerPosition(self);
                 }
