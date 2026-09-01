@@ -32,7 +32,8 @@ inline constexpr float kZoneLineHeight = 0.95f;
 inline constexpr const char* kZoneLineShader = R"(
 struct ZoneLineUniforms {
     viewProjection : mat4x4<f32>,
-    // Lines in use, band height, seconds for the pulse, unused.
+    // Rings in use, band height, seconds for the pulse, and which ring is the
+    // target - negative when nothing is selected.
     counts : vec4<f32>,
     // Per line: x, y, z, radius.
     lines : array<vec4<f32>, 16>,
@@ -46,6 +47,8 @@ struct VertexOut {
     @location(0) height : f32,
     // Around the ring, for the travelling highlight.
     @location(1) around : f32,
+    // Non-zero when this ring marks the current target rather than a zone line.
+    @location(2) target : f32,
 };
 
 @vertex
@@ -82,6 +85,7 @@ fn vertexMain(@builtin(vertex_index) vertex : u32,
     out.position = markers.viewProjection * vec4<f32>(world, 1.0);
     out.height = f32(top);
     out.around = (f32(segment) + f32(side)) / segments;
+    out.target = select(0.0, 1.0, f32(instance) == markers.counts.w);
     return out;
 }
 
@@ -97,9 +101,13 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
     let sweep = fract(in.around - markers.counts.z * 0.15);
     glow = glow + smoothstep(0.85, 1.0, 1.0 - abs(sweep - 0.5) * 2.0) * rise * 0.35;
 
-    // Cyan-white: bright against grass, stone and water alike, and not a
-    // colour any nameplate uses.
-    let tint = mix(vec3<f32>(0.35, 0.85, 1.0), vec3<f32>(0.85, 0.98, 1.0), rise);
+    // Cyan-white for a zone line: bright against grass, stone and water alike,
+    // and not a colour any nameplate uses. A target ring is amber instead, so
+    // the two never read as the same thing - one is somewhere to walk, the
+    // other is someone to talk to.
+    let line = mix(vec3<f32>(0.35, 0.85, 1.0), vec3<f32>(0.85, 0.98, 1.0), rise);
+    let mark = mix(vec3<f32>(1.00, 0.72, 0.25), vec3<f32>(1.00, 0.93, 0.70), rise);
+    let tint = mix(line, mark, in.target);
     return vec4<f32>(tint * glow, glow);
 }
 )";

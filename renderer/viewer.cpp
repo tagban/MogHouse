@@ -2431,6 +2431,12 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         }
     }
 
+    // Two cursors. The pointer says whether there is anything under it
+    // worth clicking, which is the feedback a click wants before it happens
+    // rather than after.
+    SDL_Cursor* arrowCursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
+    SDL_Cursor* handCursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_POINTER);
+
     bool dragging = false;
 
     /// Whether the pointer moved between press and release. A drag turns the
@@ -2662,6 +2668,15 @@ constexpr float kGravity = 26.0f;
     /// Picking needs to know where things were on screen, and the only place
     /// that knows is the draw. Keeping the matrix rather than recomputing it
     /// means the cursor is tested against exactly the frame that was shown.
+    /// Who was last clicked, and who the cursor is over.
+    ///
+    /// FFXI draws a ring under the thing you have targeted, which is both the
+    /// clearest indication and the cheapest: the zone line pipeline already
+    /// draws a glowing ring at a world position, so a target is one more ring
+    /// in a different colour rather than a second way of drawing.
+    uint32_t targetId = 0;
+    uint32_t hoverId = 0;
+
     mh::Mat4 pickProjection{};
     bool havePickProjection = false;
 
@@ -3039,7 +3054,12 @@ constexpr float kGravity = 26.0f;
                 {
                     if (uint32_t clicked = pickAt(upX, upY))
                     {
+                        targetId = clicked;
                         link->requestTalk(clicked);
+                    }
+                    else
+                    {
+                        targetId = 0;   // clicking the ground clears the target
                     }
                 }
 
@@ -3058,6 +3078,14 @@ constexpr float kGravity = 26.0f;
                     link->chooseDeath(deathButtons[deathPressed].choice);
                 }
                 deathPressed = -1;
+            }
+            else if (event.type == SDL_EVENT_MOUSE_MOTION && !dragging)
+            {
+                // What the cursor is over, so it can say so before a click.
+                float overX = 0.0f;
+                float overY = 0.0f;
+                hoverId = pointerNdc(event.motion.x, event.motion.y, overX, overY) ? pickAt(overX, overY) : 0;
+                SDL_SetCursor(hoverId != 0 ? handCursor : arrowCursor);
             }
             else if (event.type == SDL_EVENT_MOUSE_MOTION && dragging)
             {
@@ -3915,7 +3943,25 @@ constexpr float kGravity = 26.0f;
             {
                 const std::vector<mh::ZoneLineMarker> lines = link ? link->zoneLines()
                                                                    : std::vector<mh::ZoneLineMarker>{};
-                const int drawn = std::min(static_cast<int>(lines.size()), mh::kZoneLineMarkers);
+                int drawn = std::min(static_cast<int>(lines.size()), mh::kZoneLineMarkers);
+
+                // The target gets a ring of its own, after the zone lines. FFXI draws
+                // one under whatever you have selected, and the pipeline that draws a
+                // glowing ring at a world position already exists.
+                int targetRing = -1;
+                mh::Vec3 targetAt{};
+                if (targetId != 0 && drawn < mh::kZoneLineMarkers)
+                {
+                    for (const mh::RadarEntity& entity : radarEntities)
+                    {
+                        if (entity.id == targetId)
+                        {
+                            targetAt = mh::Vec3{entity.x, entity.y, entity.z};
+                            targetRing = drawn++;
+                            break;
+                        }
+                    }
+                }
                 if (drawn > 0)
                 {
                     ZoneLineUniforms markers{};
@@ -3923,9 +3969,21 @@ constexpr float kGravity = 26.0f;
                     markers.counts[0] = static_cast<float>(drawn);
                     markers.counts[1] = mh::kZoneLineHeight;
                     markers.counts[2] = nowSeconds;
+                    markers.counts[3] = static_cast<float>(targetRing);
 
                     for (int i = 0; i < drawn; ++i)
                     {
+                        if (i == targetRing)
+                        {
+                            // Tight enough to read as standing around one
+                            // person rather than marking a place.
+                            markers.lines[i][0] = targetAt.x;
+                            markers.lines[i][1] = targetAt.y;
+                            markers.lines[i][2] = targetAt.z;
+                            markers.lines[i][3] = 0.7f;
+                            continue;
+                        }
+
                         markers.lines[i][0] = lines[static_cast<size_t>(i)].x;
                         markers.lines[i][1] = lines[static_cast<size_t>(i)].y;
                         markers.lines[i][2] = lines[static_cast<size_t>(i)].z;

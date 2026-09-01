@@ -1450,6 +1450,22 @@ static async Task<int> PlayAsync(Dictionary<string, string> flags)
                                 .FirstOrDefault(e => e.UniqueNo == talkTo);
             if (facing is not null)
             {
+                // Say who was picked, before anything is sent.
+                //
+                // Whether the NPC answers is a separate question and
+                // currently often no, so without this a click that worked
+                // and a click that missed look exactly alike - which makes
+                // the targeting impossible to judge.
+                double reach = Math.Sqrt(
+                    (facing.X - session.PosX) * (facing.X - session.PosX) +
+                    (facing.Depth - session.PosDepth) * (facing.Depth - session.PosDepth));
+
+                string who = string.IsNullOrEmpty(facing.Name) ? $"#{facing.UniqueNo:X8}" : facing.Name;
+                Console.WriteLine($"  clicked {who} at {reach:F1} units");
+                radar?.Say("", reach > 6.0
+                                   ? $"{who} is too far away - {reach:F0} units, and six is the limit."
+                                   : $"You turn to {who}.");
+
                 await session.TalkToAsync(facing.UniqueNo, facing.ActIndex);
             }
         }
