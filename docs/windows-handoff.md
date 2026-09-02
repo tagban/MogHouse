@@ -114,11 +114,73 @@ only its headers used.
 | `docs/networking-handoff.md` | a false lead, kept so nobody repeats it |
 | `docs/local-test-server.md` | building and running LandSandBoat on macOS |
 | `tools/loginzone` | working reference for the main-thread arrangement |
+| `src/MogHouse.Core/Screens/` | the in-engine screens that replaced the Avalonia ones |
+| `renderer/monorail.h` | the Sel Phiner monorail, driven entirely client side |
+| the wiki's Audio-Formats page | `.bgw` and `.spw`, and the split sample rate |
 
 ## Still open
 
-The Avalonia client itself. It builds and runs on macOS, shows the installer
-and login, and connects - and then black-screens on zone load, because
-`LiveRadar` still defaults to its own thread. The fix is not a rebuild and not
-macOS-specific; it is which thread creates the window, and the same restructure
-suits all three platforms.
+### Avalonia cannot be deleted yet, and it is worth being precise about why
+
+The screens moved into the renderer and the client draws its own: install
+picker, sign-in, account creation, character select and character creation all
+run in the one window now, behind `--screens`. That is the *pre-game* path, and
+it is done.
+
+The *in-game* layer is not. `MogHouse.App/ViewModels/GameViewModel.cs` is 831
+lines and almost none of it is user interface - it is the wiring between the
+session and the renderer, and it has no replacement. `ClientFlow.EnterWorld`'s
+loop is twelve lines: report where the character walked to, publish the
+entities, sleep.
+
+Everything in this table lives only in `GameViewModel` and would go with it:
+
+| | |
+|---|---|
+| chat | `Say`, the typed line, what the server sends back |
+| jumping | `TakeJump` to `JumpAsync` |
+| death | `IsDead`, `HasRaiseOffer`, `AcceptRaiseAsync`, `ReturnToHomePointAsync`, `ShowDeath` |
+| zoning | `ZoneLines`, `ShowZoneLines`, `LoadZone` between zones |
+| vitals | `Health` to the HP/MP/TP bar |
+| music | `CurrentTrack` and `CurrentPath` per zone |
+| settings | `ShowSettings` and what comes back |
+| navigation | `NavMesh` |
+
+So the job is to port that wiring into `ClientFlow`, which is mostly moving
+game logic out of a view model it never belonged in. Deleting Avalonia is
+trivial afterwards and destructive before.
+
+### Parked for whoever picks this up
+
+**A seated pose while riding the monorail.** The bodies carry 137 animation
+clips and `MOGHOUSE_CLIPS` lists them. Six are sitting - `si00` and `si01`,
+`si10` and `si11`, `si20` and `si21` - which is three poses, each split into a
+lower and an upper body track the way `idl0` and `idl1` are. The renderer plays
+clips by name and `MOGHOUSE_ANIMATION` picks one, so this is small: render the
+three, choose one, play it while `riding()`.
+
+Seats as objects is the harder half and probably not worth it. Zone geometry is
+baked from the DAT's placement list at load, so nothing new can be added -
+only placements that already exist can be moved, which is the trick the train
+itself uses.
+
+**Sound effects.** The format is worked out and written up on the wiki as
+[Audio-Formats]; `tools/spwdecode.py` turns a `.spw` into a WAV and handles
+8,488 of the 9,459 in a retail install. What is missing is a place to play them:
+`Music` is one stream for one `.bgw` with no mixing and no positional audio. An
+effects channel wants a second SDL audio stream, several voices, and volume
+from the distance to whatever is making the noise - the monorail was the case
+that raised it. Finding a usable rumble among 9,459 files is its own afternoon.
+
+**Bastok Mines blows out to white around noon and goes black at night.** A
+different fault from the one already fixed: that was zones shipping no lighting
+at all, and this zone has plenty. It is that an underground zone is lit by the
+outdoor day and night cycle, and only the thirteen rooms that ship their own
+lighting escape it. `MOGHOUSE_TIME=1200` reproduces it immediately.
+
+### The old thread bug, for the record
+
+The Avalonia client black-screened on zone load because `LiveRadar` defaulted to
+its own thread and AppKit will not make a window anywhere but the main one. That
+is fixed - `ownThread: false` plus a non-async `Main` - and the restructure it
+forced is what the screens work was built on.
