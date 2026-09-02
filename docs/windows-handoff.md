@@ -1,24 +1,45 @@
 # Handing back to Windows
 
-Written on the Mac, 2026-09-02, after a session that got MogHouse running end
-to end on macOS. Two changes touch Windows and want your judgement; one bug is
-almost certainly reproducible there.
+Written on the Mac, updated 2026-09-02 after a second session that moved the
+client's screens into the renderer. Everything below is on `master`, which is
+the branch - there is no `main`.
 
-Everything below is on `master`.
+## Read this first: none of it has run on Windows
 
-## What now works on macOS
+Every change described here was written and tested on macOS only. Nothing about
+it is deliberately platform-specific, and the parts that were - the thread the
+window is created on, chiefly - were fixed in a way meant to suit all three.
+But "meant to" is not "checked", and the first useful thing a Windows session
+can do is find out which half of that is true.
 
-Against a LandSandBoat built on the Mac for the purpose:
+The likeliest places for it to bite:
 
-- login, character select, character creation
-- zone-in, with the world drawn - Bastok Mines, 223 models, 13 building
-  interiors, 103791 triangles of collision, 1477 draws
-- movement reaching the server, persisted while walking and across a relogin
-- the player's own nameplate, and other players' nameplates
-- two clients at once, each seeing the other
+- **The renderer builds with Homebrew's clang here**, because Apple's has no
+  `std::jthread`. MSVC has it. `tools/package-windows.ps1` is the Windows build
+  and has not been run since any of this landed.
+- **`NativeEnvironment.Set`** exists because on Unix `Environment.SetEnvironment
+  Variable` does not reach native `getenv`. On Windows it always did, so that
+  path is a no-op there and should stay harmless.
+- **Install detection** goes through the registry on Windows and through a list
+  of likely folders and Wine prefixes elsewhere. The registry path is untouched.
+- **The interface is now scaled** by the ratio between the window's points and
+  its pixels. On a 1080p display that ratio is 1 and nothing should change; on a
+  4K Windows display with scaling it is the thing to look at first.
 
-None of it needed changes to the protocol, the DAT reading, the shaders, Dawn,
-or `surface_metal.mm`. All of that was already right.
+## What the client does now
+
+One window for everything. The sign-in, account creation, character select and
+character creation are drawn by the renderer as forms, over a live zone rather
+than in front of a black screen - and character select is the characters
+themselves standing in Sel Phiner, faded until the cursor is over them, with a
+blank Mithra at the end for making a new one. It runs behind `--screens`;
+without it the old Avalonia launcher still starts.
+
+Then the world: walking, chat and the commands a typed line can be, jumping,
+death and raise and homepoint, zoning between zones, vitals, music, settings.
+
+Verified against a LandSandBoat running on the Mac: sign in, make an account,
+click a character, zone in, walk about, two clients seeing each other.
 
 ## 1. LiveRadar can run the render loop on the caller's thread
 
@@ -80,6 +101,37 @@ Be aware the first line is **not** necessarily a fault: with nothing happening
 nearby the server has nothing to send. It cost me hours to work that out - see
 `docs/networking-handoff.md`, which is now a post-mortem of a bug that did not
 exist rather than a description of one that does.
+
+## Running it on Windows
+
+```powershell
+dotnet run --project src/MogHouse.App/MogHouse.App.csproj --no-launch-profile -- --screens
+```
+
+Without `--screens` you get the old Avalonia launcher, which is still the
+default.
+
+The renderer needs the two key tables in `keys/` beside the repository -
+`mzb_key_table.bin` and `mmb_key_table2.bin`. They are built by
+`tools/keytables.py` rather than shipped, and without the first one a zone will
+not decode: the client now says so on a screen before asking for a password
+rather than showing a black world.
+
+Worth having while you work:
+
+| | |
+|---|---|
+| `MOGHOUSE_TIME=1700` | holds the hour still, so two runs are comparable |
+| `MOGHOUSE_UI_SCALE` | interface size on top of the display's own correction |
+| `MOGHOUSE_SCENE_ZONE` | the zone behind the sign-in; 0 is Sel Phiner, -1 is none |
+| `MOGHOUSE_LOG` | where the client writes; the renderer adds `.renderer` |
+
+The standalone renderer takes a zone DAT and needs no server at all, which is
+how most of the graphics work was done:
+
+```powershell
+.\build-renderer\moghouse-renderer.exe "$env:MOGHOUSE_FFXI_INSTALL\ROM\0\28.DAT"
+```
 
 ## Testing against the Mac's server
 
