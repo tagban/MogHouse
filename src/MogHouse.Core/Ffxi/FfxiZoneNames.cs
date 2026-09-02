@@ -13,11 +13,9 @@ public static class FfxiZoneNames
 {
     private static readonly Dictionary<uint, string> Names = new()
     {
-        // Not a zone anyone plays in: it is the backdrop the retail client
-        // stands its characters in, and the server's own table has nothing here.
-        // Named anyway, because it is a real place with a name and the radar has
-        // a line to put it on.
-        [0] = "Remnants_of_Sel_Phiner",
+        // What the server calls it, which is also the name of its data folder.
+        // See Label for what a person is shown.
+        [0] = "unknown",
         [1] = "Phanauet_Channel",
         [2] = "Carpenters_Landing",
         [3] = "Manaclipper",
@@ -320,7 +318,33 @@ public static class FfxiZoneNames
     };
 
     /// <summary>The zone's name, or null if the number isn't one we know.</summary>
+    /// <summary>
+    /// What the server calls a zone, which is also the name of its folder under
+    /// LandSandBoat's data/zones - so this is what finds a zone's zone.yaml and
+    /// must keep matching the server rather than reading well.
+    /// </summary>
     public static string? Get(uint zoneId) => Names.TryGetValue(zoneId, out string? name) ? name : null;
+
+    /// <summary>
+    /// Zones whose server name is not fit to show anybody.
+    ///
+    /// Only one so far. Zone 0 is the backdrop the retail client stands its
+    /// characters in - the remnants of Sel Phiner - and the server has no name
+    /// for it at all, so its folder and its table entry both say "unknown".
+    /// Renaming it in <see cref="Names"/> put that name straight into the path
+    /// its zone lines are read from, and they stopped being found.
+    /// </summary>
+    private static readonly Dictionary<uint, string> Labels = new()
+    {
+        [0] = "Remnants of Sel Phiner",
+    };
+
+    /// <summary>
+    /// What to show a person: the zone's own name with its underscores taken
+    /// out, or something better where the server has nothing worth reading.
+    /// </summary>
+    public static string? Label(uint zoneId) =>
+        Labels.TryGetValue(zoneId, out string? label) ? label : Get(zoneId)?.Replace('_', ' ');
 
     public static int Count => Names.Count;
 }

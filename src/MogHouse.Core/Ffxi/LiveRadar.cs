@@ -172,7 +172,7 @@ public sealed class LiveRadar : IDisposable
             // Set MOGHOUSE_SCREENSHOT to check the live radar without watching
             // it. The wait is in frames, and it has to outlast the first few
             // entity updates or the shot shows an empty radar.
-            ZoneName = FfxiZoneNames.Get((uint)zoneId) ?? $"ZONE {zoneId}",
+            ZoneName = FfxiZoneNames.Label((uint)zoneId) ?? $"ZONE {zoneId}",
             PlayerName = playerName,
             ScreenshotPath = Environment.GetEnvironmentVariable("MOGHOUSE_SCREENSHOT"),
             ScreenshotAfterFrames =
@@ -289,7 +289,7 @@ public sealed class LiveRadar : IDisposable
             // The name is set even though the sign-in screen hides the radar
             // that would show it: anyone who opens the client onto a zone to
             // look around it should be told which one they are looking at.
-            ZoneName = FfxiZoneNames.Get((uint)sceneZone) ?? string.Empty,
+            ZoneName = FfxiZoneNames.Label((uint)sceneZone) ?? string.Empty,
 
             // Late afternoon, and held there.
             //

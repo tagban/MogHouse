@@ -322,7 +322,7 @@ public static class ClientFlow
         world.SetPlayer(character.Name, FfxiAppearance.LookString(character.Race, character.Face));
         world.SetClock(state.GameTime);
 
-        string zoneName = FfxiZoneNames.Get(state.ZoneNo) ?? $"ZONE {state.ZoneNo}";
+        string zoneName = FfxiZoneNames.Label(state.ZoneNo) ?? $"ZONE {state.ZoneNo}";
         if (!world.LoadZone((int)state.ZoneNo, zoneName, game.PosX, game.PosVertical, game.PosDepth,
                             state.Direction))
         {

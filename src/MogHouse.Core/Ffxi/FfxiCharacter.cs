@@ -51,7 +51,7 @@ public sealed record FfxiCharacter(
     public string Initial => Name.Length > 0 ? Name[..1].ToUpperInvariant() : "?";
 
     /// <summary>The zone the character logged out in, by name where we know it.</summary>
-    public string ZoneName => FfxiZoneNames.Get(Zone) ?? $"zone {Zone}";
+    public string ZoneName => FfxiZoneNames.Label(Zone) ?? $"zone {Zone}";
 
     /// <summary>Face and hair ids. Numbered per race, so only meaningful next to the race.</summary>
     public string FaceHair => $"face {Face} hair {Hair}";

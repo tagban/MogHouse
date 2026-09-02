@@ -420,7 +420,7 @@ public partial class GameViewModel : ViewModelBase
             return;
         }
 
-        ZoningTo = FfxiZoneNames.Get(zone)?.Replace('_', ' ') ?? $"zone {zone}";
+        ZoningTo = FfxiZoneNames.Label(zone) ?? $"zone {zone}";
         Console.WriteLine($"zoning to {zone} ({ZoningTo})");
         IsZoning = true;
 
