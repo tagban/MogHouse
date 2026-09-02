@@ -282,6 +282,7 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
+            Console.WriteLine($"zone: nothing arrived within {timeout.TotalSeconds:0.#}s");
             return null;
         }
 
@@ -292,6 +293,20 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
         if (!reply.ChecksumValid && TryAdvanceKey(result.Buffer))
         {
             reply = Decode(result.Buffer, _blowfish, _codec);
+        }
+
+        // Said out loud because the two ways this fails are indistinguishable
+        // from the outside: LoginAsync returns null when nothing ever arrives,
+        // and a reply with no plaintext when something arrived and could not be
+        // read. Both surface as "Zone server did not answer, or its reply could
+        // not be decoded", which is the wrong sentence to be debugging from -
+        // one means look at the network, the other means look at the key.
+        if (reply.Plaintext is null)
+        {
+            Console.WriteLine(
+                $"zone: {result.Buffer.Length} bytes from {result.RemoteEndPoint}, checksum " +
+                $"{(reply.ChecksumValid ? "ok" : "FAILED")}, declared bits {reply.DeclaredBits?.ToString() ?? "none"}, " +
+                "no plaintext");
         }
 
         // Track the server's counter so our outgoing headers can acknowledge it.
