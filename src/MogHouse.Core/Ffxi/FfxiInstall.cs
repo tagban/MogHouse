@@ -172,6 +172,66 @@ public static class FfxiInstall
         yield return Path.Combine(home, ".wine", "drive_c", "Program Files (x86)", "PlayOnline", "SquareEnix", "FINAL FANTASY XI");
         yield return Path.Combine(home, "Library", "Application Support", "CrossOver", "Bottles", "FFXI",
                                   "drive_c", "Program Files (x86)", "PlayOnline", "SquareEnix", "FINAL FANTASY XI");
+
+        // A prefix the user has already pointed Wine at.
+        if (Environment.GetEnvironmentVariable("WINEPREFIX") is { Length: > 0 } prefix)
+        {
+            foreach (string candidate in InsidePrefix(prefix))
+            {
+                yield return candidate;
+            }
+        }
+
+        // Bottles are named by whoever made them, so the one above only helps
+        // someone who called theirs "FFXI". Walk whatever is actually there.
+        // Whisky is the wrapper most Mac players use now; CrossOver is the paid
+        // one. Neither is enumerated if it is not installed, and a prefix that
+        // does not hold the game just fails IsInstall like any other candidate.
+        foreach (string bottles in new[]
+                 {
+                     Path.Combine(home, "Library", "Application Support", "CrossOver", "Bottles"),
+                     Path.Combine(home, "Library", "Containers", "com.isaacmarovitz.Whisky", "Bottles"),
+                     Path.Combine(home, "Library", "Application Support", "Whisky", "Bottles"),
+                 })
+        {
+            foreach (string bottle in Subdirectories(bottles))
+            {
+                foreach (string candidate in InsidePrefix(bottle))
+                {
+                    yield return candidate;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// The two places the game sits inside a Wine prefix. 64-bit prefixes keep
+    /// a 32-bit installer's output under "Program Files (x86)"; a 32-bit prefix
+    /// has only "Program Files".
+    /// </summary>
+    private static IEnumerable<string> InsidePrefix(string prefix)
+    {
+        yield return Path.Combine(prefix, "drive_c", "Program Files (x86)", "PlayOnline", "SquareEnix", "FINAL FANTASY XI");
+        yield return Path.Combine(prefix, "drive_c", "Program Files", "PlayOnline", "SquareEnix", "FINAL FANTASY XI");
+    }
+
+    /// <summary>
+    /// Subdirectories of a path that may not exist, or may not be readable.
+    /// Enumeration happens here rather than in the caller because an iterator
+    /// cannot catch around a yield.
+    /// </summary>
+    private static string[] Subdirectories(string path)
+    {
+        try
+        {
+            return Directory.Exists(path) ? Directory.GetDirectories(path) : [];
+        }
+        catch (Exception)
+        {
+            // An unreadable bottles folder is not worth failing detection over;
+            // the picker is the fallback for everything this does not find.
+            return [];
+        }
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]

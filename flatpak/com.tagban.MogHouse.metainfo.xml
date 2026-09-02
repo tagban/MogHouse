@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.tagban.MogHouse</id>
+  <name>MogHouse XI</name>
+  <summary>A from-scratch Final Fantasy XI client</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <launchable type="desktop-id">com.tagban.MogHouse.desktop</launchable>
+  <description>
+    <p>
+      A from-scratch client for Final Fantasy XI that reads an existing retail
+      installation's own files and connects to a private server. It ships no
+      game data: a copy of the game, on the August 2026 patch, is required
+      separately.
+    </p>
+    <p>
+      This is an alpha. You can log in, walk a city with real geometry,
+      interiors, collision, water, music and other players. There is no combat.
+    </p>
+  </description>
+  <categories>
+    <category>Game</category>
+    <category>RolePlaying</category>
+  </categories>
+  <releases>
+    <release version="0.1.2" date="2026-09-01"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

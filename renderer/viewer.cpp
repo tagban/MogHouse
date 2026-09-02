@@ -3071,7 +3071,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     float jumpUntil = 0.0f;
     std::function<const ffxi::Animation*(const ffxi::Animation*)> upperFor;
     // MOGHOUSE_ANIMATION pins one clip; without it, movement picks.
-    const bool pinnedClip = options.animation ? options.animation->c_str() : nullptr != nullptr;
+    const bool pinnedClip = options.animation.has_value();
     float animationOffset = 0.0f;
     bool driving = character.has_value();
 
@@ -5828,6 +5828,13 @@ constexpr float kGravity = 26.0f;
             }
         }
     }
+
+    // `music` is a local declared far above, so its destructor runs at the end
+    // of this function - after SDL_Quit below. Destroying an SDL audio stream
+    // once the audio subsystem is gone locks a freed mutex, so shut it down
+    // here while SDL is still up. shutdown() is idempotent; the destructor
+    // still runs and finds nothing left to do.
+    music.shutdown();
 
     SDL_DestroyWindow(window);
     SDL_Quit();

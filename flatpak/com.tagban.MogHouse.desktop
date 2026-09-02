@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=MogHouse XI
+Comment=A from-scratch Final Fantasy XI client
+Exec=moghouse
+Icon=com.tagban.MogHouse
+Terminal=false
+Categories=Game;RolePlaying;

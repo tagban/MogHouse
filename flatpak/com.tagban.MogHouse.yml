@@ -1,0 +1,110 @@
+# Flatpak manifest for MogHouse XI.
+#
+# UNTESTED - written on a Mac. flatpak-builder does not run on macOS, so
+# nothing here has been built. Treat it as "this is what the manifest should
+# say", not "this is known to work", and read the notes at the bottom before
+# assuming a failure means the design is wrong.
+#
+# This packages a *pre-built* linux-x64 tree rather than compiling in the
+# sandbox. flatpak-builder runs modules with no network, so building .NET and
+# Dawn in here would mean vendoring every NuGet package and all of Dawn's
+# dependency fetch - a large job with no payoff for a build distributed
+# directly rather than through Flathub. Build the tree first:
+#
+#     tools/package-linux.sh          (on Linux, or in a Linux container)
+#     flatpak-builder --user --install --force-clean \
+#         build-flatpak flatpak/com.tagban.MogHouse.yml
+#
+# It expects dist/linux-x64/ to exist beside this repo, holding what
+# package-linux.sh produced.
+app-id: com.tagban.MogHouse
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: moghouse
+
+finish-args:
+  # A window, under either display server.
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+
+  # Dawn reaches the GPU through Vulkan on Linux. Without --device=dri there is
+  # no device at all and the renderer cannot start.
+  - --device=dri
+
+  # SDL3 opens an audio stream for zone music.
+  - --socket=pulseaudio
+
+  # The client talks to a private server.
+  - --share=network
+
+  # The game's own DATs, which are not shipped and live wherever the player
+  # installed them - commonly a Wine or Proton prefix under home. This is broad
+  # on purpose: a narrower rule cannot know where the install is, and the
+  # client only ever reads it.
+  - --filesystem=home
+  # Steam/Proton libraries often sit outside home on a second drive.
+  - --filesystem=/mnt:ro
+  - --filesystem=/media:ro
+
+modules:
+  - name: moghouse
+    buildsystem: simple
+    build-commands:
+      # The published tree goes somewhere private rather than into /app/bin,
+      # because the renderer looks for its assets beside whichever directory
+      # its library was loaded from - so the library and the assets have to
+      # stay together, exactly as they do in the Windows data/ folder and the
+      # macOS bundle's Contents/Resources/data.
+      - mkdir -p /app/moghouse
+      - cp -r . /app/moghouse/
+      - chmod +x "/app/moghouse/MogHouse XI"
+
+      # A launcher, because the executable name has a space in it and the
+      # Flatpak command cannot.
+      - install -Dm755 /dev/stdin /app/bin/moghouse <<'EOF'
+        #!/bin/sh
+        exec "/app/moghouse/MogHouse XI" "$@"
+        EOF
+
+      - install -Dm644 com.tagban.MogHouse.desktop /app/share/applications/com.tagban.MogHouse.desktop
+      - install -Dm644 com.tagban.MogHouse.metainfo.xml /app/share/metainfo/com.tagban.MogHouse.metainfo.xml
+    sources:
+      - type: dir
+        path: ../dist/linux-x64
+      - type: file
+        path: com.tagban.MogHouse.desktop
+      - type: file
+        path: com.tagban.MogHouse.metainfo.xml
+
+# Notes for whoever builds this on a Linux machine
+# ------------------------------------------------
+#
+# Things most likely to need changing, roughly in order:
+#
+# 1. **The Vulkan driver.** org.freedesktop.Platform ships Mesa, so an AMD or
+#    Intel GPU should work with --device=dri alone. NVIDIA's proprietary driver
+#    needs a matching org.freedesktop.Platform.GL.nvidia-<version> extension on
+#    the host, which Flatpak usually installs automatically but which has to
+#    match the running kernel driver exactly. "no adapter" from the renderer
+#    with a working GPU points here first.
+#
+# 2. **The runtime version.** 24.08 is a guess at what is current. If the
+#    freedesktop SDK has moved on, this and the sdk line move together.
+#
+# 3. **Audio.** --socket=pulseaudio covers PulseAudio and PipeWire's Pulse
+#    shim, which is nearly everything. A pure ALSA host would need
+#    --device=all, which is worth avoiding if it can be.
+#
+# 4. **The game directory.** --filesystem=home is what makes the install
+#    picker able to see anything. If a player keeps FFXI on a drive mounted
+#    somewhere other than /mnt or /media, they will need
+#    `flatpak override --user --filesystem=<path> com.tagban.MogHouse`.
+#
+# 5. **Writable state.** The client writes moghouse-settings.json,
+#    ffxi-server-profiles.json, ffxi-install.json and two logs beside its
+#    executable. /app is read-only inside a Flatpak, so this will fail. That is
+#    the one thing here that likely needs a code change rather than a manifest
+#    change: those paths should fall back to XDG_DATA_HOME when the directory
+#    beside the executable is not writable. Worth fixing before this ships.

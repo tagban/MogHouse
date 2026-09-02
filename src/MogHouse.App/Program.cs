@@ -68,7 +68,21 @@ sealed class Program
         string? path = Environment.GetEnvironmentVariable("MOGHOUSE_LOG");
         if (string.IsNullOrWhiteSpace(path))
         {
-            return;
+            // Default rather than give up. A packaged build has no console and
+            // nobody sets this, so without a default a released client says
+            // nothing anywhere - and the one thing a bug report needs is these
+            // two files. The config directory is used because it is already the
+            // directory established to be writable: beside the executable where
+            // that works, and a per-user directory where it does not, which is
+            // the case inside a Flatpak or under a read-only /Applications.
+            path = System.IO.Path.Combine(
+                MogHouse.Core.Ffxi.FfxiServerProfileStore.DefaultConfigDirectory(), "moghouse.log");
+
+            // The renderer writes its own file next to this one, taking the
+            // path from this variable and appending ".renderer" - it is a
+            // separate process-wide setting rather than something passed in, so
+            // it has to be exported rather than just used locally.
+            Environment.SetEnvironmentVariable("MOGHOUSE_LOG", path);
         }
 
         try

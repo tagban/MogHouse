@@ -33,6 +33,14 @@ public:
 
     void stop();
 
+    /// Destroys the audio stream. Idempotent, and the destructor calls it, but
+    /// it has to happen *before* SDL_Quit: quitting tears down the audio
+    /// subsystem, and destroying a stream afterwards locks a mutex that has
+    /// already been freed. A Music whose scope ends after SDL_Quit - which is
+    /// the case in runViewer - therefore has to be shut down by hand first.
+    /// Getting this wrong segfaults on macOS; Windows survives it by luck.
+    void shutdown();
+
     /// 0 silent, 1 as recorded. Applied while mixing rather than to the
     /// device, so it survives a track change.
     void setVolume(float volume);

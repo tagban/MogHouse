@@ -98,12 +98,18 @@ Music::Music()
     SDL_ResumeAudioStreamDevice(state_->stream);
 }
 
-Music::~Music()
+void Music::shutdown()
 {
     if (state_ && state_->stream)
     {
         SDL_DestroyAudioStream(state_->stream);
+        state_->stream = nullptr;
     }
+}
+
+Music::~Music()
+{
+    shutdown();
 }
 
 bool Music::play(const std::filesystem::path& path)
