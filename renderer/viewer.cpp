@@ -810,6 +810,27 @@ bool writeBmp(const char* path, const uint8_t* bgra, uint32_t width, uint32_t he
     std::fclose(file);
     return true;
 }
+
+/// A stand-in form, for MOGHOUSE_FORM=1.
+///
+/// Login-shaped because that is the first screen the client will set and the
+/// one worth looking at while the widget is being built - a caption, three
+/// things to type into, a button, and somewhere for a refusal to appear.
+/// Nothing here is what the client will actually send; it only has to exercise
+/// every row kind.
+mh::Form demoForm()
+{
+    mh::Form form;
+    form.title = "MogHouse XI";
+    form.message = "";
+    form.rows = {
+        mh::FormRow{mh::FormRowKind::Field, "Server", "127.0.0.1", true},
+        mh::FormRow{mh::FormRowKind::Field, "Username", "", true},
+        mh::FormRow{mh::FormRowKind::Secret, "Password", "", true},
+        mh::FormRow{mh::FormRowKind::Button, "Log In", "", true},
+    };
+    return form;
+}
 } // namespace
 
 void mh::ViewerLink::setEntities(std::vector<RadarEntity> entities)
@@ -3315,6 +3336,23 @@ constexpr float kGravity = 26.0f;
     float deathPanel[4]{};
     DialogButton deathButtons[mh::kDialogButtons]{};
 
+    // The form, if one is up, kept the same immediate-mode way.
+    //
+    // What the player has typed lives here rather than in the Form the client
+    // set, because the client's copy is what it asked for and this is what it
+    // is being given - they only meet when a button is pressed. Keeping them
+    // apart is what lets the client leave a form up unchanged while somebody
+    // is halfway through filling it in.
+    bool formShown = false;
+    float formPanel[4]{};
+    std::vector<std::string> formValues;
+    std::vector<float> formFieldRects;   // four floats per row, empty rect when not a field
+    std::vector<DialogButton> formButtons;
+    std::vector<int> formButtonRow;      // which form row each button came from
+    int formFocus = -1;                  // the row being typed into, or -1
+    int formPressed = -1;                // the button under a held mouse, by index
+    std::string formSignature;           // what the last laid-out form was, to notice a new one
+
     /// The two chips in the top left corner, as the last frame drew them.
     ///
     /// Somewhere to send a bug from inside the game, rather than from the
@@ -3460,12 +3498,132 @@ constexpr float kGravity = 26.0f;
         bool raiseOffered = options.testDeath > 1;
         const bool dead = link ? link->dead(raiseOffered) : options.testDeath > 0;
 
+        // Read here for the same reason, and it matters more: the events below
+        // decide what a keypress means by looking at the form, and the drawing
+        // further down lays it out. Two reads of a form the client can replace
+        // between them would let a click land on a button that is no longer
+        // there.
+        const mh::Form activeForm = link           ? link->form()
+                                    : options.testForm ? demoForm()
+                                                       : mh::Form{};
+
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
             if (event.type == SDL_EVENT_QUIT)
             {
                 running = false;
+            }
+            // A form takes the keyboard and the mouse before anything else.
+            // These come first in the chain on purpose: while a login screen is
+            // up, typing a W belongs in the username, not to the character.
+            else if (event.type == SDL_EVENT_TEXT_INPUT && formShown && formFocus >= 0 &&
+                     static_cast<size_t>(formFocus) < formValues.size())
+            {
+                formValues[static_cast<size_t>(formFocus)] += event.text.text;
+            }
+            else if (event.type == SDL_EVENT_KEY_DOWN && formShown)
+            {
+                const SDL_Keycode key = event.key.key;
+                const bool hasFocus = formFocus >= 0 && static_cast<size_t>(formFocus) < formValues.size();
+
+                if (key == SDLK_BACKSPACE && hasFocus)
+                {
+                    std::string& value = formValues[static_cast<size_t>(formFocus)];
+                    if (!value.empty())
+                    {
+                        // Back off a whole UTF-8 character rather than a byte,
+                        // or one press through an accented letter leaves half
+                        // of it behind and the next draw walks into nonsense.
+                        size_t back = value.size() - 1;
+                        while (back > 0 && (static_cast<unsigned char>(value[back]) & 0xC0) == 0x80)
+                        {
+                            --back;
+                        }
+                        value.resize(back);
+                    }
+                }
+                else if (key == SDLK_TAB)
+                {
+                    // Round the fields, so the whole form can be filled in from
+                    // the keyboard. Shift goes back the way people expect.
+                    const bool backwards = (event.key.mod & SDL_KMOD_SHIFT) != 0;
+                    const int count = static_cast<int>(formValues.size());
+                    for (int step = 1; step <= count; ++step)
+                    {
+                        const int offset = backwards ? -step : step;
+                        const int candidate = ((formFocus + offset) % count + count) % count;
+                        const mh::FormRowKind kind = activeForm.rows[static_cast<size_t>(candidate)].kind;
+                        if ((kind == mh::FormRowKind::Field || kind == mh::FormRowKind::Secret) &&
+                            activeForm.rows[static_cast<size_t>(candidate)].enabled)
+                        {
+                            formFocus = candidate;
+                            break;
+                        }
+                    }
+                }
+                else if (key == SDLK_RETURN || key == SDLK_KP_ENTER)
+                {
+                    // Return presses the first button that can be pressed,
+                    // which is what a login form is for.
+                    for (size_t i = 0; i < activeForm.rows.size(); ++i)
+                    {
+                        if (activeForm.rows[i].kind == mh::FormRowKind::Button &&
+                            activeForm.rows[i].enabled)
+                        {
+                            if (link)
+                            {
+                                link->submitForm(static_cast<int>(i), formValues);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && formShown)
+            {
+                float ndcX = 0.0f;
+                float ndcY = 0.0f;
+                formPressed = -1;
+                if (pointerNdc(event.button.x, event.button.y, ndcX, ndcY))
+                {
+                    // A click in a field puts the caret there.
+                    for (size_t i = 0; i * 4 + 3 < formFieldRects.size(); ++i)
+                    {
+                        const float* rect = &formFieldRects[i * 4];
+                        if (rect[2] > 0.0f && ndcX >= rect[0] && ndcX < rect[0] + rect[2] &&
+                            ndcY >= rect[1] && ndcY < rect[1] + rect[3])
+                        {
+                            formFocus = static_cast<int>(i);
+                        }
+                    }
+
+                    for (size_t i = 0; i < formButtons.size(); ++i)
+                    {
+                        if (formButtons[i].enabled && formButtons[i].holds(ndcX, ndcY))
+                        {
+                            formPressed = static_cast<int>(i);
+                        }
+                    }
+                }
+
+                // The form owns this press either way: a click on a login
+                // screen should never also swing the camera behind it.
+                dragging = false;
+            }
+            else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && formShown)
+            {
+                float ndcX = 0.0f;
+                float ndcY = 0.0f;
+                if (formPressed >= 0 && static_cast<size_t>(formPressed) < formButtons.size() &&
+                    pointerNdc(event.button.x, event.button.y, ndcX, ndcY) &&
+                    formButtons[static_cast<size_t>(formPressed)].holds(ndcX, ndcY) && link)
+                {
+                    // Pressed and released on the same button, the way a button
+                    // is meant to work - a press that slides off is not a click.
+                    link->submitForm(formButtonRow[static_cast<size_t>(formPressed)], formValues);
+                }
+                formPressed = -1;
             }
             else if (event.type == SDL_EVENT_TEXT_INPUT && typing)
             {
@@ -3947,7 +4105,10 @@ constexpr float kGravity = 26.0f;
         // guarded at each one - miss a guard and the character walks out from
         // under you mid-sentence.
         static const bool kNoKeysHeld[SDL_SCANCODE_COUNT] = {};
-        const bool* held = typing ? kNoKeysHeld : SDL_GetKeyboardState(nullptr);
+        // A form takes the keyboard for the same reason and more completely:
+        // with a login screen up there may be no character to walk at all, and
+        // a W typed into a username should never also be a step forward.
+        const bool* held = (typing || formShown) ? kNoKeysHeld : SDL_GetKeyboardState(nullptr);
         // Shift inverts the walk toggle rather than setting it, so holding
         // it walks while running and runs while walking.
         const bool shiftHeld = held[SDL_SCANCODE_LSHIFT] || held[SDL_SCANCODE_RSHIFT];
@@ -5771,6 +5932,382 @@ constexpr float kGravity = 26.0f;
             pass.SetPipeline(dialogPipeline);
             pass.SetBindGroup(0, dialogBindGroup);
             pass.Draw(3);
+        }
+
+        // A form the client put up: login, character select, and whatever else
+        // used to be a window of its own.
+        //
+        // Drawn with the same one-triangle pass as the death box, and laid out
+        // the same immediate-mode way - the rectangles this frame produces are
+        // what the next click is tested against. Deliberately not sharing that
+        // block: a form has rows of four different kinds and sizes itself round
+        // them, and folding both into one routine made neither readable. The
+        // glyph walk below is the one piece genuinely duplicated, and is worth
+        // lifting out if a third caller ever wants it.
+        formShown = false;
+        if (!activeForm.rows.empty() && dialogPipeline && dialogBindGroup && !textFont.empty())
+        {
+            // What the player has typed survives across frames, but only for
+            // the form that is actually up. A different one starts empty rather
+            // than inheriting a password somebody typed into the last screen.
+            std::string signature = activeForm.title;
+            for (const mh::FormRow& row : activeForm.rows)
+            {
+                signature += '\x1f';
+                signature += std::to_string(static_cast<int>(row.kind));
+                signature += row.text;
+            }
+
+            if (signature != formSignature)
+            {
+                formSignature = signature;
+                formValues.assign(activeForm.rows.size(), std::string{});
+                for (size_t i = 0; i < activeForm.rows.size(); ++i)
+                {
+                    formValues[i] = activeForm.rows[i].value;
+                }
+
+                // Focus starts on the first thing that can be typed into, so a
+                // form can be filled in without reaching for the mouse first.
+                formFocus = -1;
+                for (size_t i = 0; i < activeForm.rows.size(); ++i)
+                {
+                    const mh::FormRowKind kind = activeForm.rows[i].kind;
+                    if ((kind == mh::FormRowKind::Field || kind == mh::FormRowKind::Secret) &&
+                        activeForm.rows[i].enabled)
+                    {
+                        formFocus = static_cast<int>(i);
+                        break;
+                    }
+                }
+                SDL_StartTextInput(window);
+            }
+
+            DialogUniforms form{};
+            const float windowAspect = static_cast<float>(width) / static_cast<float>(height);
+            form.counts[1] = static_cast<float>(textFont.cell) * 2.0f / static_cast<float>(height);
+            form.counts[2] = windowAspect;
+            form.counts[3] = 0.62f;   // dimmer than the death box: there may be no world behind it
+            form.atlas[0] = static_cast<float>(textFont.columns);
+            form.atlas[1] = static_cast<float>(textFont.cell);
+            form.atlas[2] = static_cast<float>(textFont.width);
+            form.atlas[3] = static_cast<float>(textFont.height);
+
+            const float line = form.counts[1];
+
+            const auto layOutRow = [&textFont](DialogUniforms& into, int row, const std::string& text)
+            {
+                const float cell = static_cast<float>(textFont.cell);
+                float pen = 0.0f;
+                int written = 0;
+                for (char raw : text)
+                {
+                    if (written >= mh::kDialogChars)
+                    {
+                        break;
+                    }
+                    const float advance = textFont.advanceOf(raw) / cell;
+                    float* glyph = into.glyphs[row * mh::kDialogChars + written];
+                    glyph[0] = static_cast<float>(textFont.indexOf(raw));
+                    glyph[1] = pen;
+                    glyph[2] = advance;
+                    pen += advance;
+                    ++written;
+                }
+                for (int spare = written; spare < mh::kDialogChars; ++spare)
+                {
+                    into.glyphs[row * mh::kDialogChars + spare][2] = 0.0f;
+                }
+                into.boxes[row][2] = pen;
+                return pen;
+            };
+
+            constexpr float kTitleScale = 0.55f;
+            constexpr float kCaptionScale = 0.38f;
+            constexpr float kValueScale = 0.42f;
+            constexpr float kLabelScale = 0.44f;
+            constexpr float kMessageScale = 0.36f;
+
+            const float padX = line * 0.85f / windowAspect;
+            const float padY = line * 0.45f;
+
+            // What each row of the form becomes on screen, in order. A field is
+            // its caption and then the box under it, so one form row can be two
+            // drawn rows - which is why this is built rather than indexed.
+            struct Placed
+            {
+                int formRow;          // -1 for the title and the message
+                int drawRow;
+                mh::FormRowKind kind;
+                bool isValue;         // the box under a caption
+                float scale;
+            };
+            std::vector<Placed> placed;
+            int drawn = 0;
+            float widest = 0.0f;
+
+            const auto addText = [&](int formRow, const std::string& text, float scale,
+                                     const float* tint, mh::FormRowKind kind, bool isValue)
+            {
+                if (drawn >= mh::kDialogRows)
+                {
+                    return;
+                }
+                const float cells = layOutRow(form, drawn, text);
+                form.colours[drawn][0] = tint[0];
+                form.colours[drawn][1] = tint[1];
+                form.colours[drawn][2] = tint[2];
+                form.colours[drawn][3] = scale;
+                widest = std::max(widest, cells * line * scale / windowAspect);
+                placed.push_back(Placed{formRow, drawn, kind, isValue, scale});
+                ++drawn;
+            };
+
+            if (!activeForm.title.empty())
+            {
+                addText(-1, activeForm.title, kTitleScale, kDialogTitle, mh::FormRowKind::Label, false);
+            }
+
+            int buttonCount = 0;
+            for (size_t i = 0; i < activeForm.rows.size(); ++i)
+            {
+                const mh::FormRow& row = activeForm.rows[i];
+                const int formRow = static_cast<int>(i);
+
+                if (row.kind == mh::FormRowKind::Button)
+                {
+                    ++buttonCount;
+                    continue;   // buttons go in a row of their own, below
+                }
+
+                if (row.kind == mh::FormRowKind::Label)
+                {
+                    addText(formRow, row.text, kCaptionScale, kDialogText, row.kind, false);
+                    continue;
+                }
+
+                // A field: its caption, then what has been typed into it.
+                if (!row.text.empty())
+                {
+                    addText(formRow, row.text, kCaptionScale, kDialogText, mh::FormRowKind::Label, false);
+                }
+
+                const std::string& value = formValues[i];
+                const std::string shown = row.kind == mh::FormRowKind::Secret
+                                              ? std::string(value.size(), '*')
+                                              : value;
+                addText(formRow, shown, kValueScale,
+                        row.enabled ? kDialogLabel : kDialogLabelOff, row.kind, true);
+            }
+
+            // The buttons, across the bottom.
+            float labelWidest = 0.0f;
+            const int firstButtonDraw = drawn;
+            for (size_t i = 0; i < activeForm.rows.size() && drawn < mh::kDialogRows; ++i)
+            {
+                if (activeForm.rows[i].kind != mh::FormRowKind::Button)
+                {
+                    continue;
+                }
+                const float cells = layOutRow(form, drawn, activeForm.rows[i].text);
+                const float* tint = activeForm.rows[i].enabled ? kDialogLabel : kDialogLabelOff;
+                form.colours[drawn][0] = tint[0];
+                form.colours[drawn][1] = tint[1];
+                form.colours[drawn][2] = tint[2];
+                form.colours[drawn][3] = kLabelScale;
+                labelWidest = std::max(labelWidest, cells * line * kLabelScale / windowAspect);
+                placed.push_back(Placed{static_cast<int>(i), drawn, mh::FormRowKind::Button, false, kLabelScale});
+                ++drawn;
+            }
+
+            if (!activeForm.message.empty() && drawn < mh::kDialogRows)
+            {
+                addText(-1, activeForm.message, kMessageScale, kDialogTitle, mh::FormRowKind::Label, false);
+            }
+
+            const float fieldHigh = line * kValueScale * 2.0f;
+            const float buttonHigh = line * kLabelScale * 2.0f;
+            const float buttonGap = line * 0.45f / windowAspect;
+            const float buttonWide = labelWidest + padX * 1.3f;
+            const float buttonsWide = buttonCount > 0
+                                          ? buttonWide * buttonCount + buttonGap * (buttonCount - 1)
+                                          : 0.0f;
+
+            // Fields are drawn wider than their text so an empty one still looks
+            // like somewhere to type.
+            const float fieldWide = std::max(widest, buttonsWide) + padX * 0.6f;
+
+            const float rowGap = line * 0.18f;
+            const float groupGap = line * 0.34f;
+
+            float contentHigh = 0.0f;
+            for (const Placed& item : placed)
+            {
+                if (item.kind == mh::FormRowKind::Button)
+                {
+                    continue;
+                }
+                contentHigh += (item.isValue ? fieldHigh : line * item.scale) + rowGap;
+            }
+            if (buttonCount > 0)
+            {
+                contentHigh += groupGap + buttonHigh;
+            }
+
+            const float panelWide = std::max(fieldWide, buttonsWide) + padX * 2.0f;
+            const float panelHigh = contentHigh + padY * 2.0f;
+            form.panel[0] = -panelWide * 0.5f;
+            form.panel[1] = -panelHigh * 0.5f;
+            form.panel[2] = panelWide;
+            form.panel[3] = panelHigh;
+            std::memcpy(formPanel, form.panel, sizeof(formPanel));
+
+            float pointerX = -2.0f;
+            float pointerY = -2.0f;
+            {
+                float mouseX = 0.0f;
+                float mouseY = 0.0f;
+                SDL_GetMouseState(&mouseX, &mouseY);
+                if (!pointerNdc(mouseX, mouseY, pointerX, pointerY))
+                {
+                    pointerX = -2.0f;
+                    pointerY = -2.0f;
+                }
+            }
+
+            formFieldRects.assign(activeForm.rows.size() * 4, 0.0f);
+            formButtons.clear();
+            formButtonRow.clear();
+
+            float cursorY = form.panel[1] + panelHigh - padY;
+            for (const Placed& item : placed)
+            {
+                if (item.kind == mh::FormRowKind::Button)
+                {
+                    continue;
+                }
+
+                if (item.isValue)
+                {
+                    cursorY -= fieldHigh;
+
+                    const float left = -fieldWide * 0.5f;
+                    form.rects[item.drawRow][0] = left;
+                    form.rects[item.drawRow][1] = cursorY;
+                    form.rects[item.drawRow][2] = fieldWide;
+                    form.rects[item.drawRow][3] = fieldHigh;
+
+                    const bool focused = item.formRow == formFocus;
+                    const float* fill = focused ? kDialogButtonHot : kDialogButtonOff;
+                    form.fills[item.drawRow][0] = fill[0];
+                    form.fills[item.drawRow][1] = fill[1];
+                    form.fills[item.drawRow][2] = fill[2];
+                    form.fills[item.drawRow][3] = 1.0f;
+
+                    // Text sits inside the box rather than centred on it, the
+                    // way a field reads: it fills from the left as you type.
+                    const float high = line * item.scale;
+                    const float inset = padX * 0.35f;
+                    form.boxes[item.drawRow][0] = left + inset;
+                    form.boxes[item.drawRow][1] = cursorY + (fieldHigh - high) * 0.5f;
+
+                    if (item.formRow >= 0)
+                    {
+                        float* rect = &formFieldRects[static_cast<size_t>(item.formRow) * 4];
+                        rect[0] = left;
+                        rect[1] = cursorY;
+                        rect[2] = fieldWide;
+                        rect[3] = fieldHigh;
+                    }
+
+                    // The caret, just past the last glyph of the focused field.
+                    if (focused)
+                    {
+                        const float textWide = form.boxes[item.drawRow][2] * high / windowAspect;
+                        form.caret[0] = form.boxes[item.drawRow][0] + textWide;
+                        form.caret[1] = cursorY + fieldHigh * 0.18f;
+                        form.caret[2] = line * 0.06f / windowAspect;
+                        form.caret[3] = fieldHigh * 0.64f;
+                    }
+
+                    cursorY -= rowGap;
+                    continue;
+                }
+
+                const float high = line * item.scale;
+                cursorY -= high;
+                const float wide = form.boxes[item.drawRow][2] * high / windowAspect;
+                form.boxes[item.drawRow][0] = -wide * 0.5f;
+                form.boxes[item.drawRow][1] = cursorY;
+                cursorY -= rowGap;
+            }
+
+            if (buttonCount > 0)
+            {
+                cursorY -= groupGap;
+                cursorY -= buttonHigh;
+
+                float buttonLeft = -buttonsWide * 0.5f;
+                for (const Placed& item : placed)
+                {
+                    if (item.kind != mh::FormRowKind::Button)
+                    {
+                        continue;
+                    }
+
+                    const bool enabled = activeForm.rows[item.formRow].enabled;
+                    const bool over = enabled && pointerX >= buttonLeft &&
+                                      pointerX < buttonLeft + buttonWide && pointerY >= cursorY &&
+                                      pointerY < cursorY + buttonHigh;
+                    const bool held = formPressed == static_cast<int>(formButtons.size());
+
+                    form.rects[item.drawRow][0] = buttonLeft;
+                    form.rects[item.drawRow][1] = cursorY;
+                    form.rects[item.drawRow][2] = buttonWide;
+                    form.rects[item.drawRow][3] = buttonHigh;
+
+                    const float* fill = !enabled  ? kDialogButtonOff
+                                        : (over || held) ? kDialogButtonHot
+                                                         : kDialogButton;
+                    form.fills[item.drawRow][0] = fill[0];
+                    form.fills[item.drawRow][1] = fill[1];
+                    form.fills[item.drawRow][2] = fill[2];
+                    form.fills[item.drawRow][3] = 1.0f;
+
+                    const float high = line * item.scale;
+                    const float wide = form.boxes[item.drawRow][2] * high / windowAspect;
+                    form.boxes[item.drawRow][0] = buttonLeft + (buttonWide - wide) * 0.5f;
+                    form.boxes[item.drawRow][1] = cursorY + (buttonHigh - high) * 0.5f;
+
+                    DialogButton hit{};
+                    hit.left = buttonLeft;
+                    hit.bottom = cursorY;
+                    hit.width = buttonWide;
+                    hit.height = buttonHigh;
+                    hit.enabled = enabled;
+                    formButtons.push_back(hit);
+                    formButtonRow.push_back(item.formRow);
+
+                    buttonLeft += buttonWide + buttonGap;
+                }
+            }
+
+            formShown = true;
+            form.counts[0] = static_cast<float>(drawn);
+            queue.WriteBuffer(dialogUniformBuffer, 0, &form, sizeof(form));
+            pass.SetPipeline(dialogPipeline);
+            pass.SetBindGroup(0, dialogBindGroup);
+            pass.Draw(3);
+        }
+        else if (formSignature.length() > 0 && activeForm.rows.empty())
+        {
+            // The form came down. Stop taking text, or the next key press goes
+            // into a field nobody can see.
+            formSignature.clear();
+            formValues.clear();
+            formButtons.clear();
+            formFocus = -1;
+            SDL_StopTextInput(window);
         }
 
         pass.End();

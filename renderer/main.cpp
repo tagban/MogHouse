@@ -113,6 +113,13 @@ ViewerOptions optionsFromEnvironment(int argc, char** argv)
         options.testDeath = std::atoi(death->c_str());
     }
 
+    // MOGHOUSE_FORM=1 shows a stand-in login screen, for looking at the form
+    // widget without standing up a client to set one.
+    if (const std::optional<std::string> form = fromEnvironment("MOGHOUSE_FORM"))
+    {
+        options.testForm = std::atoi(form->c_str());
+    }
+
     if (const std::optional<std::string> frame = fromEnvironment("MOGHOUSE_FRAME"))
     {
         options.frame = static_cast<float>(std::atof(frame->c_str()));

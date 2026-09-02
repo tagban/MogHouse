@@ -245,6 +245,11 @@ struct ViewerOptions
     /// you, and then finding someone willing to cast Raise.
     int testDeath{};
 
+    /// Puts a stand-in form up so the widget can be looked at without a client.
+    /// Same idea as testDeath: the standalone viewer has no ViewerLink, so
+    /// without this there is no way to see a screen the client would set.
+    int testForm{};
+
     /// How many frames to let pass before taking a screenshot. The default
     /// is just enough to let the first frames settle; a caller feeding the
     /// viewer from outside wants longer, because a shot taken before anything
