@@ -69,7 +69,56 @@ internal static class Program
             return 1;
         }
 
-        FfxiCharacter character = characters[0];
+        // A fresh account comes back with sixteen empty slots rather than no
+        // characters at all, and connecting to a zone as one of those hangs
+        // waiting for a reply that never comes. Pick a real one, and make a
+        // real one if there is none - which is what a brand new test account
+        // needs before it can zone anywhere.
+        FfxiCharacter? character = null;
+        foreach (FfxiCharacter candidate in characters)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate.Name))
+            {
+                character = candidate;
+                break;
+            }
+        }
+
+        if (character is null)
+        {
+            string wantedName = Environment.GetEnvironmentVariable("MOGHOUSE_TEST_CHARACTER") ?? "Testy";
+            Console.WriteLine($"no characters on this account - creating {wantedName}...");
+
+            var wanted = new FfxiNewCharacter(wantedName, FfxiRaceId.HumeMale, 0,
+                                              FfxiBodySize.Medium, FfxiStartingJob.Warrior,
+                                              FfxiNation.Bastok);
+
+            string? refused = await session.CreateCharacterAsync(wanted, login.SessionHash!);
+            if (refused is not null)
+            {
+                Console.WriteLine($"character creation refused: {refused}");
+                return 1;
+            }
+
+            // The roster has to be read again for the new character's id.
+            (login, characters) = await session.LoginAsync(profile);
+            foreach (FfxiCharacter candidate in characters)
+            {
+                if (!string.IsNullOrWhiteSpace(candidate.Name))
+                {
+                    character = candidate;
+                    break;
+                }
+            }
+
+            if (character is null)
+            {
+                Console.WriteLine("created a character but the roster still shows none");
+                return 1;
+            }
+            Console.WriteLine($"created {character.Name}");
+        }
+
         Console.WriteLine($"entering the world as {character.Name}...");
 
         await session.ConnectToZoneAsync(character, login.SessionHash!, host);
