@@ -196,6 +196,48 @@ public:
     /// How far along the line a stop is.
     float stopAt(size_t index) const { return index < stops_.size() ? stops_[index] : 0.0f; }
 
+    /// A point on the line, and which way the track runs there.
+    ///
+    /// For standing something beside the railway rather than guessing at where
+    /// the railway is - the character-select line-up wants the train to pass
+    /// behind it, which means knowing where the train will be.
+    bool at(float along, Vec3& point, float& heading) const
+    {
+        if (route_.size() < 2)
+        {
+            return false;
+        }
+
+        float remaining = std::clamp(along, 0.0f, routeLength_);
+        for (size_t i = 0; i + 1 < route_.size(); ++i)
+        {
+            const Vec3 from = route_[i];
+            const Vec3 to = route_[i + 1];
+            const float span = distance(to, from);
+            if (span <= 0.0001f)
+            {
+                continue;
+            }
+
+            if (remaining <= span || i + 2 == route_.size())
+            {
+                const float t = std::clamp(remaining / span, 0.0f, 1.0f);
+                point = from + (to - from) * t;
+                heading = std::atan2(to.x - from.x, to.z - from.z);
+                return true;
+            }
+
+            remaining -= span;
+        }
+        return false;
+    }
+
+    /// Sets off without the usual wait at the end.
+    ///
+    /// The sign-in screen opens on a stationary train that then stands there
+    /// for nine seconds, which is most of the time anybody looks at it.
+    void departNow() { dwell_ = 0.0f; }
+
     /// Whether this zone has a railway at all.
     bool present() const { return !cars_.empty() && route_.size() > 1; }
 

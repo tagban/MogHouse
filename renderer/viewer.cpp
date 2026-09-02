@@ -66,6 +66,15 @@ constexpr uint32_t kWidth = 1280;
 constexpr uint32_t kHeight = 720;
 constexpr wgpu::TextureFormat kDepthFormat = wgpu::TextureFormat::Depth24Plus;
 
+/// Where along the line a character-select line-up stands, and how far back
+/// from it.
+///
+/// Far enough along that the train is there within a few seconds of setting
+/// off, and far enough back that four people and a train fit in the shot
+/// without the train running through them.
+inline constexpr float kLineupAlongTrack = 150.0f;
+inline constexpr float kLineupFromTrack = 26.0f;
+
 /// How far below a carriage's own origin somebody riding in it stands.
 ///
 /// The cars hang from the beam, so their origin is up at the coupling rather
@@ -2954,6 +2963,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             }
         }
         monorail.setStops(std::move(stops));
+        monorail.departNow();
 
         std::printf("monorail: %zu cars on %.0f units of track, %zu stops, %zu draws to light\n",
                     monorail.cars().size(), static_cast<double>(monorail.routeLength()),
@@ -2971,10 +2981,39 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     float lineupYaw = 0.0f;
     const auto findLineupSpot = [&]()
     {
-        lineupAt = centre;
-        if (auto ground = collision.nearestGround(centre.x, centre.z, centre.y, radius))
+        // Beside the railway, when the zone has one.
+        //
+        // The line-up stands between the camera and the track, far enough along
+        // that the train reaches it within a few seconds of setting off - so
+        // whoever is choosing a character has it run past behind them rather
+        // than somewhere off in the distance they never look. Everything is
+        // measured off the route rather than written down, because the route is
+        // worked out at load and moving one rail beam would otherwise leave the
+        // row standing in a field.
+        mh::Vec3 on{};
+        float along = 0.0f;
+        if (monorail.present() && monorail.at(kLineupAlongTrack, on, along))
         {
-            lineupAt = *ground;
+            // Square to the track, on the side the camera will be.
+            const float acrossX = std::cos(along);
+            const float acrossZ = -std::sin(along);
+
+            lineupAt = mh::Vec3{on.x + acrossX * kLineupFromTrack, on.y,
+                                on.z + acrossZ * kLineupFromTrack};
+
+            // Facing the track, so the camera - which sits behind the row -
+            // looks past them at it.
+            lineupYaw = std::atan2(-acrossX, -acrossZ);
+        }
+        else
+        {
+            lineupAt = centre;
+            lineupYaw = 0.0f;
+        }
+
+        if (auto ground = collision.nearestGround(lineupAt.x, lineupAt.z, lineupAt.y + 40.0f, radius))
+        {
+            lineupAt.y = ground->y;
         }
     };
     findLineupSpot();
