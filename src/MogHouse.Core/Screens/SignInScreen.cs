@@ -25,8 +25,9 @@ public static class SignInScreen
                                      bool MakeAccount = false);
 
     private const string SignIn = "SIGN IN";
+    private const string Saved = "LOAD";
     private const string NewAccount = "NEW ACCOUNT";
-    private const string Remember = "REMEMBER SERVER";
+    private const string Remember = "SAVE PROFILE";
     private const string Quit = "QUIT";
 
     /// <summary>
@@ -46,8 +47,14 @@ public static class SignInScreen
         // Whatever was used last, so a returning player presses one button. The
         // store keeps passwords obfuscated rather than encrypted, so it is
         // filled in only when it was deliberately saved before.
-        FfxiServerProfile? saved = FfxiServerProfileStore.Profiles.FirstOrDefault();
+        // Every server that has been kept, not just the first. Copied once so
+        // the list cannot change underneath the cycling below.
+        List<FfxiServerProfile> profiles = [.. FfxiServerProfileStore.Profiles];
+        int chosen = 0;
 
+        FfxiServerProfile? saved = profiles.FirstOrDefault();
+
+        string name = saved?.Name ?? "";
         string host = saved?.Host ?? "";
         string username = account ?? saved?.Username ?? "";
 
@@ -58,16 +65,32 @@ public static class SignInScreen
 
         while (true)
         {
-            NativeFormRow[] rows =
-            [
+            var rows = new List<NativeFormRow>
+            {
+                // What to call this sign-in. Kept first because it is what the
+                // picker below shows, and a saved server is far easier to find
+                // by the name its owner gave it than by a host and an account.
+                NativeFormRow.Field("PROFILE", name),
                 NativeFormRow.Field("SERVER", host),
                 NativeFormRow.Field("ACCOUNT", username),
                 NativeFormRow.Secret("PASSWORD", password),
+            };
+
+            // A button that names the server it would load and steps to the
+            // next one, rather than a list taking up the screen. Only worth
+            // showing when there is more than one to step between - with a
+            // single saved server it is already filled in.
+            if (profiles.Count > 1)
+            {
+                rows.Add(NativeFormRow.Button($"{Saved}: {profiles[chosen].Name.ToUpperInvariant()}"));
+            }
+
+            rows.AddRange([
                 NativeFormRow.Button(SignIn),
                 NativeFormRow.Button(NewAccount),
                 NativeFormRow.Button(Remember),
                 NativeFormRow.Button(Quit),
-            ];
+            ]);
 
             NativeFormResult? result = screens.Ask("MOGHOUSE XI", message, rows);
             if (result is null)
@@ -78,17 +101,34 @@ public static class SignInScreen
             // Whatever was typed, kept across a re-show. Read before the button
             // is looked at, so a failed sign-in comes back filled in rather
             // than blank.
-            host = result[0].Trim();
-            username = result[1].Trim();
-            password = result[2];
+            name = result[0].Trim();
+            host = result[1].Trim();
+            username = result[2].Trim();
+            password = result[3];
 
-            switch (rows[result.Button].Text)
+            // The picker names the server it holds, so it is matched by what it
+            // starts with rather than by its whole label.
+            string pressed = rows[result.Button].Text;
+            if (pressed.StartsWith(Saved, StringComparison.Ordinal))
+            {
+                chosen = (chosen + 1) % profiles.Count;
+
+                FfxiServerProfile next = profiles[chosen];
+                name = next.Name;
+                host = next.Host;
+                username = next.Username;
+                password = next.Password;
+                message = "";
+                continue;
+            }
+
+            switch (pressed)
             {
                 case Quit:
                     return null;
 
                 case Remember:
-                    message = Save(host, username, password);
+                    message = Save(name, host, username, password);
                     continue;
 
                 case NewAccount when host.Length == 0:
@@ -118,22 +158,40 @@ public static class SignInScreen
     /// the password is obfuscated at rest and that is not encryption, so
     /// writing one to disk should be something the player asked for.
     /// </summary>
-    private static string Save(string host, string username, string password)
+    /// <summary>
+    /// What to call a saved sign-in when its owner did not say: the host, and
+    /// the account with it, because a host alone does not tell two accounts on
+    /// the same server apart.
+    /// </summary>
+    private static string Describe(string host, string username) =>
+        username.Length > 0 ? $"{host} ({username})" : host;
+
+    private static string Save(string name, string host, string username, string password)
     {
         if (host.Length == 0)
         {
-            return "A SERVER IS NEEDED BEFORE IT CAN BE REMEMBERED.";
+            return "A SERVER IS NEEDED BEFORE THE PROFILE CAN BE SAVED.";
         }
 
-        FfxiServerProfile profile =
-            FfxiServerProfileStore.Profiles.FirstOrDefault(p => p.Host == host)
-            ?? FfxiServerProfileStore.CreateAndSave(host, host);
+        if (name.Length == 0)
+        {
+            name = Describe(host, username);
+        }
 
+        // Matched on the name its owner gave it. Two sign-ins can differ only
+        // by which account they use - a main and an alt on one server - and
+        // matching on the host alone had the second quietly replace the first.
+        FfxiServerProfile profile =
+            FfxiServerProfileStore.Profiles.FirstOrDefault(
+                p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
+            ?? FfxiServerProfileStore.CreateAndSave(name, host);
+
+        profile.Name = name;
         profile.Host = host;
         profile.Username = username;
         profile.Password = password;
         FfxiServerProfileStore.Save();
 
-        return "SERVER REMEMBERED.";
+        return $"SAVED AS {name.ToUpperInvariant()}.";
     }
 }

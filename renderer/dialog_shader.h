@@ -23,7 +23,7 @@ namespace mh
 {
 /// How many rows the box holds: a heading, two lines of explanation, and the
 /// two buttons.
-inline constexpr int kDialogRows = 12;
+inline constexpr int kDialogRows = 20;
 
 /// Characters per row. Long enough for a sentence at this width.
 inline constexpr int kDialogChars = 40;
@@ -35,7 +35,7 @@ inline constexpr int kDialogButtons = 2;
 /// they are asserted rather than trusted. Getting them out of step resizes the
 /// uniform buffer without changing what the shader reads, which shows up as
 /// garbage rows rather than as an error.
-static_assert(kDialogRows == 12, "dialog_shader.h WGSL hardcodes 12 rows");
+static_assert(kDialogRows == 20, "dialog_shader.h WGSL hardcodes 20 rows");
 static_assert(kDialogChars == 40, "dialog_shader.h WGSL hardcodes kChars = 40");
 
 inline constexpr const char* kDialogShader = R"(
@@ -52,16 +52,16 @@ struct DialogUniforms {
     caret : vec4<f32>,
     // Per row, the button behind it: left, bottom, width, height. A width of
     // zero is a row of plain text with nothing drawn behind it.
-    rects : array<vec4<f32>, 12>,
+    rects : array<vec4<f32>, 20>,
     // Per row, that button's fill: colour, then how opaque it is.
-    fills : array<vec4<f32>, 12>,
+    fills : array<vec4<f32>, 20>,
     // Per row, the text: left and bottom in NDC, width in cells, unused.
-    boxes : array<vec4<f32>, 12>,
+    boxes : array<vec4<f32>, 20>,
     // Per row, the text's colour, then its size against the shared cell.
-    colours : array<vec4<f32>, 12>,
+    colours : array<vec4<f32>, 20>,
     // Per glyph: atlas cell index, x offset in cells, advance in cells.
     // Laid out row-major, kDialogChars apart.
-    glyphs : array<vec4<f32>, 480>,
+    glyphs : array<vec4<f32>, 800>,
 };
 
 const kChars = 40;

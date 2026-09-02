@@ -6328,6 +6328,23 @@ constexpr float kGravity = 26.0f;
                 addText(-1, activeForm.message, kMessageScale, kDialogTitle, mh::FormRowKind::Label, false);
             }
 
+            // A form too tall for the uniform simply stops being drawn part way
+            // through, and the rows that fall off the end are the last ones -
+            // which on a sign-in screen are the buttons. Adding a field to that
+            // screen silently cost it "remember server" and "quit", and nothing
+            // anywhere said so. Say so.
+            if (drawn >= mh::kDialogRows)
+            {
+                static bool complained = false;
+                if (!complained)
+                {
+                    complained = true;
+                    std::printf("form needs more than %d rows; the rest is not drawn - "
+                                "raise kDialogRows in dialog_shader.h\n",
+                                mh::kDialogRows);
+                }
+            }
+
             const float fieldHigh = line * kValueScale * 2.0f;
             const float buttonHigh = line * kLabelScale * 2.0f;
             const float buttonGap = line * 0.45f / windowAspect;
