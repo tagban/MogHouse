@@ -54,3 +54,7 @@ renderer/assets/water/*.water
 # Packaged builds. Large, reproducible from tools/package-windows.ps1, and
 # belong on a release rather than in history.
 dist/
+
+# Harness build output
+/tools/loginzone/bin
+/tools/loginzone/obj
