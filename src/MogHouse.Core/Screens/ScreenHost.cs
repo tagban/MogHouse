@@ -75,6 +75,14 @@ public sealed class ScreenHost(LiveRadar world)
     public void Tell(string title, string message) =>
         Ask(title, message, [NativeFormRow.Button("OK")]);
 
+    /// <summary>
+    /// Puts a screen up without waiting for it, for a caller watching something
+    /// else at the same time - character select waits on a click in the world
+    /// as well as on a button.
+    /// </summary>
+    public void ShowForm(string title, string message, IReadOnlyList<NativeFormRow> rows) =>
+        world.ShowForm(title, message, rows);
+
     /// <summary>Takes whatever is showing down, so the world is unobscured.</summary>
     public void Clear() => world.HideForm();
 }

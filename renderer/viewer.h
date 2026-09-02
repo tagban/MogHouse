@@ -124,6 +124,15 @@ struct RadarEntity
     /// worth fighting.
     int healthPercent{-1};
 
+    /// How to draw this one: 0 as itself, 1 as a pale half-transparent shape
+    /// with no face or clothes, 2 as itself but faded until the cursor is over
+    /// it.
+    ///
+    /// Character select uses both. The figure standing in for a character that
+    /// does not exist yet is the first; everyone real is the second, so the one
+    /// being pointed at is the one in full colour.
+    int silhouette{};
+
     /// Whether the server will accept a trigger on this one. Only these are
     /// worth picking with a cursor: an auction counter is a real entity with a
     /// real position that answers nothing.
@@ -540,6 +549,30 @@ public:
     void setLook(std::string look);
     bool takeLook(std::string& out);
 
+    /// Whether to draw the game's own furniture: the radar, the chat panel, the
+    /// clock and the zone's name.
+    ///
+    /// On by default, because the standalone viewer is always in a zone and has
+    /// nobody to turn it on for it. The client turns it off while it is on its
+    /// own screens - a compass and a chat log mean nothing during a sign-in,
+    /// and they sit over the very thing being looked at.
+    void setHud(bool on);
+    bool hud() const;
+
+    /// Whether the entities are a character-select line-up rather than a zone's
+    /// population.
+    ///
+    /// The client knows who is on the account and what they look like; it does
+    /// not know where the ground is or where the camera points, and both are
+    /// needed to stand a row of people up and look at them. So it publishes the
+    /// roster as ordinary entities and turns this on, and the arranging happens
+    /// on the side that has the collision and the camera.
+    ///
+    /// Picking one is the ordinary entity click - the same path that asks an
+    /// NPC to talk - so the client reads the choice back through takeTalk.
+    void setLineup(bool on);
+    bool lineup() const;
+
     /// The server's clock, in Earth seconds since the Vana'diel epoch.
     ///
     /// Carries the moment it was set alongside it, which ViewerOptions did not
@@ -603,6 +636,8 @@ private:
     std::string playerName_;
     std::string look_;
     bool lookChanged_{false};
+    std::atomic<bool> lineup_{false};
+    std::atomic<bool> hud_{true};
     uint32_t serverClock_{0};
     uint64_t serverClockSetAtNs_{0};
     bool serverClockKnown_{false};

@@ -190,6 +190,7 @@ void mh_viewer_set_entities(MhViewerHandle viewer, const MhRadarEntity* entities
             entity.modelId = static_cast<uint16_t>(entities[i].modelId);
             entity.healthPercent = entities[i].healthPercent;
             entity.triggerable = entities[i].triggerable != 0;
+            entity.silhouette = entities[i].silhouette;
             copied.push_back(std::move(entity));
         }
     }
@@ -383,6 +384,22 @@ void mh_viewer_set_clock(MhViewerHandle viewer, uint32_t server_clock)
     if (viewer != nullptr)
     {
         viewer->link.setServerClock(server_clock);
+    }
+}
+
+void mh_viewer_set_lineup(MhViewerHandle viewer, int32_t on)
+{
+    if (viewer != nullptr)
+    {
+        viewer->link.setLineup(on != 0);
+    }
+}
+
+void mh_viewer_set_hud(MhViewerHandle viewer, int32_t on)
+{
+    if (viewer != nullptr)
+    {
+        viewer->link.setHud(on != 0);
     }
 }
 

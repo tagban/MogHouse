@@ -56,6 +56,10 @@ public static class ClientFlow
 
         LiveRadar world = LiveRadar.OpenEmpty(ownThread: false);
 
+        // The screens are not the game: no radar, no chat log until there is a
+        // world to have them about.
+        world.ShowHud(false);
+
         // Everything that waits for a person or a server happens over here, so
         // the thread below is free to draw the screen they are waiting on.
         var session = new Thread(() => RunSession(world, say))
@@ -207,7 +211,7 @@ public static class ClientFlow
 
         while (!screens.Closed)
         {
-            CharacterScreens.Choice? choice = CharacterScreens.Select(screens, characters, message);
+            CharacterScreens.Choice? choice = CharacterScreens.Select(screens, world, characters, message);
             if (choice is null)
             {
                 return false;
@@ -328,6 +332,10 @@ public static class ClientFlow
         // The screen comes down last, so there is never a frame of empty
         // window between the sign-in and the world.
         screens.Clear();
+
+        // And now there is somewhere to be, so the radar and the chat log mean
+        // something again.
+        world.ShowHud(true);
 
         while (!world.Closed)
         {

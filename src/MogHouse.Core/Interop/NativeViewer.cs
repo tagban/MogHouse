@@ -77,6 +77,13 @@ public struct NativeRadarEntity
     /// <summary>Non-zero when the server will accept a trigger on this.</summary>
     public int Triggerable;
 
+    /// <summary>
+    /// How to draw this one: 0 as itself, 1 as a pale half-transparent shape,
+    /// 2 as itself but faded until the cursor is over it. Matches
+    /// MhRadarEntity.silhouette.
+    /// </summary>
+    public int Silhouette;
+
     public unsafe void SetLook(Ffxi.FfxiEntityLook? look)
     {
         if (look is null)
@@ -601,6 +608,38 @@ public sealed partial class NativeViewer : IDisposable
     }
 
     /// <summary>
+    /// Whether to draw the game's own furniture - the radar and the chat panel.
+    /// Off while the client is showing its own screens.
+    /// </summary>
+    public void ShowHud(bool on)
+    {
+        if (!_disposed && _handle != IntPtr.Zero)
+        {
+            mh_viewer_set_hud(_handle, on ? 1 : 0);
+        }
+    }
+
+    /// <summary>
+    /// Says that the entities on this viewer are a character-select line-up:
+    /// stand them in a row on the floor and look at them.
+    ///
+    /// <para>
+    /// The roster goes across as ordinary entities, with the names and looks
+    /// the client knows. Where they stand needs the zone's collision and the
+    /// camera, so the renderer works that out. Picking one is the ordinary
+    /// entity click, so the answer arrives through <see cref="TakeTalk"/> as
+    /// the id given to that entity.
+    /// </para>
+    /// </summary>
+    public void SetLineup(bool on)
+    {
+        if (!_disposed && _handle != IntPtr.Zero)
+        {
+            mh_viewer_set_lineup(_handle, on ? 1 : 0);
+        }
+    }
+
+    /// <summary>
     /// Puts a form up in the renderer, replacing whatever was showing.
     ///
     /// <para>
@@ -850,6 +889,12 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static unsafe partial int mh_viewer_take_chat(IntPtr viewer, byte* buffer, int capacity);
+
+    [LibraryImport(LibraryName)]
+    private static partial void mh_viewer_set_hud(IntPtr viewer, int on);
+
+    [LibraryImport(LibraryName)]
+    private static partial void mh_viewer_set_lineup(IntPtr viewer, int on);
 
     [LibraryImport(LibraryName)]
     private static partial void mh_viewer_set_clock(IntPtr viewer, uint serverClock);

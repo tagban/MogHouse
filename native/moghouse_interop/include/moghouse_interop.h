@@ -81,6 +81,12 @@ typedef struct MhRadarEntity
     /// Non-zero when the server will accept a trigger on this entity, which is
     /// what makes it worth putting a cursor over.
     int32_t triggerable;
+
+    /// Non-zero to draw this one as a pale, half-transparent shape instead of
+    /// itself: the figure standing in for a character that does not exist yet.
+    /// It has a race and a build so it reads as a person, and no face, no
+    /// colour and no clothes so it reads as nobody in particular.
+    int32_t silhouette;
 } MhRadarEntity;
 
 /// What to open. Every string is borrowed for the duration of the create call
@@ -263,6 +269,27 @@ MH_API void mh_viewer_set_player(MhViewerHandle viewer, const char* name, const 
 /// now open through the whole sign-in. The renderer counts from the moment this
 /// arrives, so the sky is not ahead by the time someone spent typing.
 MH_API void mh_viewer_set_clock(MhViewerHandle viewer, uint32_t server_clock);
+
+/// Whether the entities set on this viewer are a character-select line-up
+/// rather than a zone's population.
+///
+/// The client knows who is on the account and what they look like; it does not
+/// know where the floor is or where the camera points, and standing a row of
+/// people up needs both. So it publishes the roster through
+/// mh_viewer_set_entities and turns this on, and the arranging is done on the
+/// side that has the zone's collision.
+///
+/// Picking one is the ordinary entity click, so the choice comes back through
+/// mh_viewer_take_talk as the id the client gave that entity.
+MH_API void mh_viewer_set_lineup(MhViewerHandle viewer, int32_t on);
+
+/// Whether to draw the game's own furniture - the radar, the chat panel, the
+/// clock and the zone's name.
+///
+/// Off while the client is on its own screens. Signing in and choosing a
+/// character are not moments when a compass or a chat log mean anything, and
+/// they sit over the very thing being looked at.
+MH_API void mh_viewer_set_hud(MhViewerHandle viewer, int32_t on);
 
 /// One row of a form the client asks the renderer to draw.
 ///

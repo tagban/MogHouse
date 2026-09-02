@@ -8,8 +8,6 @@ namespace MogHouse.Core.Screens;
 /// </summary>
 public static class CharacterScreens
 {
-    private const string Create = "CREATE A CHARACTER";
-    private const string Quit = "QUIT";
     private const string Back = "BACK";
 
     /// <summary>
@@ -30,43 +28,111 @@ public static class CharacterScreens
     /// list, so the unnamed ones are left out - they are slots, not people, and
     /// zoning in as one hangs waiting for a reply that never comes.
     /// </summary>
-    public static Choice? Select(ScreenHost screens, IReadOnlyList<FfxiCharacter> characters,
-                                 string message = "")
+    /// <summary>
+    /// The id given to the figure that stands for "make a new one". Well clear
+    /// of the roster's own indices, so a click is never ambiguous.
+    /// </summary>
+    private const uint NewCharacterId = 0xFFFF_FF01;
+
+    /// <summary>
+    /// The id of the first character in the line-up. Anything but zero, because
+    /// zero is what <see cref="LiveRadar.TakeTalk"/> answers when nobody has
+    /// been clicked - given to the first character, it reads as that character
+    /// being chosen the instant the screen appears, which is precisely what it
+    /// did.
+    /// </summary>
+    private const uint FirstCharacterId = 1;
+
+    /// <summary>
+    /// A Mithra stands in for the character that does not exist yet. The retail
+    /// screen shows an empty slot; a figure to walk up to and click reads
+    /// better in a line-up, and it is the one race nobody has to be told is not
+    /// theirs.
+    /// </summary>
+    private const ushort NewCharacterRace = (ushort)FfxiRaceId.Mithra;
+
+    /// <summary>A pale blank shape - a person, but nobody yet.</summary>
+    private const int BlankStyle = 1;
+
+    /// <summary>Themselves, but faded until the cursor is over them.</summary>
+    private const int FadedStyle = 2;
+
+    public static Choice? Select(ScreenHost screens, LiveRadar world,
+                                 IReadOnlyList<FfxiCharacter> characters, string message = "")
     {
         List<FfxiCharacter> named =
             [.. characters.Where(c => !string.IsNullOrWhiteSpace(c.Name))];
 
-        var rows = new List<NativeFormRow>();
-        foreach (FfxiCharacter character in named)
+        // Everyone on the account, standing in the world, plus the figure that
+        // means "one more". The renderer stands them on the floor and looks at
+        // them; all this decides is who is in the row and in what order.
+        var cast = new List<(uint Id, string Name, ushort Race, ushort Face, int Style)>();
+        for (int i = 0; i < named.Count; i++)
         {
-            // What tells two characters apart at a glance, which is what this
-            // screen is for: who they are, what they are, and where they left off.
-            rows.Add(NativeFormRow.Button(
-                $"{character.Name}  {character.RaceName}  {character.JobSummary}  {character.ZoneName}".ToUpperInvariant()));
+            // Faded until pointed at, the way an invisible player looks, so the
+            // one under the cursor is plainly the one that would be picked.
+            cast.Add((FirstCharacterId + (uint)i, named[i].Name, named[i].Race, named[i].Face, FadedStyle));
         }
 
-        rows.Add(NativeFormRow.Button(Create));
-        rows.Add(NativeFormRow.Button(Quit));
+        cast.Add((NewCharacterId, "NEW CHARACTER", NewCharacterRace, 0, BlankStyle));
 
-        if (named.Count == 0 && message.Length == 0)
+        world.ShowLineup(cast);
+
+        // No panel. The people standing there are the choice - a dialog listing
+        // the same names in front of them is asking the question twice, and it
+        // covers the very thing it is asking about.
+        screens.Clear();
+
+        if (named.Count == 0)
         {
-            message = "THIS ACCOUNT HAS NO CHARACTERS YET.";
+            world.Say(null, "No characters on this account yet - pick the Mithra to make one.");
+        }
+        else if (message.Length > 0)
+        {
+            // Whatever went wrong last time goes to the chat line rather than
+            // into a box over the roster.
+            world.Say(null, message);
         }
 
-        NativeFormResult? result = screens.Ask("CHOOSE A CHARACTER", message, rows);
-        if (result is null)
+        try
         {
-            return null;
+            return WaitForClick(screens, world, named);
+        }
+        finally
+        {
+            // Down on every way out of here, including the window closing, so
+            // the roster is never left standing in the world behind whatever
+            // comes next.
+            world.HideLineup();
+        }
+    }
+
+    /// <summary>
+    /// Waits for one of the figures to be clicked. Null if the window closes
+    /// first, which is the player leaving.
+    /// </summary>
+    private static Choice? WaitForClick(ScreenHost screens, LiveRadar world,
+                                        IReadOnlyList<FfxiCharacter> named)
+    {
+        while (!screens.Closed)
+        {
+            // The id is the one handed to ShowLineup, so it says directly which
+            // of them was picked.
+            uint clicked = world.TakeTalk();
+            if (clicked == NewCharacterId)
+            {
+                return Choice.New;
+            }
+
+            if (clicked >= FirstCharacterId && clicked - FirstCharacterId < named.Count)
+            {
+                return new Choice(named[(int)(clicked - FirstCharacterId)], false);
+            }
+
+            Thread.Sleep(16);
         }
 
-        // By position rather than by label: two characters can be described the
-        // same way, and a name is not unique across worlds.
-        if (result.Button >= 0 && result.Button < named.Count)
-        {
-            return new Choice(named[result.Button], false);
-        }
-
-        return rows[result.Button].Text == Create ? Choice.New : null;
+        return null;
     }
 
     /// <summary>Everything the server needs to build somebody, and how to say it.</summary>

@@ -223,15 +223,23 @@ public sealed class LiveRadar : IDisposable
     /// <summary>
     /// The zone drawn behind the client's own screens.
     ///
-    /// West Ronfaure, because it is outdoors, has a sky and a horizon, and is
-    /// in every installation there is. MOGHOUSE_SCENE_ZONE picks another, and
-    /// 0 opens onto nothing.
+    /// Zone 0 - "selp", the remnants of Sel Phiner - which is the backdrop the
+    /// retail client stands its characters in. It exists for nothing else: a
+    /// green plain with cliffs around the edge and no reason to walk anywhere,
+    /// which is why parts of it are missing and why that does not matter.
+    ///
+    /// MOGHOUSE_SCENE_ZONE picks another, and -1 opens onto nothing. Note that
+    /// 0 is a real zone here rather than "none", which is exactly the trap this
+    /// comment exists to point at.
     /// </summary>
-    public const int DefaultSceneZone = 100;
+    public const int DefaultSceneZone = 0;
+
+    /// <summary>No scene at all - a plain black screen behind the forms.</summary>
+    private const int NoSceneZone = -1;
 
     /// <summary>
     /// Which zone to open behind the screens: what the environment asks for,
-    /// or West Ronfaure.
+    /// or Sel Phiner.
     /// </summary>
     private static int SceneZone() =>
         int.TryParse(Environment.GetEnvironmentVariable("MOGHOUSE_SCENE_ZONE"), out int wanted)
@@ -250,7 +258,7 @@ public sealed class LiveRadar : IDisposable
         // normal state before anybody types anything.
         string scene = string.Empty;
         int sceneZone = SceneZone();
-        if (sceneZone > 0)
+        if (sceneZone != NoSceneZone)
         {
             try
             {
@@ -274,7 +282,12 @@ public sealed class LiveRadar : IDisposable
 
             // No look, deliberately. The scene wants nobody standing in it, and
             // the character is built and uploaded when one is actually chosen.
-            ZoneName = FfxiZoneNames.Get((uint)sceneZone) ?? string.Empty,
+            //
+            // No name either: the backdrop is scenery, not somewhere the player
+            // is, and labelling it in the corner of a sign-in screen only
+            // invites the question of how to walk there. Sel Phiner has no name
+            // worth showing in any case.
+            ZoneName = string.Empty,
 
             // Holds the hour still, as the standalone viewer's own
             // MOGHOUSE_TIME does. Worth having in the client too: the light a
@@ -291,6 +304,89 @@ public sealed class LiveRadar : IDisposable
         };
 
         return new LiveRadar(new NativeViewer(options), ownThread);
+    }
+
+    /// <summary>
+    /// Stands a set of characters up in the world for the player to choose
+    /// between, and reports which one they pick.
+    /// </summary>
+    /// <param name="cast">
+    /// Who to show, in the order they should stand. The id given to each is
+    /// what comes back from <see cref="TakeTalk"/> when it is chosen, so a
+    /// caller can use whatever numbering suits it.
+    /// </param>
+    /// <remarks>
+    /// The positions are not given here. Standing people on the floor takes the
+    /// zone's collision and framing them takes the camera, and both of those
+    /// live in the renderer - so this says who, and the renderer says where.
+    /// </remarks>
+    public void ShowLineup(IReadOnlyList<(uint Id, string Name, ushort Race, ushort Face, int Style)> cast)
+    {
+        if (_closed)
+        {
+            return;
+        }
+
+        var entities = new NativeRadarEntity[cast.Count];
+        for (int i = 0; i < cast.Count; i++)
+        {
+            NativeRadarEntity entity = new()
+            {
+                Id = cast[i].Id,
+
+                // A player, so the character loader builds them out of a race
+                // and equipment rather than looking for a creature model.
+                Kind = (int)FfxiEntityKind.Player,
+
+                // Only a triggerable entity answers a click, and answering a
+                // click is the entire point of this one.
+                Triggerable = 1,
+                HealthPercent = -1,
+
+                // 1 draws a pale blank shape, 2 draws them faded until pointed
+                // at. See MhRadarEntity.silhouette.
+                Silhouette = cast[i].Style,
+            };
+            entity.SetName(cast[i].Name);
+
+            // Race and face are all the roster gives; the gear slots take the
+            // same stand-in the player's own look uses, because the server
+            // never sends us what our own characters are wearing.
+            entity.SetLook(new FfxiEntityLook(
+                FfxiLookKind.Equipped, ModelId: 0,
+                Race: (byte)cast[i].Race, Face: (byte)cast[i].Face,
+                Head: FfxiAppearance.UnknownGear, Body: FfxiAppearance.UnknownGear,
+                Hands: FfxiAppearance.UnknownGear, Legs: FfxiAppearance.UnknownGear,
+                Feet: FfxiAppearance.UnknownGear,
+                Main: 0, Sub: 0, Ranged: 0));
+
+            entities[i] = entity;
+        }
+
+        _viewer.SetEntities(entities);
+        _viewer.SetLineup(true);
+    }
+
+    /// <summary>
+    /// Whether the game's own furniture - the radar, the chat panel - is drawn.
+    /// Off while the client is showing its own screens.
+    /// </summary>
+    public void ShowHud(bool on)
+    {
+        if (!_closed)
+        {
+            _viewer.ShowHud(on);
+        }
+    }
+
+    /// <summary>Takes the line-up down, leaving the world as it was.</summary>
+    public void HideLineup()
+    {
+        if (!_closed)
+        {
+            _viewer.SetLineup(false);
+            _viewer.SetEntities([]);
+        }
     }
 
     /// <summary>

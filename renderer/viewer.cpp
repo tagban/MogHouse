@@ -65,6 +65,11 @@ constexpr uint32_t kWidth = 1280;
 constexpr uint32_t kHeight = 720;
 constexpr wgpu::TextureFormat kDepthFormat = wgpu::TextureFormat::Depth24Plus;
 
+/// How much of a faded character is drawn. Enough to read the shape and the
+/// colours, little enough that the one being pointed at is obviously the one in
+/// front.
+inline constexpr wgpu::Color kFadedBody{0.42, 0.42, 0.42, 1.0};
+
 struct Uniforms
 {
     float viewProjection[16];
@@ -1165,6 +1170,14 @@ bool mh::ViewerLink::takeLook(std::string& out)
     return true;
 }
 
+void mh::ViewerLink::setHud(bool on) { hud_ = on; }
+
+bool mh::ViewerLink::hud() const { return hud_; }
+
+void mh::ViewerLink::setLineup(bool on) { lineup_ = on; }
+
+bool mh::ViewerLink::lineup() const { return lineup_; }
+
 void mh::ViewerLink::setServerClock(uint32_t clock)
 {
     std::lock_guard<std::mutex> guard(mutex_);
@@ -1385,6 +1398,15 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     wgpu::RenderPipeline pipeline;
     wgpu::RenderPipeline cutoutPipeline;
     wgpu::RenderPipeline translucentPipeline;
+
+    /// The same again, blended against a constant set per draw - how a
+    /// character is shown faded without the shader knowing anything about it.
+    wgpu::RenderPipeline fadePipeline;
+
+    /// One flat pale surface, for the figure that stands in for a character
+    /// nobody has made yet.
+    wgpu::Texture ghostTexture;
+    wgpu::BindGroup ghostBindGroup;
     wgpu::BindGroupLayout zoneBindGroupLayout;
     wgpu::Sampler sampler;
     wgpu::Texture whiteTexture;
@@ -1609,6 +1631,27 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                 surfaceDescriptor.fragment = &surfaceFragment;
                 surfaceDescriptor.depthStencil = &surfaceDepth;
                 translucentPipeline = device.CreateRenderPipeline(&surfaceDescriptor);
+
+                // And once more again, blended against a constant rather than
+                // against the texture's own alpha. That is the whole trick
+                // behind the faded characters at character select: skin and
+                // cloth are opaque, so blending on what the texture says can
+                // only ever draw them solid, while a blend constant is set per
+                // draw and needs nothing from the shader at all.
+                wgpu::BlendState fadeBlend{
+                    .color = {.operation = wgpu::BlendOperation::Add,
+                              .srcFactor = wgpu::BlendFactor::Constant,
+                              .dstFactor = wgpu::BlendFactor::OneMinusConstant},
+                    .alpha = {.operation = wgpu::BlendOperation::Add,
+                              .srcFactor = wgpu::BlendFactor::One,
+                              .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha}};
+                wgpu::ColorTargetState fadeTarget{.format = surfaceFormat, .blend = &fadeBlend};
+                wgpu::FragmentState fadeFragment{
+                    .module = module, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &fadeTarget};
+                wgpu::RenderPipelineDescriptor fadeDescriptor = pipelineDescriptor;
+                fadeDescriptor.fragment = &fadeFragment;
+                fadeDescriptor.depthStencil = &surfaceDepth;
+                fadePipeline = device.CreateRenderPipeline(&fadeDescriptor);
 
                 // WebGPU has no bindless arrays, so each texture needs its own bind
                 // group and its own draw. Fine at a zone's few dozen textures; this is
@@ -2600,6 +2643,47 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // they arrive. Left as a one-off, a character signed in through the
     // in-window screens had its model built and never uploaded, so it drew as
     // nothing at all while its nameplate hung in the air above it.
+    // Slot 0 is the player. The rest are the entities, one instance each.
+    //
+    // Made whether or not there is a player to fill slot 0, because everyone
+    // else's transforms live here too - and at character select there is a row
+    // of people to draw and nobody playing yet. Tied to the player's own upload,
+    // the roster stood there as a line of floating names with no bodies under
+    // them.
+    {
+        float instance[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+        wgpu::BufferDescriptor instanceDescriptor{.usage = wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst,
+                                                  .size = sizeof(instance) * (mh::kMaxDrawnBodies + 1)};
+        characterInstanceBuffer = device.CreateBuffer(&instanceDescriptor);
+        queue.WriteBuffer(characterInstanceBuffer, 0, instance, sizeof(instance));
+    }
+
+    // The pale surface the blank figure wears. Made once, from nothing the zone
+    // provides, so it survives a zone change like the white fallback does.
+    const auto makeGhost = [&]()
+    {
+        if (ghostBindGroup || !zoneBindGroupLayout || !uniformBuffer || !sampler)
+        {
+            return;
+        }
+
+        ghostTexture = mh::createSolidTexture(device, 225, 232, 245, 255);
+
+        wgpu::BindGroupEntry entries[3] = {};
+        entries[0].binding = 0;
+        entries[0].buffer = uniformBuffer;
+        entries[0].size = sizeof(Uniforms);
+        entries[1].binding = 1;
+        entries[1].textureView = ghostTexture.CreateView();
+        entries[2].binding = 2;
+        entries[2].sampler = sampler;
+
+        wgpu::BindGroupDescriptor descriptor{
+            .layout = zoneBindGroupLayout, .entryCount = 3, .entries = entries};
+        ghostBindGroup = device.CreateBindGroup(&descriptor);
+    };
+    makeGhost();
+
     const auto uploadCharacter = [&]()
     {
         if (!character || character->geometry.indices.empty() || !pipeline)
@@ -2625,18 +2709,6 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         entityVertexBuffer = createBuffer(device, character->geometry.vertices.data(),
                                           character->geometry.vertices.size() * sizeof(mh::Vertex),
                                           wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst);
-
-        // Slot 0 is the player. The rest are the tracked entities, which
-        // share this one skinned mesh: every NPC and every other player is
-        // drawn from the same geometry in the same pose, so they cost an
-        // instance each and nothing more. Giving them their own models and
-        // animations is the next step; standing them in the right places is
-        // this one.
-        float instance[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
-        wgpu::BufferDescriptor instanceDescriptor{.usage = wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst,
-                                                  .size = sizeof(instance) * (mh::kMaxDrawnBodies + 1)};
-        characterInstanceBuffer = device.CreateBuffer(&instanceDescriptor);
-        queue.WriteBuffer(characterInstanceBuffer, 0, instance, sizeof(instance));
 
         for (const mh::Batch& batch : character->geometry.batches)
         {
@@ -2692,6 +2764,24 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // fog with the interface still drawn over it, which looks like a zone that
     // failed to load rather than one being thrown away by the projection.
     float radius = zone ? std::max(zone->radius(), 1.0f) : 1.0f;
+
+    // Where a character-select line-up stands, and which way it faces.
+    //
+    // Near the middle of the zone, on whatever floor is under it - a spot
+    // rather than a frame's worth of searching, because it belongs to the zone
+    // and not to the moment. The yaw is arbitrary; what matters is that the row
+    // is laid across it and the camera looks along it.
+    mh::Vec3 lineupAt = centre;
+    float lineupYaw = 0.0f;
+    const auto findLineupSpot = [&]()
+    {
+        lineupAt = centre;
+        if (auto ground = collision.nearestGround(centre.x, centre.z, centre.y, radius))
+        {
+            lineupAt = *ground;
+        }
+    };
+    findLineupSpot();
 
     mh::Camera camera;
     camera.target = centre;
@@ -4584,6 +4674,63 @@ constexpr float kGravity = 26.0f;
         {
             radarEntities = link->entities();
 
+            // Character select: the people on the account standing in the
+            // world, rather than their names in a list.
+            //
+            // The client says who they are and what they look like; where they
+            // stand is worked out here, because it takes the zone's collision
+            // to find the floor and the camera to frame them, and neither of
+            // those crosses the boundary.
+            if (link->lineup() && !radarEntities.empty())
+            {
+                const float spacing = 1.9f;
+                const float half = static_cast<float>(radarEntities.size() - 1) * 0.5f;
+
+                // Across the camera's view rather than along a world axis, so
+                // the row faces whichever way the scene happens to look.
+                const float acrossX = std::cos(lineupYaw);
+                const float acrossZ = -std::sin(lineupYaw);
+
+                float standY = centre.y;
+                for (size_t i = 0; i < radarEntities.size(); ++i)
+                {
+                    mh::RadarEntity& who = radarEntities[i];
+                    const float along = (static_cast<float>(i) - half) * spacing;
+
+                    who.x = lineupAt.x + acrossX * along;
+                    who.z = lineupAt.z + acrossZ * along;
+
+                    // On the floor, searched from above the zone rather than
+                    // from wherever the client left them - they arrive with no
+                    // meaningful height at all.
+                    who.y = collision.nearestGround(who.x, who.z, lineupAt.y + 8.0f, 40.0f)
+                                .value_or(mh::Vec3{who.x, lineupAt.y, who.z})
+                                .y;
+                    standY = who.y;
+
+                    // Facing the camera, and pickable: only a triggerable
+                    // entity answers a click, and these are the one kind that
+                    // has to.
+                    //
+                    // Half a turn from the camera's own yaw. The camera looks
+                    // along its forward and stands behind the row, so a figure
+                    // sharing that heading would be looking the same way the
+                    // camera does - at the backs of everyone's heads.
+                    who.heading = lineupYaw + 3.14159265f;
+                    who.triggerable = true;
+                    who.nameHidden = false;
+                }
+
+                // Framed on the row. Orbiting rather than walking, so the
+                // distance widens with the number of people in it and nobody
+                // falls off the edge of a full account.
+                camera.orbiting = true;
+                camera.target = {lineupAt.x, standY + 1.1f, lineupAt.z};
+                camera.distance = 3.4f + static_cast<float>(radarEntities.size()) * 0.9f;
+                camera.yaw = lineupYaw;
+                camera.pitch = -0.08f;
+            }
+
             // Nearest first, and deterministically so.
             //
             // The list arrives in the order a Dictionary happened to enumerate
@@ -5086,8 +5233,16 @@ constexpr float kGravity = 26.0f;
                 }
             }
 
-            if (!characterBindGroups.empty())
+            // Bodies: the player's, and everyone else's. Either alone is
+            // enough of a reason to be here - at character select there is a
+            // row of people and nobody playing yet, and gating the whole lot on
+            // the player's own bind groups left that row as floating names.
+            if (!characterBindGroups.empty() || (!radarEntities.empty() && characterInstanceBuffer))
             {
+                pass.SetVertexBuffer(1, characterInstanceBuffer);
+
+                if (!characterBindGroups.empty())
+                {
                 if (playing)
                 {
                     float frame = animationSeconds / playing->frameSeconds();
@@ -5114,7 +5269,6 @@ constexpr float kGravity = 26.0f;
                     queue.WriteBuffer(characterVertexBuffer, 0, character->geometry.vertices.data(),
                                       character->geometry.vertices.size() * sizeof(mh::Vertex));
                 }
-                pass.SetVertexBuffer(1, characterInstanceBuffer);
                 pass.SetIndexBuffer(characterIndexBuffer, wgpu::IndexFormat::Uint32);
 
                 // Instance 0 is the player, animated. The rest are everyone
@@ -5156,6 +5310,7 @@ constexpr float kGravity = 26.0f;
                                          static_cast<uint32_t>(body + 1));
                     }
                 }
+                }   // the player's own body, and the shared one everyone borrows
 
                 // And everyone the server described well enough to build: their
                 // own race, their own clothes. One model per distinct look,
@@ -5182,18 +5337,55 @@ constexpr float kGravity = 26.0f;
                     const bool animated = posed != entityPoses.end() && posed->second.drawn;
                     pass.SetVertexBuffer(0, animated ? posed->second.vertices : model->vertices);
                     pass.SetIndexBuffer(model->indices, wgpu::IndexFormat::Uint32);
+
+                    // How solid this one is. The character being pointed at is
+                    // shown as itself; the rest stand back, the way an invisible
+                    // player does. The blank figure never comes forward - it is
+                    // nobody yet, and pretending otherwise would suggest there
+                    // is someone there to play as.
+                    const int style = radarEntities[index].silhouette;
+                    const bool pointedAt = hoverId != 0 && radarEntities[index].id == hoverId;
+                    const bool ghost = style == 1;
+                    const bool faded = style == 2 && !pointedAt;
+
+                    if (ghost || faded)
+                    {
+                        pass.SetBlendConstant(&kFadedBody);
+                    }
+
                     for (size_t b = 0; b < model->loaded.geometry.batches.size() && b < model->bindGroups.size(); ++b)
                     {
                         const mh::Batch& batch = model->loaded.geometry.batches[b];
-                        pass.SetPipeline(batch.cutout ? cutoutPipeline : pipeline);
-                        pass.SetBindGroup(0, model->bindGroups[b]);
+
+                        if (ghost && ghostBindGroup && fadePipeline)
+                        {
+                            // Its own shape, and none of its own surface: one
+                            // flat pale colour instead of a face and clothes.
+                            pass.SetPipeline(fadePipeline);
+                            pass.SetBindGroup(0, ghostBindGroup);
+                        }
+                        else if (faded && fadePipeline)
+                        {
+                            pass.SetPipeline(fadePipeline);
+                            pass.SetBindGroup(0, model->bindGroups[b]);
+                        }
+                        else
+                        {
+                            pass.SetPipeline(batch.cutout ? cutoutPipeline : pipeline);
+                            pass.SetBindGroup(0, model->bindGroups[b]);
+                        }
+
                         pass.DrawIndexed(batch.indexCount, 1, batch.indexOffset, 0,
                                          static_cast<uint32_t>(body + 1));
                     }
                 }
 
-                // The player's index buffer again, for whatever draws next.
-                pass.SetIndexBuffer(characterIndexBuffer, wgpu::IndexFormat::Uint32);
+                // The player's index buffer again, for whatever draws next -
+                // when there is a player to have one.
+                if (characterIndexBuffer)
+                {
+                    pass.SetIndexBuffer(characterIndexBuffer, wgpu::IndexFormat::Uint32);
+                }
             }
 
             // The zone's exits, standing in the world.
@@ -5300,7 +5492,13 @@ constexpr float kGravity = 26.0f;
                 pass.DrawIndexed(waterIndexCount);
             }
 
-            if (radarPipeline && radarBindGroup)
+            // The game's own furniture, hidden while the client is on its own
+            // screens. A compass and a chat log say nothing during a sign-in,
+            // and the radar sits exactly where a character-select line-up wants
+            // the eye to be.
+            const bool showHud = link ? link->hud() : true;
+
+            if (radarPipeline && radarBindGroup && showHud)
             {
                 RadarUniforms radar{};
                 // Top right, a fifth of the shorter side across, and low
@@ -5650,6 +5848,7 @@ constexpr float kGravity = 26.0f;
                 // Chat, bottom left, oldest at the top. Same atlas as
                 // everything else: this was the last thing still drawing from
                 // the 4x6 bitmap font, which had no lower case at all.
+                if (showHud)
                 {
                     std::vector<std::string> lines = link ? link->chat() : options.testChat;
                     if (lines.empty())
@@ -6636,10 +6835,12 @@ constexpr float kGravity = 26.0f;
                 // to, and replacing those leaves every one of those bind groups
                 // pointing at something that no longer exists. The radar is
                 // built once, from whatever zone the window opened with.
+                makeGhost();
                 uploadCharacter();
 
                 // The new zone's size, for the far plane and the light.
                 radius = zone ? std::max(zone->radius(), 1.0f) : 1.0f;
+                findLineupSpot();
 
                 characterAt = {pending.x, pending.y, pending.z};
                 characterFacing = pending.heading;

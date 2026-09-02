@@ -76,6 +76,12 @@ public static class SignInScreen
                 NativeFormRow.Secret("PASSWORD", password),
             };
 
+            // Sign in first, always. Return presses the first button that can
+            // be pressed, so whatever leads is what typing a password and
+            // pressing return does - and with the picker in front of it, that
+            // was "step to the next saved server" rather than "sign in".
+            rows.Add(NativeFormRow.Button(SignIn));
+
             // A button that names the server it would load and steps to the
             // next one, rather than a list taking up the screen. Only worth
             // showing when there is more than one to step between - with a
@@ -86,7 +92,6 @@ public static class SignInScreen
             }
 
             rows.AddRange([
-                NativeFormRow.Button(SignIn),
                 NativeFormRow.Button(NewAccount),
                 NativeFormRow.Button(Remember),
                 NativeFormRow.Button(Quit),
