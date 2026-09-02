@@ -2,8 +2,11 @@
 
 #include "viewer.h"
 
+#include <SDL3/SDL.h>
+
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <optional>
 #include <string>
@@ -357,5 +360,79 @@ void mh_viewer_stop(MhViewerHandle viewer)
 }
 
 void mh_viewer_destroy(MhViewerHandle viewer) { delete viewer; }
+
+namespace
+{
+/// What the folder chooser produced, filled in by SDL's callback.
+struct FolderChoice
+{
+    bool done{false};
+    bool chosen{false};
+    std::string path;
+};
+
+void SDLCALL onFolderChosen(void* userdata, const char* const* filelist, int /*filter*/)
+{
+    auto* choice = static_cast<FolderChoice*>(userdata);
+    if (choice == nullptr)
+    {
+        return;
+    }
+
+    // A null list is the chooser failing; an empty one is the player pressing
+    // cancel. Both leave `chosen` false, and only the first is worth a
+    // different answer to the caller - which it gets from the return value
+    // below rather than from here.
+    if (filelist != nullptr && filelist[0] != nullptr)
+    {
+        choice->path = filelist[0];
+        choice->chosen = true;
+    }
+    choice->done = true;
+}
+} // namespace
+
+int32_t mh_pick_folder(const char* default_location, char* out, int32_t out_size)
+{
+    if (out == nullptr || out_size <= 0)
+    {
+        return -1;
+    }
+    out[0] = '\0';
+
+    // Video is what owns a chooser, and on a first run nothing has started it
+    // yet. Init is reference counted, so asking again when the renderer is
+    // already up costs nothing and does not tear anything down on the way out.
+    if (!SDL_InitSubSystem(SDL_INIT_VIDEO))
+    {
+        std::printf("could not start SDL video for the folder chooser: %s\n", SDL_GetError());
+        return -1;
+    }
+
+    FolderChoice choice;
+    SDL_ShowOpenFolderDialog(onFolderChosen, &choice, nullptr, default_location, false);
+
+    // SDL answers through the callback, and on a first run there is no other
+    // loop to deliver it - so this one pumps until the answer arrives.
+    while (!choice.done)
+    {
+        SDL_PumpEvents();
+        SDL_Delay(10);
+    }
+
+    if (!choice.chosen)
+    {
+        return 0;
+    }
+
+    if (static_cast<int32_t>(choice.path.size()) >= out_size)
+    {
+        std::printf("the chosen folder's path is longer than the caller's buffer\n");
+        return -1;
+    }
+
+    std::memcpy(out, choice.path.c_str(), choice.path.size() + 1);
+    return 1;
+}
 
 } // extern "C"

@@ -139,6 +139,67 @@ public static class FfxiInstall
         return remembered is not null && IsInstall(remembered) ? remembered : null;
     }
 
+    /// <summary>
+    /// The install to use, asking the player for it if this is a first run.
+    ///
+    /// <para>
+    /// The whole of the first-run check: if a location has been confirmed
+    /// before, it is returned and nothing is shown. Otherwise the platform's
+    /// own folder chooser opens, and what comes back is resolved, checked and
+    /// remembered - so this happens once per machine rather than once per
+    /// launch.
+    /// </para>
+    ///
+    /// <para>
+    /// This has to run before anything else the client draws. With no install
+    /// there are no DATs, so no glyph atlas and nothing to render a screen
+    /// with; a native chooser is the only prompt that works at that point.
+    /// It therefore <b>must be called on the main thread</b>, like anything
+    /// else that opens a window on macOS.
+    /// </para>
+    ///
+    /// <para>
+    /// Returns null if the player cancels, or if what they picked was not an
+    /// installation after <paramref name="attempts"/> tries. Picking the ROM
+    /// folder, or a numbered folder inside it, is fine - see
+    /// <see cref="ResolveChosen"/>.
+    /// </para>
+    /// </summary>
+    public static string? EnsureChosen(int attempts = 3, Action<string>? say = null)
+    {
+        if (Confirmed() is { } already)
+        {
+            return already;
+        }
+
+        for (int attempt = 0; attempt < attempts; attempt++)
+        {
+            say?.Invoke("Where is Final Fantasy XI? Pick the folder holding FTABLE.DAT and ROM.");
+
+            string? picked = MogHouse.Core.Interop.NativeViewer.PickFolder();
+            if (picked is null)
+            {
+                // Cancelled, or no chooser available. Either way there is
+                // nothing to fall back on, so say so rather than looping at
+                // someone who has already declined.
+                say?.Invoke("No folder chosen.");
+                return null;
+            }
+
+            if (ResolveChosen(picked) is { } root)
+            {
+                Remember(root);
+                say?.Invoke($"Using the installation at {root}");
+                return root;
+            }
+
+            say?.Invoke($"{picked} does not look like a Final Fantasy XI installation - " +
+                        "it should contain FTABLE.DAT, VTABLE.DAT and a ROM folder.");
+        }
+
+        return null;
+    }
+
     private static string? LoadRemembered()
     {
         try

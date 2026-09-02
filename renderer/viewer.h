@@ -273,6 +273,48 @@ enum class DeathChoice
     AcceptRaise = 2,
 };
 
+/// What a row of a form is.
+///
+/// Deliberately few. The screens this replaces - login, character select, the
+/// install prompt - are captions, things you type into, and things you press,
+/// and a widget set larger than that is a second UI toolkit to maintain
+/// alongside the game's own.
+enum class FormRowKind
+{
+    Label = 0,
+    Field = 1,
+    /// Typed into like a Field, drawn as dots. Nothing else differs.
+    Secret = 2,
+    Button = 3,
+};
+
+/// One row of a form the renderer draws and the client fills in.
+struct FormRow
+{
+    FormRowKind kind{FormRowKind::Label};
+    /// The caption above a field, the text of a label, or a button's name.
+    std::string text;
+    /// What a Field or Secret currently holds. Ignored for the others.
+    std::string value;
+    /// A button that cannot be pressed, or a field that cannot be typed into.
+    bool enabled{true};
+};
+
+/// A form waiting to be filled in, or nothing.
+///
+/// This is how the client asks for a screen without the renderer knowing what
+/// a login is. The client says what the rows are; the renderer draws them,
+/// takes the typing and the clicks, and reports back which button was pressed
+/// and what the fields held at the time. All the deciding stays on the client
+/// side, where it already lives.
+struct Form
+{
+    std::string title;
+    /// Shown under the buttons, for whatever went wrong last time.
+    std::string message;
+    std::vector<FormRow> rows;
+};
+
 /// The live half of a running viewer: what a caller on another thread can
 /// change while it runs, and how to ask it to stop.
 ///
@@ -459,6 +501,22 @@ public:
     void chooseDeath(DeathChoice choice);
     DeathChoice takeDeathChoice();
 
+    /// Puts a form up, or takes it down with an empty one. Replacing a form
+    /// while one is showing is how a screen moves on to the next.
+    void setForm(Form form);
+
+    /// The form to draw this frame, if any.
+    Form form() const;
+
+    /// Records that a button was pressed, with the fields as they stood.
+    void submitForm(int button, std::vector<std::string> values);
+
+    /// What the player pressed, taken once. Returns false while they are still
+    /// filling it in. `button` indexes the form's rows, so the caller gets back
+    /// the row it supplied rather than a count of buttons it would have to
+    /// track separately.
+    bool takeFormResult(int& button, std::vector<std::string>& values);
+
 private:
     mutable std::mutex mutex_;
     std::vector<RadarEntity> entities_;
@@ -478,6 +536,14 @@ private:
     // nothing the box would draw differently.
     std::atomic<bool> dead_{false};
     std::atomic<bool> raiseOffered_{false};
+
+    // Under the mutex rather than atomic, unlike the flags above: a form is a
+    // title, a message and a list of rows, and a half-swapped one would draw
+    // one screen's captions over another's fields.
+    Form form_;
+    bool formResultReady_{false};
+    int formButton_{-1};
+    std::vector<std::string> formValues_;
     std::atomic<uint32_t> hp_{0};
     std::atomic<uint32_t> mp_{0};
     std::atomic<uint32_t> tp_{0};

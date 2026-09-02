@@ -607,6 +607,39 @@ public sealed partial class NativeViewer : IDisposable
     [LibraryImport(LibraryName)]
     private static unsafe partial int mh_viewer_take_chat(IntPtr viewer, byte* buffer, int capacity);
 
+    [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
+    private static unsafe partial int mh_pick_folder(string? defaultLocation, byte* buffer, int capacity);
+
+    /// <summary>
+    /// Asks the player for a folder, using the platform's own chooser.
+    /// Returns null when they cancel or the chooser cannot be opened.
+    ///
+    /// <para>
+    /// Needs no viewer, because the one thing it is for happens before there
+    /// is one: with no game files there are no DATs, no glyph atlas, and
+    /// nothing to draw a screen with. This is the only prompt that works on a
+    /// first run, which is why it is a native chooser rather than a form.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Must be called on the main thread</b>, and it blocks until answered.
+    /// macOS opens no window of any kind off the main thread.
+    /// </para>
+    /// </summary>
+    public static unsafe string? PickFolder(string? defaultLocation = null)
+    {
+        // No explicit setup call: the static constructor registers the library
+        // resolver, and touching this method is what runs it.
+
+        // Long enough for any real path; the native side refuses rather than
+        // truncating if somebody manages a longer one.
+        const int capacity = 4096;
+        byte* buffer = stackalloc byte[capacity];
+
+        int result = mh_pick_folder(defaultLocation, buffer, capacity);
+        return result == 1 ? Marshal.PtrToStringUTF8((IntPtr)buffer) : null;
+    }
+
     [LibraryImport(LibraryName)]
     private static partial void mh_viewer_place_character(IntPtr viewer, float x, float y, float z, float heading);
 

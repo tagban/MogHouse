@@ -1051,6 +1051,58 @@ mh::DeathChoice mh::ViewerLink::takeDeathChoice()
     return static_cast<DeathChoice>(deathChoice_.exchange(static_cast<int>(DeathChoice::None)));
 }
 
+void mh::ViewerLink::setForm(Form form)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    form_ = std::move(form);
+
+    // A new form clears whatever the last one produced. Otherwise a result the
+    // client had not collected yet would be handed back as this screen's
+    // answer, which is how a login refusal becomes a character selection.
+    formResultReady_ = false;
+    formButton_ = -1;
+    formValues_.clear();
+}
+
+mh::Form mh::ViewerLink::form() const
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    return form_;
+}
+
+void mh::ViewerLink::submitForm(int button, std::vector<std::string> values)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+
+    // First press wins. A second one before the client has read the first
+    // would replace an answer already given with whatever the fields hold now.
+    if (formResultReady_)
+    {
+        return;
+    }
+
+    formResultReady_ = true;
+    formButton_ = button;
+    formValues_ = std::move(values);
+}
+
+bool mh::ViewerLink::takeFormResult(int& button, std::vector<std::string>& values)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (!formResultReady_)
+    {
+        return false;
+    }
+
+    button = formButton_;
+    values = std::move(formValues_);
+
+    formResultReady_ = false;
+    formButton_ = -1;
+    formValues_.clear();
+    return true;
+}
+
 void mh::ViewerLink::stop() { stop_ = true; }
 
 bool mh::ViewerLink::stopping() const { return stop_; }

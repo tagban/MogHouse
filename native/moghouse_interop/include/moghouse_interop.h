@@ -244,6 +244,25 @@ MH_API void mh_viewer_stop(MhViewerHandle viewer);
 /// Frees the viewer. Stop it and let mh_viewer_run return first.
 MH_API void mh_viewer_destroy(MhViewerHandle viewer);
 
+/// Asks the player where the game is, with the platform's own folder chooser.
+///
+/// Needs no viewer, because it runs before there is one. On a first run there
+/// is no install, so no DATs, so no glyph atlas and nothing to draw a screen
+/// with - a native chooser is the only thing that works with no game data at
+/// all, and SDL gives the same call on all three platforms.
+///
+/// **Must be called on the main thread.** macOS will not open a window of any
+/// kind anywhere else, this one included.
+///
+/// Blocks until the player chooses or cancels, pumping events while it waits:
+/// SDL reports the answer through a callback, and on a first run there is no
+/// other event loop running to deliver it. Writes a NUL-terminated path into
+/// `out`.
+///
+/// Returns 1 when a folder was chosen, 0 when cancelled, and -1 if the chooser
+/// could not be opened at all.
+MH_API int32_t mh_pick_folder(const char* default_location, char* out, int32_t out_size);
+
 #ifdef __cplusplus
 }
 #endif
