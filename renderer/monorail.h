@@ -138,9 +138,63 @@ public:
             car.placedHeading = headingNear(car.at);
         }
 
+        // Where it calls. The ends are stops in their own right, so a line with
+        // none named still behaves the way it did: out, wait, and back.
+        stops_ = {0.0f, routeLength_ - train};
+        atStop_ = 0;
+
         travelled_ = 0.0f;
         return true;
     }
+
+    /// Sets where the train calls, as distances along the line from the end it
+    /// starts at. The two ends are added if they are not already there, because
+    /// a train that runs past the end of its track is worse than one that stops
+    /// somewhere odd.
+    void setStops(std::vector<float> stops)
+    {
+        if (!present())
+        {
+            return;
+        }
+
+        const float train = spacing_ * static_cast<float>(cars_.size() - 1);
+        const float last = routeLength_ - train;
+
+        stops.push_back(0.0f);
+        stops.push_back(last);
+        for (float& stop : stops)
+        {
+            stop = std::clamp(stop, 0.0f, last);
+        }
+
+        std::sort(stops.begin(), stops.end());
+        stops.erase(std::unique(stops.begin(), stops.end(),
+                                [](float a, float b) { return std::fabs(a - b) < 1.0f; }),
+                    stops.end());
+
+        stops_ = std::move(stops);
+
+        // Whichever it is nearest, so setting the stops mid-journey does not
+        // send it back to the beginning.
+        atStop_ = 0;
+        for (size_t i = 1; i < stops_.size(); ++i)
+        {
+            if (std::fabs(stops_[i] - travelled_) < std::fabs(stops_[atStop_] - travelled_))
+            {
+                atStop_ = i;
+            }
+        }
+    }
+
+    /// Which stop it is standing at, or -1 while it is moving.
+    int stop() const { return dwell_ > 0.0f ? static_cast<int>(atStop_) : -1; }
+
+    /// How many stops the line has.
+    size_t stops() const { return stops_.size(); }
+
+    /// How far along the line a stop is.
+    float stopAt(size_t index) const { return index < stops_.size() ? stops_[index] : 0.0f; }
 
     /// Whether this zone has a railway at all.
     bool present() const { return !cars_.empty() && route_.size() > 1; }
@@ -176,25 +230,31 @@ public:
         }
 
         const float train = spacing_ * static_cast<float>(cars_.size() - 1);
-        const float run = routeLength_ - train;
 
         travelled_ += kSpeed * seconds * (forward_ ? 1.0f : -1.0f);
 
-        // At an end it waits, then goes back the way it came. There is no loop
-        // to run round - the line has two ends - and a train that teleported
-        // back to the start would be the one thing on this screen that could
-        // not be believed.
-        if (travelled_ >= run)
+        // On to the next stop, turning round at the ends. There is no loop to
+        // run - the line has two ends - and a train that teleported back to the
+        // start would be the one thing here that could not be believed.
+        const size_t next = forward_ ? atStop_ + 1 : (atStop_ == 0 ? 0 : atStop_ - 1);
+        const float target = std::clamp(stops_[std::min(next, stops_.size() - 1)], 0.0f, routeLength_ - train);
+
+        if ((forward_ && travelled_ >= target) || (!forward_ && travelled_ <= target))
         {
-            travelled_ = run;
-            forward_ = false;
+            travelled_ = target;
+            atStop_ = std::min(next, stops_.size() - 1);
             dwell_ = kDwellSeconds;
-        }
-        else if (travelled_ <= 0.0f)
-        {
-            travelled_ = 0.0f;
-            forward_ = true;
-            dwell_ = kDwellSeconds;
+
+            // Only the ends turn it round. Everywhere else it carries on the
+            // way it was going.
+            if (atStop_ + 1 >= stops_.size())
+            {
+                forward_ = false;
+            }
+            else if (atStop_ == 0)
+            {
+                forward_ = true;
+            }
         }
 
         // The leading car is furthest along; the rest trail it by a car's
@@ -362,9 +422,16 @@ private:
                 const Vec3 at = from + (to - from) * t;
                 car.at = Vec3{at.x, rideHeight_, at.z};
 
-                // Along the line it is on, turned round when it is going the
-                // other way - a train reverses rather than driving backwards.
-                const Vec3 way = forward_ ? (to - from) : (from - to);
+                // Along the line, and always the same way along it, whichever
+                // way the train is going.
+                //
+                // Turning the cars round to face the direction of travel is
+                // wrong for this train, and wrong only on the return leg, which
+                // is why it survived a look: it has a cab at each end - the two
+                // mono_a1 are placed facing opposite ways - so it drives from
+                // the other end rather than turning round. Rotating them put
+                // the rear cab at the front on the way back.
+                const Vec3 way = to - from;
                 car.heading = std::atan2(way.x, way.z);
 
                 writeTransform(car);
@@ -413,6 +480,8 @@ private:
     float spacing_{21.0f};
     float rideHeight_{};
     float travelled_{};
+    std::vector<float> stops_;
+    size_t atStop_{0};
     float dwell_{kDwellSeconds};
     float lamps_{0.0f};
     bool forward_{true};
