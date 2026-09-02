@@ -69,11 +69,20 @@ constexpr wgpu::TextureFormat kDepthFormat = wgpu::TextureFormat::Depth24Plus;
 /// Where along the line a character-select line-up stands, and how far back
 /// from it.
 ///
-/// Far enough along that the train is there within a few seconds of setting
-/// off, and far enough back that four people and a train fit in the shot
-/// without the train running through them.
-inline constexpr float kLineupAlongTrack = 150.0f;
+/// Well inside the long diagonal, which runs unbroken from 168 to 528 - the
+/// only stretch with room for the whole train, which is sixty-three units long,
+/// to pass without touching a bend at either end.
+///
+/// That matters because the cars are laid along the route one at a time and
+/// each turns to the piece of track it is on, so through a corner they splay
+/// rather than following each other round it. The first attempt at 150 put the
+/// row immediately after a forty-seven degree bend, which is the worst place on
+/// the line to watch from.
+inline constexpr float kLineupAlongTrack = 300.0f;
 inline constexpr float kLineupFromTrack = 26.0f;
+
+/// How long after the line-up appears the train reaches it.
+inline constexpr float kLineupTrainSeconds = 3.0f;
 
 /// How far below a carriage's own origin somebody riding in it stands.
 ///
@@ -2908,6 +2917,10 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     /// with the T key, so both have to be asked.
     bool ridingHere = false;
 
+    /// Whether a character-select line-up was up last frame, so the train can
+    /// be started the moment one appears.
+    bool lineupWas = false;
+
     /// Which of the zone's draws are the train, so they can be drawn again to
     /// light them. Indices into zone->draws.
     std::vector<size_t> monorailDraws;
@@ -5051,7 +5064,17 @@ constexpr float kGravity = 26.0f;
             // stand is worked out here, because it takes the zone's collision
             // to find the floor and the camera to frame them, and neither of
             // those crosses the boundary.
-            if (link->lineup() && !radarEntities.empty())
+            // The line-up has just gone up, so start the train's run now.
+            // Otherwise it has been going since the window opened and is
+            // wherever a minute of signing in happened to leave it.
+            const bool lineupNow = link->lineup() && !radarEntities.empty();
+            if (lineupNow && !lineupWas)
+            {
+                monorail.approach(kLineupAlongTrack, kLineupTrainSeconds);
+            }
+            lineupWas = lineupNow;
+
+            if (lineupNow)
             {
                 const float spacing = 1.9f;
                 const float half = static_cast<float>(radarEntities.size() - 1) * 0.5f;

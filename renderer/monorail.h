@@ -238,6 +238,36 @@ public:
     /// for nine seconds, which is most of the time anybody looks at it.
     void departNow() { dwell_ = 0.0f; }
 
+    /// Puts the train a few seconds short of somewhere, running towards it.
+    ///
+    /// Time on this line is measured from when the renderer started, and a
+    /// screen the player reaches whenever they finish typing is not. Left to
+    /// run, the train is wherever a minute of signing in has left it - halfway
+    /// out, or coming back, or standing at an end. This starts its approach
+    /// when there is finally somebody to watch it.
+    void approach(float target, float seconds)
+    {
+        if (!present())
+        {
+            return;
+        }
+
+        const float train = spacing_ * static_cast<float>(cars_.size() - 1);
+
+        // travelled_ trails the leading car by the length of the train, so the
+        // arithmetic is about where the front of it is rather than the back.
+        travelled_ = std::clamp(target - kSpeed * seconds - train, 0.0f, routeLength_ - train);
+        forward_ = true;
+        dwell_ = 0.0f;
+        atStop_ = 0;
+
+        for (size_t i = 0; i < cars_.size(); ++i)
+        {
+            placeAlong(cars_[i], std::clamp(travelled_ + train - spacing_ * static_cast<float>(i),
+                                            0.0f, routeLength_));
+        }
+    }
+
     /// Whether this zone has a railway at all.
     bool present() const { return !cars_.empty() && route_.size() > 1; }
 
