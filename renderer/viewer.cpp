@@ -5278,7 +5278,14 @@ constexpr float kGravity = 26.0f;
                 }
             }
 
-            if (platePipeline && plateBindGroup && !radarEntities.empty())
+            // Not gated on there being entities. Our own nameplate is laid out
+            // in here before the entity loop, and it does not come from the
+            // entity list at all - so requiring one made the player anonymous
+            // whenever nobody else was nearby, which is exactly when a name
+            // over your own head is the only one on screen. The inner
+            // `named > 0` check already skips the draw when there is nothing
+            // to say.
+            if (platePipeline && plateBindGroup)
             {
                 NameplateUniforms plate{};
                 std::memcpy(plate.viewProjection, viewProjection.m, sizeof(plate.viewProjection));
