@@ -244,6 +244,58 @@ MH_API void mh_viewer_stop(MhViewerHandle viewer);
 /// Frees the viewer. Stop it and let mh_viewer_run return first.
 MH_API void mh_viewer_destroy(MhViewerHandle viewer);
 
+/// One row of a form the client asks the renderer to draw.
+///
+/// Fixed-width strings for the same reason MhRadarEntity uses them: the array
+/// crosses as a pointer and stays blittable, and nobody owns a lifetime on the
+/// other side of the boundary. The renderer only draws about forty characters
+/// of a row anyway, so the widths here are generous rather than tight.
+typedef struct MhFormRow
+{
+    /// 0 label, 1 field, 2 secret (typed, drawn as dots), 3 button.
+    int32_t kind;
+
+    /// 0 for a button that cannot be pressed or a field that cannot be typed
+    /// into. Drawn greyed either way, so it reads as unavailable rather than
+    /// missing.
+    int32_t enabled;
+
+    /// The caption over a field, a label's text, or a button's name.
+    char text[64];
+
+    /// What a field starts with. Ignored for labels and buttons, and replaced
+    /// by whatever the player types.
+    char value[128];
+} MhFormRow;
+
+/// Puts a form up, replacing any that was showing. A count of zero takes it
+/// down.
+///
+/// The renderer knows nothing about what a login is: the client says what the
+/// rows are and reads back what was typed, so every decision stays on the
+/// client side where it already lives.
+MH_API void mh_viewer_set_form(MhViewerHandle viewer, const char* title, const char* message,
+                               const MhFormRow* rows, int32_t count);
+
+/// What the player pressed, taken once. Returns 0 while they are still filling
+/// it in, so a caller polls this the way it polls the jump.
+///
+/// `button` receives the index of the row that was pressed - the caller gets
+/// back the row it supplied rather than a count it would have to track. Each
+/// row's value is written into `values` NUL terminated, one after another, in
+/// the order the rows were given.
+///
+/// Returns how many values were written, which is how the caller knows where
+/// the list ends. A trailing marker cannot do that job here: label and button
+/// rows always come back empty, and an empty value is a lone NUL, so the first
+/// such row would be read as the end of the list.
+///
+/// `capacity` should be at least 129 bytes per row - the widest value a
+/// MhFormRow can carry, plus its terminator. A value that does not fit is
+/// dropped along with everything after it, and the count reflects that.
+MH_API int32_t mh_viewer_take_form_result(MhViewerHandle viewer, int32_t* button, char* values,
+                                          int32_t capacity);
+
 /// Asks the player where the game is, with the platform's own folder chooser.
 ///
 /// Needs no viewer, because it runs before there is one. On a first run there

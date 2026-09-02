@@ -147,6 +147,74 @@ public enum NativeLink
     Issues = 2,
 }
 
+/// <summary>What a form row is for. Cast straight across; the values match MhFormRow.</summary>
+public enum NativeFormRowKind
+{
+    /// <summary>Text on its own line. Not focusable.</summary>
+    Label = 0,
+
+    /// <summary>A box the player types into.</summary>
+    Field = 1,
+
+    /// <summary>A field drawn as dots. Still returned in the clear.</summary>
+    Secret = 2,
+
+    /// <summary>Something to press, which ends the form.</summary>
+    Button = 3,
+}
+
+/// <summary>
+/// A row of a form, as callers write it.
+///
+/// The nested factories read better at a call site than four bools would:
+/// <c>NativeFormRow.Secret("Password")</c> says what it is.
+/// </summary>
+public sealed record NativeFormRow(NativeFormRowKind Kind, string Text, string Value = "", bool Enabled = true)
+{
+    public static NativeFormRow Label(string text) => new(NativeFormRowKind.Label, text);
+
+    public static NativeFormRow Field(string caption, string value = "", bool enabled = true) =>
+        new(NativeFormRowKind.Field, caption, value, enabled);
+
+    public static NativeFormRow Secret(string caption, string value = "", bool enabled = true) =>
+        new(NativeFormRowKind.Secret, caption, value, enabled);
+
+    public static NativeFormRow Button(string text, bool enabled = true) =>
+        new(NativeFormRowKind.Button, text, "", enabled);
+}
+
+/// <summary>
+/// What came back when a form was submitted: which button, and what every row
+/// held at that moment.
+/// </summary>
+/// <param name="Button">
+/// The index of the row that was pressed, in the list that was handed to
+/// <see cref="NativeViewer.ShowForm"/> - so the caller gets back the row it
+/// supplied rather than a count it would have to keep track of.
+/// </param>
+/// <param name="Values">
+/// One entry per row, in the same order. Labels and buttons come back empty;
+/// fields come back with whatever was typed.
+/// </param>
+public sealed record NativeFormResult(int Button, IReadOnlyList<string> Values)
+{
+    /// <summary>
+    /// What a row held, or an empty string if that row is not one there is a
+    /// value for. Saves every caller writing the same bounds check.
+    /// </summary>
+    public string this[int row] => row >= 0 && row < Values.Count ? Values[row] : string.Empty;
+}
+
+/// <summary>Blittable, laid out to match MhFormRow.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeFormRowData
+{
+    public int Kind;
+    public int Enabled;
+    public unsafe fixed byte Text[64];
+    public unsafe fixed byte Value[128];
+}
+
 /// <summary>What to open the viewer on.</summary>
 public sealed record NativeViewerOptions
 {
@@ -495,6 +563,144 @@ public sealed partial class NativeViewer : IDisposable
     }
 
     /// <summary>
+    /// Puts a form up in the renderer, replacing whatever was showing.
+    ///
+    /// <para>
+    /// The renderer knows nothing about what a login or a character list is.
+    /// It draws rows and reports a press; every decision about what the rows
+    /// mean stays here, on the side that already holds the session and the
+    /// protocol.
+    /// </para>
+    ///
+    /// <para>
+    /// Safe from any thread: the rows are copied into the renderer's own
+    /// storage before this returns, so nothing here has to outlive the call.
+    /// </para>
+    /// </summary>
+    public unsafe void ShowForm(string title, string message, IReadOnlyList<NativeFormRow> rows)
+    {
+        if (_disposed || _handle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        // stackalloc rather than an array: a form is a handful of rows, and
+        // this way there is nothing for the collector to pin while the native
+        // side reads it.
+        NativeFormRowData* data = stackalloc NativeFormRowData[rows.Count];
+        for (int i = 0; i < rows.Count; i++)
+        {
+            NativeFormRow row = rows[i];
+            data[i].Kind = (int)row.Kind;
+            data[i].Enabled = row.Enabled ? 1 : 0;
+            WriteFixed(data[i].Text, 64, row.Text);
+            WriteFixed(data[i].Value, 128, row.Value);
+        }
+
+        mh_viewer_set_form(_handle, title, message, data, rows.Count);
+    }
+
+    /// <summary>Takes the form back down, showing whatever is behind it.</summary>
+    public unsafe void HideForm()
+    {
+        if (!_disposed && _handle != IntPtr.Zero)
+        {
+            mh_viewer_set_form(_handle, string.Empty, string.Empty, null, 0);
+        }
+    }
+
+    /// <summary>
+    /// What the player pressed, or null while they are still filling the form
+    /// in. Polled the same way <see cref="TakeChat"/> is, and answers once.
+    /// </summary>
+    public unsafe NativeFormResult? TakeFormResult()
+    {
+        if (_disposed || _handle == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        // A single value is capped at 128 by the struct that carried it in, so
+        // this holds sixty-odd rows end to end - more than a character list,
+        // which is the longest form there is.
+        const int capacity = 8192;
+        byte* buffer = stackalloc byte[capacity];
+
+        int count = mh_viewer_take_form_result(_handle, out int button, buffer, capacity);
+        if (count == 0)
+        {
+            return null;
+        }
+
+        return new NativeFormResult(button, SplitValues(new ReadOnlySpan<byte>(buffer, capacity), count));
+    }
+
+    /// <summary>
+    /// Unpacks what the renderer wrote: <paramref name="count"/> NUL
+    /// terminated values, in the order the rows were given.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Counted rather than terminated. Label and button rows come back empty,
+    /// an empty value is a lone NUL, and so a trailing marker would be
+    /// indistinguishable from the first caption in the form - the list would
+    /// end before the fields anyone actually typed into.
+    /// </para>
+    /// <para>
+    /// Split out from the call above so it can be tested without a viewer, and
+    /// so the pointer arithmetic lives in one place.
+    /// </para>
+    /// </remarks>
+    internal static IReadOnlyList<string> SplitValues(ReadOnlySpan<byte> packed, int count)
+    {
+        var values = new List<string>(Math.Max(count, 0));
+
+        for (int i = 0; i < count && !packed.IsEmpty; i++)
+        {
+            int end = packed.IndexOf((byte)0);
+            if (end < 0)
+            {
+                // No terminator left, so the buffer was filled to its very end.
+                // Take what is there rather than dropping it.
+                values.Add(System.Text.Encoding.UTF8.GetString(packed));
+                break;
+            }
+
+            values.Add(System.Text.Encoding.UTF8.GetString(packed[..end]));
+            packed = packed[(end + 1)..];
+        }
+
+        return values;
+    }
+
+    /// <summary>
+    /// Writes a string into one of the fixed-width arrays a form row carries,
+    /// truncated to fit and always NUL terminated.
+    /// </summary>
+    /// <remarks>
+    /// Cut to ASCII for the same reason <see cref="NativeRadarEntity.SetName"/>
+    /// is: the renderer's font has no accents and turns what it does not know
+    /// into a space, so it is better to make that substitution here, in one
+    /// place, than to send bytes that quietly come out wrong.
+    /// </remarks>
+    internal static unsafe void WriteFixed(byte* target, int capacity, string? value)
+    {
+        int written = 0;
+        if (!string.IsNullOrEmpty(value))
+        {
+            foreach (char c in value)
+            {
+                if (written >= capacity - 1)
+                {
+                    break;
+                }
+                target[written++] = c < 128 ? (byte)c : (byte)' ';
+            }
+        }
+        target[written] = 0;
+    }
+
+    /// <summary>
     /// Puts the character somewhere, because the server said so. Y is up here;
     /// the caller converts from the protocol's frame.
     /// </summary>
@@ -606,6 +812,14 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static unsafe partial int mh_viewer_take_chat(IntPtr viewer, byte* buffer, int capacity);
+
+    [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
+    private static unsafe partial void mh_viewer_set_form(IntPtr viewer, string title, string message,
+                                                          NativeFormRowData* rows, int count);
+
+    [LibraryImport(LibraryName)]
+    private static unsafe partial int mh_viewer_take_form_result(IntPtr viewer, out int button,
+                                                                 byte* values, int capacity);
 
     [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
     private static unsafe partial int mh_pick_folder(string? defaultLocation, byte* buffer, int capacity);

@@ -4,6 +4,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -357,6 +358,97 @@ void mh_viewer_stop(MhViewerHandle viewer)
     {
         viewer->link.stop();
     }
+}
+
+// Pinned because the C# side declares this layout a second time, by hand, and
+// a mismatch would not fail to build on either side - it would just read the
+// wrong bytes. If one of these fires, NativeFormRowData needs the same edit.
+static_assert(sizeof(MhFormRow) == 200, "MhFormRow layout changed; update NativeFormRowData");
+static_assert(offsetof(MhFormRow, kind) == 0, "MhFormRow.kind moved");
+static_assert(offsetof(MhFormRow, enabled) == 4, "MhFormRow.enabled moved");
+static_assert(offsetof(MhFormRow, text) == 8, "MhFormRow.text moved");
+static_assert(offsetof(MhFormRow, value) == 72, "MhFormRow.value moved");
+
+void mh_viewer_set_form(MhViewerHandle viewer, const char* title, const char* message,
+                        const MhFormRow* rows, int32_t count)
+{
+    if (viewer == nullptr)
+    {
+        return;
+    }
+
+    mh::Form form;
+    form.title = title ? title : "";
+    form.message = message ? message : "";
+
+    if (rows != nullptr && count > 0)
+    {
+        form.rows.reserve(static_cast<size_t>(count));
+        for (int32_t i = 0; i < count; ++i)
+        {
+            const MhFormRow& from = rows[i];
+
+            mh::FormRow row;
+            row.kind = static_cast<mh::FormRowKind>(from.kind);
+            row.enabled = from.enabled != 0;
+
+            // strnlen rather than trusting the terminator: the arrays are
+            // fixed width and a caller that filled one exactly would leave no
+            // NUL to find.
+            row.text.assign(from.text, strnlen(from.text, sizeof(from.text)));
+            row.value.assign(from.value, strnlen(from.value, sizeof(from.value)));
+
+            form.rows.push_back(std::move(row));
+        }
+    }
+
+    viewer->link.setForm(std::move(form));
+}
+
+int32_t mh_viewer_take_form_result(MhViewerHandle viewer, int32_t* button, char* values,
+                                   int32_t capacity)
+{
+    if (viewer == nullptr || button == nullptr || values == nullptr || capacity <= 0)
+    {
+        return 0;
+    }
+
+    int pressed = -1;
+    std::vector<std::string> taken;
+    if (!viewer->link.takeFormResult(pressed, taken))
+    {
+        return 0;
+    }
+
+    // Packed one after another rather than returned one at a time: a form is
+    // read once when a button is pressed, and a call per field would mean
+    // holding the answer across several crossings while the player carries on
+    // typing into it.
+    //
+    // The count is returned rather than marked in the buffer. An empty value is
+    // a lone NUL and every label and button row produces one, so a terminator
+    // would end the list at the first caption instead of after the last field.
+    int32_t at = 0;
+    int32_t written = 0;
+    for (const std::string& value : taken)
+    {
+        const int32_t needed = static_cast<int32_t>(value.size()) + 1;
+        if (at + needed > capacity)
+        {
+            // Out of room. Better to hand back what fits and say the press
+            // happened than to lose the press entirely - the alternative is a
+            // button that visibly does nothing.
+            std::printf("form result did not fit in %d bytes; %zu values were dropped\n", capacity,
+                        taken.size() - static_cast<size_t>(written));
+            break;
+        }
+        std::memcpy(values + at, value.c_str(), static_cast<size_t>(needed));
+        at += needed;
+        ++written;
+    }
+
+    *button = pressed;
+    return written;
 }
 
 void mh_viewer_destroy(MhViewerHandle viewer) { delete viewer; }
