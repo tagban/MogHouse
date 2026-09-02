@@ -48,6 +48,37 @@ arriving and being rejected rather than not arriving: this protocol drops what
 it does not like without saying so, which is why there is nothing in the map
 log about it.
 
+## The server's side of it, traced
+
+Since the server is local, its own code answers most of this.
+
+`cleanupSessions` does not care about movement. It keys on `last_update`:
+
+    if (now > map_session_data->last_update + 5s)                    // mark link-dead
+    if (now > map_session_data->last_update + MAX_TIME_LASTUPDATE)   // clear the session
+
+with `MAX_TIME_LASTUPDATE = 60`, which is the 68s we measured. A player standing
+perfectly still keeps their session alive, so an unchanging position is not why
+this dies.
+
+`last_update` is refreshed in exactly one place, at the top of
+`MapNetworking::parse`:
+
+    if (PSession->blowfish.status != BLOWFISH_PENDING_ZONE &&
+        PSession->blowfish.status != BLOWFISH_WAITING)
+    {
+        PSession->tapLastUpdate();   // "Update the time we last got a char sync packet"
+    }
+
+The `0x00A` we sent did reach the server and did its job - the map log shows the
+zone-in - which sets `BLOWFISH_ACCEPTED`. So the status gate is open, and any
+later packet reaching `parse` would refresh the timer.
+
+It never was refreshed. **So the packets after login are not reaching `parse` at
+all** - they are being dropped in decryption, before any handler runs. That is
+consistent with the client receiving nothing back: the server only answers
+packets it accepted.
+
 ## The hypothesis, and why it is only that
 
 The login packet is accepted and the reply decodes - so at that moment the
@@ -65,8 +96,24 @@ at or just after zone-in, the client cannot learn it, because it never receives
 another packet to fail a checksum on. That is a deadlock rather than a
 mistake in the rotation logic, and it would look exactly like this.
 
-**Treat that as unconfirmed.** It fits every symptom and it is where I would
-look first, but I could not separate it from the alternative below.
+The server's own comment in the `0x00A` handler says as much:
+
+> Key is already assumed to be incremented correctly
+
+So it expects the client's key to have advanced by the time the zone-in
+completes. If the client is still on the previous key, every packet it sends
+fails decryption, never reaches `parse`, never taps the timer - and the server,
+having nothing valid to answer, sends nothing, so the client never gets the
+failed checksum that is its only cue to advance. Each side is waiting for the
+other.
+
+If that is right, the fix is for the client to advance its key at zone-in
+rather than reactively, and `TryAdvanceKey` stays only as a recovery path.
+
+**Treat that as unconfirmed.** Every measurement fits it and the server comment
+supports it, but nothing here proves the client is on the wrong key - only that
+its packets are refused before `parse`. Instrumenting the server side, or
+comparing the key state against a Windows client that works, would settle it.
 
 ## The thing you can settle and I cannot
 
