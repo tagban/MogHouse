@@ -30,8 +30,19 @@ namespace ffxi
 class BgwStream
 {
 public:
-    static constexpr uint32_t kSampleRate = 44100;
+    /// What to open a device at before any file has been read. Most of the
+    /// music is this, and a stream's actual rate comes from the file.
+    static constexpr uint32_t kDefaultSampleRate = 44100;
     static constexpr int kChannels = 2;
+
+    /// This file's rate, in Hz.
+    ///
+    /// Stored as a pair that sums to it: a value at +0x20 and the rate minus
+    /// that value at +0x24. Not a constant, which is the point - 29 of the 111
+    /// tracks in a retail install are 48000 and the rest are 44100. Played at a
+    /// fixed 44100 they run about nine per cent slow, which is flat rather than
+    /// obviously broken, and is why it went unnoticed.
+    uint32_t sampleRate() const { return sampleRate_; }
 
     /// Opens a .bgw, or returns false if it is not one.
     bool open(const std::filesystem::path& path);
@@ -62,6 +73,7 @@ private:
 
     std::ifstream file_;
     uint32_t track_{};
+    uint32_t sampleRate_{kDefaultSampleRate};
     uint32_t blocks_{};
     uint32_t loopBlock_{kNoLoop};
     uint32_t dataOffset_{};

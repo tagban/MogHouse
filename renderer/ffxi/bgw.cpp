@@ -40,6 +40,16 @@ bool BgwStream::open(const std::filesystem::path& path)
     }
 
     track_ = readAt<uint32_t>(header, 0x14);
+
+    // The rate is stored as a pair that sums to it, at +0x20 and +0x24. Why it
+    // is split like that is anyone's guess - it is not a checksum, since either
+    // half is free - but every file in a retail install adds up to a rate, and
+    // the sound effects use the same trick.
+    const uint32_t rateA = readAt<uint32_t>(header, 0x20);
+    const uint32_t rateB = readAt<uint32_t>(header, 0x24);
+    const uint32_t rate = rateA + rateB;   // deliberately wrapping
+    sampleRate_ = (rate >= 8000 && rate <= 192000) ? rate : kDefaultSampleRate;
+
     blocks_ = readAt<uint32_t>(header, 0x18);
     loopBlock_ = readAt<uint32_t>(header, 0x1C);
     dataOffset_ = readAt<uint32_t>(header, 0x28);

@@ -87,7 +87,7 @@ Music::Music()
     SDL_AudioSpec spec{};
     spec.format = SDL_AUDIO_S16LE;
     spec.channels = ffxi::BgwStream::kChannels;
-    spec.freq = static_cast<int>(ffxi::BgwStream::kSampleRate);
+    spec.freq = static_cast<int>(ffxi::BgwStream::kDefaultSampleRate);
 
     state_->stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, feed, state_.get());
     if (!state_->stream)
@@ -144,7 +144,22 @@ bool Music::play(const std::filesystem::path& path)
     }
 
     state_->playing = wanted;
-    std::printf("music: track %u%s\n", state_->source.track(),
+
+    // Tell the stream what rate this track is, rather than assuming the one the
+    // device was opened at. Twenty-nine of the hundred and eleven tracks in a
+    // retail install are 48000 and the rest are 44100; played at a flat 44100
+    // those twenty-nine run about nine per cent slow, which sounds like a
+    // slightly flat recording rather than like a bug, and so went unnoticed.
+    SDL_AudioSpec source{};
+    source.format = SDL_AUDIO_S16LE;
+    source.channels = ffxi::BgwStream::kChannels;
+    source.freq = static_cast<int>(state_->source.sampleRate());
+    if (!SDL_SetAudioStreamFormat(state_->stream, &source, nullptr))
+    {
+        std::printf("music: could not set %u Hz: %s\n", state_->source.sampleRate(), SDL_GetError());
+    }
+
+    std::printf("music: track %u, %u Hz%s\n", state_->source.track(), state_->source.sampleRate(),
                 state_->source.loops() ? ", looping" : ", once");
     return true;
 }
