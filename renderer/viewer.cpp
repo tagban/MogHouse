@@ -2680,7 +2680,32 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                 }
             }
             std::printf("\n");
-            return loadCharacter(paths, textures);
+
+            std::optional<LoadedCharacter> built = loadCharacter(paths, textures);
+
+            // What this body can be made to do. The clips are named rather
+            // than numbered - idl0, wlk0, run0 - and there is no index of them
+            // anywhere, so the way to find out whether a race can sit down is
+            // to ask it.
+            if (built && SDL_getenv("MOGHOUSE_CLIPS") != nullptr)
+            {
+                std::vector<std::string> named;
+                named.reserve(built->animations.size());
+                for (const auto& [clip, _] : built->animations)
+                {
+                    named.push_back(clip);
+                }
+                std::sort(named.begin(), named.end());
+
+                std::printf("clips (%zu):", named.size());
+                for (size_t i = 0; i < named.size(); ++i)
+                {
+                    std::printf("%s%s", i % 12 == 0 ? "\n  " : " ", named[i].c_str());
+                }
+                std::printf("\n");
+            }
+
+            return built;
         }
         catch (const std::exception& e)
         {
@@ -2900,8 +2925,32 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             }
         }
 
-        std::printf("monorail: %zu cars on %.0f units of track, %zu draws to light\n", monorail.cars().size(),
-                    static_cast<double>(monorail.routeLength()), monorailDraws.size());
+        // Where it calls, as distances along the line. Picked by riding it and
+        // marking the places a stop belongs, rather than spaced evenly - a
+        // station goes where there is a reason to get off, and the line runs
+        // past a signpost, a bridge and a walled mill before it reaches the
+        // far end. The two ends are stops as well and setStops adds them.
+        std::vector<float> stops{127.0f, 262.0f, 468.0f, 1050.0f};
+        if (const char* wanted = SDL_getenv("MOGHOUSE_TRAIN_STOPS"))
+        {
+            stops.clear();
+            for (const char* at = wanted; *at;)
+            {
+                char* end = nullptr;
+                const float value = std::strtof(at, &end);
+                if (end == at)
+                {
+                    break;
+                }
+                stops.push_back(value);
+                at = (*end == ',') ? end + 1 : end;
+            }
+        }
+        monorail.setStops(std::move(stops));
+
+        std::printf("monorail: %zu cars on %.0f units of track, %zu stops, %zu draws to light\n",
+                    monorail.cars().size(), static_cast<double>(monorail.routeLength()),
+                    monorail.stops(), monorailDraws.size());
     };
     findMonorail();
 

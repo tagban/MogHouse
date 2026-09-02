@@ -146,5 +146,13 @@ ViewerOptions optionsFromEnvironment(int argc, char** argv)
 
 int main(int argc, char** argv)
 {
+    // A line at a time, so a log being written to a file can be read while the
+    // viewer is still running. Redirected to a file, stdout is block buffered:
+    // everything printed sits in the buffer until it fills or the process
+    // exits, so pressing p and then going to look at the log shows nothing, and
+    // the positions only appear once the window is closed. The client's own
+    // path already turns buffering off for the same reason.
+    std::setvbuf(stdout, nullptr, _IOLBF, 0);
+
     return mh::runViewer(mh::optionsFromEnvironment(argc, argv));
 }
