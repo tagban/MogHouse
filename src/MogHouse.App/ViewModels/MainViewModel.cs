@@ -99,7 +99,7 @@ public partial class MainViewModel : ViewModelBase
         }
         else
         {
-            Environment.SetEnvironmentVariable("MOGHOUSE_FFXI_INSTALL", InstallPath);
+            MogHouse.Core.Interop.NativeEnvironment.Set("MOGHOUSE_FFXI_INSTALL", InstallPath);
             CurrentPage = new LoginViewModel(this);
         }
 

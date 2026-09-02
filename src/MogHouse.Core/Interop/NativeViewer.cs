@@ -224,7 +224,7 @@ public sealed partial class NativeViewer : IDisposable
                 // The renderer looks for its glyph atlas beside whatever loaded
                 // it, and in-process that is a .NET host somewhere else. Only
                 // this code knows where the shim actually came from, so it says.
-                Environment.SetEnvironmentVariable("MOGHOUSE_NATIVE_DIR", directory);
+                NativeEnvironment.Set("MOGHOUSE_NATIVE_DIR", directory);
                 return loaded;
             }
         }
@@ -269,7 +269,7 @@ public sealed partial class NativeViewer : IDisposable
         // renderer already reads its preferences that way, and widening the
         // interop struct is a change worth making deliberately rather than for
         // one float. Set before the create call, which is when it is read.
-        Environment.SetEnvironmentVariable(
+        NativeEnvironment.Set(
             "MOGHOUSE_BODY_DISTANCE",
             MogHouseSettings.Current.BodyDrawDistance > 0.0f
                 ? MogHouseSettings.Current.BodyDrawDistance.ToString(CultureInfo.InvariantCulture)

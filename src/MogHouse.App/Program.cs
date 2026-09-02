@@ -82,7 +82,7 @@ sealed class Program
             // path from this variable and appending ".renderer" - it is a
             // separate process-wide setting rather than something passed in, so
             // it has to be exported rather than just used locally.
-            Environment.SetEnvironmentVariable("MOGHOUSE_LOG", path);
+            MogHouse.Core.Interop.NativeEnvironment.Set("MOGHOUSE_LOG", path);
         }
 
         try

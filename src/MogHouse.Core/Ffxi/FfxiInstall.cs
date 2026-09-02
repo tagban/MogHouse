@@ -111,7 +111,7 @@ public static class FfxiInstall
     /// </summary>
     public static void Remember(string path)
     {
-        Environment.SetEnvironmentVariable("MOGHOUSE_FFXI_INSTALL", path);
+        MogHouse.Core.Interop.NativeEnvironment.Set("MOGHOUSE_FFXI_INSTALL", path);
 
         try
         {

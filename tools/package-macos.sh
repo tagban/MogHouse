@@ -241,6 +241,25 @@ fi
 # Without this the menu bar, the Dock and the force-quit list all say "Avalonia
 # Application", and NSHighResolutionCapable decides whether the window is
 # retina or a scaled-up 1x one.
+step "Copying the icon"
+# <ApplicationIcon> in the csproj only reaches a Windows PE executable - .NET
+# embeds moghouse.ico into the .exe and does nothing with it anywhere else. A
+# .app takes an .icns named by CFBundleIconFile instead, so without this the
+# Mac build shows the generic executable icon and is impossible to pick out of
+# a Dock or an Applications list.
+#
+# Assets/MogHouse.icns was generated from Assets/moghouse.ico, whose largest
+# frame is 256x256. Regenerate with sips into a .iconset and `iconutil -c
+# icns`. There is deliberately no 1024px entry: it would be a 4x upscale of the
+# source and visibly soft.
+icon="$root/src/MogHouse.App/Assets/MogHouse.icns"
+if [ -f "$icon" ]; then
+    cp "$icon" "$contents/Resources/MogHouse.icns"
+    echo "    MogHouse.icns"
+else
+    warn "no MogHouse.icns in src/MogHouse.App/Assets - the app will have a generic icon"
+fi
+
 step "Writing Info.plist"
 cat > "$contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -250,6 +269,7 @@ cat > "$contents/Info.plist" <<PLIST
     <key>CFBundleName</key>              <string>MogHouse XI</string>
     <key>CFBundleDisplayName</key>       <string>MogHouse XI</string>
     <key>CFBundleExecutable</key>        <string>MogHouse XI</string>
+    <key>CFBundleIconFile</key>          <string>MogHouse.icns</string>
     <key>CFBundleIdentifier</key>        <string>com.tagban.moghouse</string>
     <key>CFBundlePackageType</key>       <string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
