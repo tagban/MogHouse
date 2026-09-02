@@ -275,6 +275,14 @@ public sealed class LiveRadar : IDisposable
             // No look, deliberately. The scene wants nobody standing in it, and
             // the character is built and uploaded when one is actually chosen.
             ZoneName = FfxiZoneNames.Get((uint)sceneZone) ?? string.Empty,
+
+            // Holds the hour still, as the standalone viewer's own
+            // MOGHOUSE_TIME does. Worth having in the client too: the light a
+            // zone is under is the hardest thing to compare between two runs
+            // when it will not stop moving.
+            TimeOfDay = int.TryParse(Environment.GetEnvironmentVariable("MOGHOUSE_TIME"), out int hhmm)
+                ? hhmm
+                : null,
             ScreenshotPath = Environment.GetEnvironmentVariable("MOGHOUSE_SCREENSHOT"),
             ScreenshotAfterFrames =
                 int.TryParse(Environment.GetEnvironmentVariable("MOGHOUSE_SCREENSHOT_AFTER"), out int after)
