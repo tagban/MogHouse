@@ -542,6 +542,10 @@ size_t loadWater(const std::string& zoneName, mh::Scene& scene)
     return count;
 }
 
+/// West Ronfaure's DAT, whose day is lent to zones that have none. Its file id
+/// rather than its zone id: 100 is the offset between the two.
+inline constexpr size_t kBorrowedLightingFileId = 200;
+
 std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, const char* key2Path, std::string& zoneId,
                                      std::unordered_map<std::string, ffxi::Texture>& textures, ffxi::Lighting& lighting,
                                      mh::Collision& collision, std::vector<mh::InteriorLighting>& interiors)
@@ -558,6 +562,61 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
     for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkLighting))
     {
         lighting.add(chunk);
+    }
+
+    // A zone with no day of its own borrows one.
+    //
+    // Sel Phiner - the backdrop the retail client stands its characters in -
+    // ships exactly one lighting set, for midnight. Interpolating a day out of
+    // a single entry gives that entry at every hour, so the sky was black at
+    // noon and the grass was lit by moonlight, which is what "this zone was
+    // never finished" looks like from inside.
+    //
+    // Two sets is the least that can describe a change, so anything less takes
+    // a full day from a zone that has one. West Ronfaure by default: open
+    // grassland under an open sky, which is what these zones are, and present
+    // in every installation.
+    if (lighting.sets().size() < 2)
+    {
+        const char* donor = SDL_getenv("MOGHOUSE_LIGHTING_FROM");
+        std::string borrowed = donor ? donor : "";
+        if (borrowed.empty())
+        {
+            try
+            {
+                const ffxi::FileTable table{ffxi::defaultInstallRoot()};
+                if (auto path = table.path(kBorrowedLightingFileId))
+                {
+                    borrowed = path->string();
+                }
+            }
+            catch (const std::exception&)
+            {
+                // No file table, no loan. The zone keeps whatever it had.
+            }
+        }
+
+        if (!borrowed.empty() && borrowed != datPath)
+        {
+            try
+            {
+                ffxi::DatFile lender{std::filesystem::path{borrowed}};
+                size_t added = 0;
+                for (const ffxi::Chunk& chunk : lender.chunksOfType(ffxi::kChunkLighting))
+                {
+                    lighting.add(chunk);
+                    ++added;
+                }
+                if (added)
+                {
+                    std::printf("lighting: this zone has none of its own, borrowed %zu sets\n", added);
+                }
+            }
+            catch (const std::exception& e)
+            {
+                std::printf("could not borrow lighting: %s\n", e.what());
+            }
+        }
     }
 
     // Textures are not obfuscated, so they need no keys.
@@ -3752,7 +3811,34 @@ constexpr float kGravity = 26.0f;
                 if (key == SDLK_BACKSPACE && hasFocus)
                 {
                     std::string& value = formValues[static_cast<size_t>(formFocus)];
-                    if (!value.empty())
+
+                    // The shortcuts every other text box has. There is no
+                    // selection here - no dragging across a word, no select
+                    // all - so without these the only way to empty a field of
+                    // a saved server name is to hold backspace and count. That
+                    // is what someone trying to select the text and delete it
+                    // discovers, after the click does nothing.
+                    const bool wholeField = (event.key.mod & (SDL_KMOD_GUI | SDL_KMOD_CTRL)) != 0;
+                    const bool wholeWord = (event.key.mod & SDL_KMOD_ALT) != 0;
+
+                    if (wholeField)
+                    {
+                        value.clear();
+                    }
+                    else if (wholeWord)
+                    {
+                        // Trailing spaces first, then the word itself, so a
+                        // press at the end of "one two " leaves "one ".
+                        while (!value.empty() && value.back() == ' ')
+                        {
+                            value.pop_back();
+                        }
+                        while (!value.empty() && value.back() != ' ')
+                        {
+                            value.pop_back();
+                        }
+                    }
+                    else if (!value.empty())
                     {
                         // Back off a whole UTF-8 character rather than a byte,
                         // or one press through an accented letter leaves half

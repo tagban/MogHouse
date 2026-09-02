@@ -237,6 +237,9 @@ public sealed class LiveRadar : IDisposable
     /// <summary>No scene at all - a plain black screen behind the forms.</summary>
     private const int NoSceneZone = -1;
 
+    /// <summary>The hour the backdrop is held at, as HHMM.</summary>
+    private const int DefaultSceneHour = 1700;
+
     /// <summary>
     /// Which zone to open behind the screens: what the environment asks for,
     /// or Sel Phiner.
@@ -288,13 +291,17 @@ public sealed class LiveRadar : IDisposable
             // look around it should be told which one they are looking at.
             ZoneName = FfxiZoneNames.Get((uint)sceneZone) ?? string.Empty,
 
-            // Holds the hour still, as the standalone viewer's own
-            // MOGHOUSE_TIME does. Worth having in the client too: the light a
-            // zone is under is the hardest thing to compare between two runs
-            // when it will not stop moving.
+            // Late afternoon, and held there.
+            //
+            // A backdrop is a photograph, not a place: the retail screen does
+            // not run a clock behind its characters either. This is the hour
+            // its sky is that lavender, which is the look the screen has always
+            // had. MOGHOUSE_TIME overrides it, and the light a zone is under is
+            // also the hardest thing to compare between two runs when it will
+            // not stop moving.
             TimeOfDay = int.TryParse(Environment.GetEnvironmentVariable("MOGHOUSE_TIME"), out int hhmm)
                 ? hhmm
-                : null,
+                : DefaultSceneHour,
             ScreenshotPath = Environment.GetEnvironmentVariable("MOGHOUSE_SCREENSHOT"),
             ScreenshotAfterFrames =
                 int.TryParse(Environment.GetEnvironmentVariable("MOGHOUSE_SCREENSHOT_AFTER"), out int after)
