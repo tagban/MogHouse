@@ -220,15 +220,61 @@ public sealed class LiveRadar : IDisposable
     /// As <see cref="Open"/>. False is right for the client, where the main
     /// thread runs the loop because AppKit insists on it.
     /// </param>
+    /// <summary>
+    /// The zone drawn behind the client's own screens.
+    ///
+    /// West Ronfaure, because it is outdoors, has a sky and a horizon, and is
+    /// in every installation there is. MOGHOUSE_SCENE_ZONE picks another, and
+    /// 0 opens onto nothing.
+    /// </summary>
+    public const int DefaultSceneZone = 100;
+
+    /// <summary>
+    /// Which zone to open behind the screens: what the environment asks for,
+    /// or West Ronfaure.
+    /// </summary>
+    private static int SceneZone() =>
+        int.TryParse(Environment.GetEnvironmentVariable("MOGHOUSE_SCENE_ZONE"), out int wanted)
+            ? wanted
+            : DefaultSceneZone;
+
     public static LiveRadar OpenEmpty(bool ownThread = false)
     {
+        // A zone behind the sign-in, which is how the game has always looked
+        // while it asks who you are.
+        //
+        // It is not only decoration. Several things are built once from the
+        // zone that is present when the window opens - the radar's map among
+        // them - and a window opened onto nothing has none of them for the rest
+        // of the session. Opening onto a scene means the client is in its
+        // normal state before anybody types anything.
+        string scene = string.Empty;
+        int sceneZone = SceneZone();
+        if (sceneZone > 0)
+        {
+            try
+            {
+                var table = new FfxiFileTable(FfxiFileTable.DefaultInstallRoot());
+                if (table.ZonePath(sceneZone) is { } path && File.Exists(path))
+                {
+                    scene = path;
+                }
+            }
+            catch (Exception)
+            {
+                // No scene is a plainer client, not a broken one.
+            }
+        }
+
         var options = new NativeViewerOptions
         {
-            // No zone, no keys needed to read one. The renderer clears to
-            // black and draws whatever is put in front of it.
-            ZonePath = string.Empty,
+            ZonePath = scene,
             KeyTablePath = KeyTable("MOGHOUSE_FFXI_KEYTABLE", "mzb_key_table.bin"),
             KeyTable2Path = KeyTable("MOGHOUSE_FFXI_KEYTABLE2", "mmb_key_table2.bin"),
+
+            // No look, deliberately. The scene wants nobody standing in it, and
+            // the character is built and uploaded when one is actually chosen.
+            ZoneName = FfxiZoneNames.Get((uint)sceneZone) ?? string.Empty,
             ScreenshotPath = Environment.GetEnvironmentVariable("MOGHOUSE_SCREENSHOT"),
             ScreenshotAfterFrames =
                 int.TryParse(Environment.GetEnvironmentVariable("MOGHOUSE_SCREENSHOT_AFTER"), out int after)
