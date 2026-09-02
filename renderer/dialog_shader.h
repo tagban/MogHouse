@@ -23,13 +23,20 @@ namespace mh
 {
 /// How many rows the box holds: a heading, two lines of explanation, and the
 /// two buttons.
-inline constexpr int kDialogRows = 5;
+inline constexpr int kDialogRows = 12;
 
 /// Characters per row. Long enough for a sentence at this width.
 inline constexpr int kDialogChars = 40;
 
 /// How many of those rows are buttons. The last ones, always.
 inline constexpr int kDialogButtons = 2;
+
+/// The WGSL below spells these out - a shader cannot see a C++ constant - so
+/// they are asserted rather than trusted. Getting them out of step resizes the
+/// uniform buffer without changing what the shader reads, which shows up as
+/// garbage rows rather than as an error.
+static_assert(kDialogRows == 12, "dialog_shader.h WGSL hardcodes 12 rows");
+static_assert(kDialogChars == 40, "dialog_shader.h WGSL hardcodes kChars = 40");
 
 inline constexpr const char* kDialogShader = R"(
 struct DialogUniforms {
@@ -40,18 +47,21 @@ struct DialogUniforms {
     atlas : vec4<f32>,
     // The box itself: left, bottom, width, height, in NDC.
     panel : vec4<f32>,
+    // The text caret in the focused field: left, bottom, width, height. Width
+    // zero means no field has focus and nothing is drawn.
+    caret : vec4<f32>,
     // Per row, the button behind it: left, bottom, width, height. A width of
     // zero is a row of plain text with nothing drawn behind it.
-    rects : array<vec4<f32>, 5>,
+    rects : array<vec4<f32>, 12>,
     // Per row, that button's fill: colour, then how opaque it is.
-    fills : array<vec4<f32>, 5>,
+    fills : array<vec4<f32>, 12>,
     // Per row, the text: left and bottom in NDC, width in cells, unused.
-    boxes : array<vec4<f32>, 5>,
+    boxes : array<vec4<f32>, 12>,
     // Per row, the text's colour, then its size against the shared cell.
-    colours : array<vec4<f32>, 5>,
+    colours : array<vec4<f32>, 12>,
     // Per glyph: atlas cell index, x offset in cells, advance in cells.
     // Laid out row-major, kDialogChars apart.
-    glyphs : array<vec4<f32>, 200>,
+    glyphs : array<vec4<f32>, 480>,
 };
 
 const kChars = 40;
@@ -128,6 +138,14 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
                      in.ndc.y < rect.y + edge || in.ndc.y >= rect.y + rect.w - edge;
         colour = select(fill.rgb, mix(fill.rgb, vec3<f32>(1.0, 1.0, 1.0), 0.45), onEdge);
         alpha = max(alpha, fill.a);
+    }
+
+    let caret = dialog.caret;
+    if (caret.z > 0.0 &&
+        in.ndc.x >= caret.x && in.ndc.x < caret.x + caret.z &&
+        in.ndc.y >= caret.y && in.ndc.y < caret.y + caret.w) {
+        colour = vec3<f32>(0.98, 0.98, 1.0);
+        alpha = 1.0;
     }
 
     for (var row = 0; row < rows; row = row + 1) {

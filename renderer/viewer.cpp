@@ -156,6 +156,7 @@ struct DialogUniforms
     float counts[4];
     float atlas[4];
     float panel[4];
+    float caret[4];
     float rects[mh::kDialogRows][4];
     float fills[mh::kDialogRows][4];
     float boxes[mh::kDialogRows][4];
