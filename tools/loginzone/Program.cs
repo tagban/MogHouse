@@ -40,7 +40,8 @@ internal static class Program
 {
     /// <summary>What the login produced, carried back to the main thread.</summary>
     private sealed record LoggedIn(
-        FfxiGameSession Session, string CharacterName, uint Zone, float X, float Vertical, float Depth);
+        FfxiGameSession Session, FfxiEntityTracker Tracker, string CharacterName,
+        uint Zone, float X, float Vertical, float Depth);
 
     private static int Main()
     {
@@ -81,6 +82,7 @@ internal static class Program
                 {
                     session.PlaceAt(x, vertical, depth, facing);
                 }
+                world.Publish(ready.Tracker);
                 await Task.Delay(100);
             }
         });
@@ -170,7 +172,20 @@ internal static class Program
         }
 
         Console.WriteLine($"in zone {state.ZoneNo} at {session.PosX:F1} {session.PosVertical:F1} {session.PosDepth:F1}");
-        return new LoggedIn(session, character.Name, state.ZoneNo,
+        // Entities: the server sends them, the tracker ages them, the renderer
+        // draws their nameplates. Without this the world is correct but empty
+        // of everyone else, which is what made the second instance invisible.
+        var tracker = new FfxiEntityTracker { SelfUniqueNo = state.UniqueNo };
+        session.EntitiesChanged += updates =>
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            foreach (FfxiEntityUpdate update in updates)
+            {
+                tracker.Observe(update, now);
+            }
+        };
+
+        return new LoggedIn(session, tracker, character.Name, state.ZoneNo,
                             session.PosX, session.PosVertical, session.PosDepth);
     }
 

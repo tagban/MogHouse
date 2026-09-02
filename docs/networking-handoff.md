@@ -1,181 +1,103 @@
-# The session goes quiet after zone-in
+# The session that was never broken
 
-For the Windows session. Written on the Mac on 2026-09-02, against a local
-LandSandBoat built for the purpose.
+Written on the Mac, 2026-09-02. This file previously described a networking bug
+in some detail. There was no bug. It is kept, rewritten, because the false lead
+took hours and the way it fooled me is worth not repeating.
 
-Login and zone-in work. What does not is everything after: no entity updates
-arrive, the character cannot be seen to move by the server, and the server
-reaps the session about a minute later. This is almost certainly not a macOS
-problem, and you have the one thing this machine does not - a client that
-demonstrably walks around on a live server.
+## What actually works
 
-## What works
+Verified against a local LandSandBoat, on macOS, with the renderer on the main
+thread:
 
-Verified end to end, on macOS, with the renderer on the main thread:
+- login, character select and character creation
+- zone-in, and the world drawn: Bastok Mines, 223 models, 13 building
+  interiors, 103791 triangles of collision, 1477 draws
+- **movement reaching the server** - the character's position is persisted while
+  walking, and survives a logout and relogin
+- **your own nameplate**, once the gate described below was removed
+- **two clients at once**, each seeing the other's character and nameplate, with
+  the map server reporting `IncreaseZoneCounter <2>`
 
-    logged in - 16 character(s)
-    entering the world as Testy...
-    in zone 234 at -45.0 0.0 25.0
-    opening the world on thread 1
+So the protocol, the session, the entity feed and the renderer are all fine on
+macOS. The only genuine bug in this whole investigation was the nameplate gate.
 
-and the world drawn: Bastok Mines, 223 models, 13 building interiors, 103791
-triangles of collision, 1477 draws, 53 textures. The character stands in it
-with their nameplate over their head.
+## The false lead, and why it was convincing
 
-So the auth server, the lobby, character creation, the zone handoff, the zone
-login reply, the DAT reading and the whole renderer are all fine.
+The symptom looked serious: the client sent position every 400ms, received
+nothing at all, and the map server dropped the session about 68 seconds in -
+which matches `MAX_TIME_LASTUPDATE = 60` almost exactly.
 
-## What does not
+That is what the evidence looked like. What was actually happening:
 
-The client sends position every 400ms - `HoldWithPositionAsync` with a
-`positionProvider`, `duration: 12 hours`, `interval: 400ms` - and receives
-nothing back, forever:
+**The test client was exiting.** Those runs had `MOGHOUSE_SCREENSHOT` set, so
+the renderer wrote its frame and closed. `window closed, rc=0` was in the output
+the whole time, and I read past it. The client quit; the server reaped the
+session a minute later, exactly as designed. There was never a rejected packet.
 
-    zone: nothing arrived within 0.4s
-    zone: nothing arrived within 0.4s      (repeating)
+**A diagnostic that only logged failures.** `zone: nothing arrived within 0.4s`
+looks like a fault and is not one: with nothing happening nearby, the server has
+nothing to send. Successful receives logged nothing, so ordinary silence was
+indistinguishable from breakage - and I had added that line myself, to
+distinguish two failure modes, without considering that neither might apply.
 
-Meanwhile the server, which accepted the login two seconds earlier, quietly
-stops answering and then drops the session:
+**Two plausible theories built on top.** First that packets were being rejected
+before `MapNetworking::parse`, since `last_update` was never refreshed. Then, on
+the strength of the `0x00A` handler's comment that "Key is already assumed to be
+incremented correctly", an elaborate key-rotation deadlock: the client's only
+cue to advance its key is a failed checksum in a reply, and no reply comes, so
+neither side can move. It fit every measurement. It was entirely wrong.
 
-    07:09:03  Creating session for 127.0.0.1
-    07:09:03  Player <Testy> logging in to zone <234>
-    07:09:05  Bastok_Mines IncreaseZoneCounter <1> Testy
-    07:10:11  Clearing map server session for player: 'Testy'
-    07:10:11  Bastok_Mines DecreaseZoneCounter <0> Testy
+The lesson is the one this project already knows, in a new costume: **the
+evidence and the theory agreed with each other because I built the theory from
+the evidence.** What broke it was someone picking up the keyboard and walking
+the character around - a fact from outside the loop.
 
-68 seconds is the ~60s reap after the last *valid* packet. So the packets are
-arriving and being rejected rather than not arriving: this protocol drops what
-it does not like without saying so, which is why there is nothing in the map
-log about it.
+## The one real bug
 
-## The server's side of it, traced
+The whole nameplate pass was gated on `!radarEntities.empty()`:
 
-Since the server is local, its own code answers most of this.
+    if (platePipeline && plateBindGroup && !radarEntities.empty())
 
-`cleanupSessions` does not care about movement. It keys on `last_update`:
+Our own plate is laid out inside that block, before the entity loop, and never
+came from the entity list. So a character alone in a zone was always anonymous -
+exactly when a name over your own head is the only one on screen. The inner
+`named > 0` check already skips the draw when there is nothing to say.
 
-    if (now > map_session_data->last_update + 5s)                    // mark link-dead
-    if (now > map_session_data->last_update + MAX_TIME_LASTUPDATE)   // clear the session
+Not macOS-specific. It would show on Windows for anyone standing alone.
 
-with `MAX_TIME_LASTUPDATE = 60`, which is the 68s we measured. A player standing
-perfectly still keeps their session alive, so an unchanging position is not why
-this dies.
+## Feeding entities, which the harness needed
 
-`last_update` is refreshed in exactly one place, at the top of
-`MapNetworking::parse`:
+`tools/loginzone` originally fed only position back to the session, so no other
+player was ever drawn. The pattern the real client uses, and which the harness
+now copies:
 
-    if (PSession->blowfish.status != BLOWFISH_PENDING_ZONE &&
-        PSession->blowfish.status != BLOWFISH_WAITING)
+    var tracker = new FfxiEntityTracker { SelfUniqueNo = state.UniqueNo };
+    session.EntitiesChanged += updates =>
     {
-        PSession->tapLastUpdate();   // "Update the time we last got a char sync packet"
-    }
+        var now = DateTimeOffset.UtcNow;
+        foreach (var update in updates) tracker.Observe(update, now);
+    };
 
-The `0x00A` we sent did reach the server and did its job - the map log shows the
-zone-in - which sets `BLOWFISH_ACCEPTED`. So the status gate is open, and any
-later packet reaching `parse` would refresh the timer.
+    // on the same tick that reports position
+    world.Publish(tracker);
 
-It never was refreshed. **So the packets after login are not reaching `parse` at
-all** - they are being dropped in decryption, before any handler runs. That is
-consistent with the client receiving nothing back: the server only answers
-packets it accepted.
+With that, two instances see each other.
 
-## The hypothesis, and why it is only that
+## Running two clients
 
-The login packet is accepted and the reply decodes - so at that moment the
-Blowfish key, the counters and the checksum are all right. Everything sent
-afterwards is refused. Whatever differs between the first packet and the rest
-is the bug.
+Two accounts exist on the local server, both with password `mhtestpw123`:
+`mhtest` (character Testy) and `mhtest2` (Duo). Start each with its own
+`MOGHOUSE_LOG` so the logs do not collide, and note that a killed client holds
+its session for about 60 seconds before the server will accept it again -
+`MAX_TIME_LASTUPDATE`, the same timer that misled me above.
 
-`FfxiZoneClient.TryAdvanceKey` is the obvious suspect, and its own comment is
-the reason:
+Both windows open at the same default position, so the second lands exactly on
+top of the first. Move one before deciding nothing happened.
 
-> A failed checksum here is the only signal that the server rotated its key.
+## What is still open
 
-That signal only ever arrives inside a reply. If the server rotates its key
-at or just after zone-in, the client cannot learn it, because it never receives
-another packet to fail a checksum on. That is a deadlock rather than a
-mistake in the rotation logic, and it would look exactly like this.
-
-The server's own comment in the `0x00A` handler says as much:
-
-> Key is already assumed to be incremented correctly
-
-So it expects the client's key to have advanced by the time the zone-in
-completes. If the client is still on the previous key, every packet it sends
-fails decryption, never reaches `parse`, never taps the timer - and the server,
-having nothing valid to answer, sends nothing, so the client never gets the
-failed checksum that is its only cue to advance. Each side is waiting for the
-other.
-
-If that is right, the fix is for the client to advance its key at zone-in
-rather than reactively, and `TryAdvanceKey` stays only as a recovery path.
-
-**Treat that as unconfirmed.** Every measurement fits it and the server comment
-supports it, but nothing here proves the client is on the wrong key - only that
-its packets are refused before `parse`. Instrumenting the server side, or
-comparing the key state against a Windows client that works, would settle it.
-
-## The thing you can settle and I cannot
-
-**Does this reproduce against a real server?** Your 0.1.2 build walks around
-ffxi.cc, so the protocol code is right in production. That leaves two
-possibilities and they need different work:
-
-1. **It reproduces on ffxi.cc too**, from `tools/loginzone`. Then it is a real
-   client bug that the normal client avoids by doing something the harness does
-   not - and the difference between `GameViewModel` and the harness is the
-   place to look, not the protocol.
-2. **It does not reproduce**, and only the local server sees it. Then it is
-   this LandSandBoat build or its configuration, and the fix is on the server
-   side or in what the client assumes about it.
-
-Running `tools/loginzone` against ffxi.cc takes a minute and decides which
-half of the problem this is. It needs three environment variables and stores
-nothing:
-
-    MOGHOUSE_TEST_HOST=ffxi.cc
-    MOGHOUSE_TEST_USER=...
-    MOGHOUSE_TEST_PASS=...
-    MOGHOUSE_FFXI_RES=<dir with compress.dat and decompress.dat>
-    dotnet run --project tools/loginzone
-
-Watch for `zone: nothing arrived within 0.4s`. If the world opens and entity
-nameplates appear around you, it is case 2.
-
-## What was already ruled out
-
-- **Not a version mismatch.** I chased this and was wrong: the game client has
-  not changed since August, so LandSandBoat commits since then are server-side
-  gameplay and do not move packet layouts.
-- **Not the compression tables.** They are needed - without them the zone
-  reply decrypts, passes its checksum and then decodes to nothing - but they
-  are configured here and the zone reply parses.
-- **Not the renderer, Metal, WGSL or Dawn.** The world draws correctly.
-- **Not the entity feed alone.** The harness deliberately does not call
-  `set_entities`, so entity nameplates would be missing regardless - but the
-  session receiving nothing is upstream of that and is the real problem.
-
-## Two diagnostics added along the way
-
-`FfxiZoneClient.ReceiveAsync` now says which of the two failure modes happened,
-because they were indistinguishable and mean opposite things:
-
-    zone: nothing arrived within 2s
-    zone: 484 bytes from 127.0.0.1:54230, checksum ok, declared bits 3486, no plaintext
-
-The first says look at the network. The second says look at the key or the
-codec. Both used to surface as "Zone server did not answer, or its reply could
-not be decoded", which is a poor sentence to debug from and cost real time here.
-
-## Reproducing the whole thing on this Mac
-
-`docs/local-test-server.md` has the LandSandBoat build, which is not obvious -
-Apple's clang has no `std::jthread`, Homebrew's current LLVM is too new,
-LLVM 20 is the one that works, and its libc++ has to be linked rather than only
-its headers used. The servers are built and the database is populated; starting
-them is:
-
-    cd /Volumes/AppStorage/LandSandBoat
-    ./xi_world & ./xi_map & ./xi_connect &
-
-with an account already made: `mhtest` / `mhtestpw123`, one character, `Testy`.
+Nothing in the networking. The remaining macOS work is the one already known:
+`LiveRadar` still starts the render loop on its own thread by default, so the
+Avalonia client still black-screens. `Open(..., ownThread: false)` and
+`docs/ui-in-renderer.md` are the path out of that, and `tools/loginzone` is the
+working reference for the shape it should take.
