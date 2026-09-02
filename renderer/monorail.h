@@ -160,10 +160,19 @@ public:
             return false;
         }
 
+        // Whether it is moving or waiting, the lamps are always going one way
+        // or the other, so this happens before anything returns.
+        const float wanted = dwell_ > 0.0f ? 0.0f : 1.0f;
+        const float step = seconds / kLampSeconds;
+        lamps_ = wanted > lamps_ ? std::min(wanted, lamps_ + step) : std::max(wanted, lamps_ - step);
+
         if (dwell_ > 0.0f)
         {
             dwell_ -= seconds;
-            return false;
+
+            // The lamps are still fading even though nothing has moved, and the
+            // caller has to know to keep drawing them that way.
+            return lamps_ > 0.0f;
         }
 
         const float train = spacing_ * static_cast<float>(cars_.size() - 1);
@@ -202,6 +211,14 @@ public:
 
     const std::vector<Car>& cars() const { return cars_; }
 
+    /// How brightly the cars are lit, 0 to 1.
+    ///
+    /// Comes up as it sets off and goes out as it settles, rather than
+    /// switching with the motion - lamps warm and dim, and a train whose lights
+    /// snapped on the instant it moved would read as a bug in the lights rather
+    /// than as a train.
+    float lamps() const { return lamps_; }
+
     /// Where the front of the train is, for anything that wants to sit on it -
     /// a plume of steam, a lamp.
     Vec3 head() const { return cars_.empty() ? Vec3{} : cars_.back().at; }
@@ -210,10 +227,13 @@ private:
     /// How fast it runs, in world units a second. Slow: it is scenery at the
     /// far side of a valley, and something crossing a backdrop at a sprint
     /// reads as a mistake.
-    static constexpr float kSpeed = 18.0f;
+    static constexpr float kSpeed = 20.0f;
 
     /// How long it stands at each end before setting off again.
     static constexpr float kDwellSeconds = 9.0f;
+
+    /// How long the lamps take to come up or go out.
+    static constexpr float kLampSeconds = 2.5f;
 
     static Vec3 translationOf(const Scene& scene, uint32_t instance)
     {
@@ -394,6 +414,7 @@ private:
     float rideHeight_{};
     float travelled_{};
     float dwell_{kDwellSeconds};
+    float lamps_{0.0f};
     bool forward_{true};
 
 

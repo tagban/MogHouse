@@ -1463,6 +1463,10 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     /// character is shown faded without the shader knowing anything about it.
     wgpu::RenderPipeline fadePipeline;
 
+    /// Draws something a second time, adding to what is already there. The
+    /// monorail's cars light up through this.
+    wgpu::RenderPipeline glowPipeline;
+
     /// One flat pale surface, for the figure that stands in for a character
     /// nobody has made yet.
     wgpu::Texture ghostTexture;
@@ -1714,6 +1718,24 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                 fadeDescriptor.fragment = &fadeFragment;
                 fadeDescriptor.depthStencil = &surfaceDepth;
                 fadePipeline = device.CreateRenderPipeline(&fadeDescriptor);
+
+                // And an additive one, for drawing something a second time to
+                // light it up. The constant decides how much is added, so one
+                // pipeline covers a lamp coming on, holding, and going out.
+                wgpu::BlendState glowBlend{
+                    .color = {.operation = wgpu::BlendOperation::Add,
+                              .srcFactor = wgpu::BlendFactor::Constant,
+                              .dstFactor = wgpu::BlendFactor::One},
+                    .alpha = {.operation = wgpu::BlendOperation::Add,
+                              .srcFactor = wgpu::BlendFactor::Zero,
+                              .dstFactor = wgpu::BlendFactor::One}};
+                wgpu::ColorTargetState glowTarget{.format = surfaceFormat, .blend = &glowBlend};
+                wgpu::FragmentState glowFragment{
+                    .module = module, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &glowTarget};
+                wgpu::RenderPipelineDescriptor glowDescriptor = pipelineDescriptor;
+                glowDescriptor.fragment = &glowFragment;
+                glowDescriptor.depthStencil = &surfaceDepth;
+                glowPipeline = device.CreateRenderPipeline(&glowDescriptor);
 
                 // WebGPU has no bindless arrays, so each texture needs its own bind
                 // group and its own draw. Fine at a zone's few dozen textures; this is
@@ -2829,13 +2851,39 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 
     // The railway through Sel Phiner, if this zone has one. Nothing else does.
     mh::Monorail monorail;
+
+    /// Which of the zone's draws are the train, so they can be drawn again to
+    /// light them. Indices into zone->draws.
+    std::vector<size_t> monorailDraws;
+
     const auto findMonorail = [&]()
     {
-        if (zone && monorail.find(*zone))
+        monorailDraws.clear();
+        if (!zone || !monorail.find(*zone))
         {
-            std::printf("monorail: %zu cars on %.0f units of track\n", monorail.cars().size(),
-                        static_cast<double>(monorail.routeLength()));
+            return;
         }
+
+        for (const char* model : {"mono_a1", "mono_b1"})
+        {
+            auto range = zone->instanceRanges.find(model);
+            if (range == zone->instanceRanges.end())
+            {
+                continue;
+            }
+            const uint32_t first = range->second.first;
+            const uint32_t last = first + range->second.second;
+            for (size_t i = 0; i < zone->draws.size(); ++i)
+            {
+                if (zone->draws[i].instanceOffset >= first && zone->draws[i].instanceOffset < last)
+                {
+                    monorailDraws.push_back(i);
+                }
+            }
+        }
+
+        std::printf("monorail: %zu cars on %.0f units of track, %zu draws to light\n", monorail.cars().size(),
+                    static_cast<double>(monorail.routeLength()), monorailDraws.size());
     };
     findMonorail();
 
@@ -5358,6 +5406,44 @@ constexpr float kGravity = 26.0f;
                                                           : draw.cutout;
                     pass.SetPipeline(translucent ? translucentPipeline : (cutout ? cutoutPipeline : pipeline));
                     pass.SetBindGroup(0, batchBindGroups[i]);
+                    pass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
+                }
+            }
+
+            // The train's own lights: the cars drawn a second time, adding to
+            // themselves rather than replacing anything. Where the texture is
+            // already bright - the windows, the trim along the side - it goes
+            // brighter, and where it is dark almost nothing happens, which is
+            // what lit windows in a dark carriage look like without anything
+            // having to know which triangles are windows.
+            if (monorail.lamps() > 0.0f && glowPipeline && !monorailDraws.empty())
+            {
+                // A slow breath on top of the fade, so it reads as something
+                // running rather than a decal.
+                const float breathe = 0.88f + 0.12f * std::sin(static_cast<float>(SDL_GetTicksNS() / 1000000ull) * 0.0016f);
+                // How bright the lamps burn. Worth a knob: it is the one number
+                // here that is a matter of taste, and taste is easier to settle
+                // by looking at two of them than by arguing about one.
+                static const float lampStrength = []
+                {
+                    const char* set = SDL_getenv("MOGHOUSE_TRAIN_LAMPS");
+                    const float parsed = set ? std::strtof(set, nullptr) : 0.80f;
+                    return std::clamp(parsed, 0.0f, 2.0f);
+                }();
+
+                const float amount = monorail.lamps() * lampStrength * breathe;
+                const wgpu::Color lamp{amount, amount * 0.94f, amount * 0.78f, 1.0};
+                pass.SetBlendConstant(&lamp);
+                pass.SetPipeline(glowPipeline);
+
+                for (size_t index : monorailDraws)
+                {
+                    if (index >= batchBindGroups.size())
+                    {
+                        continue;
+                    }
+                    const mh::InstancedDraw& draw = zone->draws[index];
+                    pass.SetBindGroup(0, batchBindGroups[index]);
                     pass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
                 }
             }
