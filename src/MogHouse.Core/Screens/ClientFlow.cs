@@ -126,13 +126,28 @@ public static class ClientFlow
     private static void SignIn(ScreenHost screens, LiveRadar world, FfxiGameSession game, TextWriter say)
     {
         string message = "";
+        string? madeAccount = null;
 
         while (!screens.Closed)
         {
-            SignInScreen.Credentials? credentials = SignInScreen.Show(screens, message);
+            SignInScreen.Credentials? credentials = SignInScreen.Show(screens, message, madeAccount);
             if (credentials is null)
             {
                 return;
+            }
+
+            if (credentials.MakeAccount)
+            {
+                // Made, not signed in with: creation answers with no session,
+                // so the account comes back and the sign-in screen is shown
+                // again with it filled in.
+                madeAccount = CreateAccountScreen.Show(
+                    screens, credentials.Host, FfxiConstants.AuthPort, say);
+
+                message = madeAccount is null
+                    ? ""
+                    : $"{madeAccount.ToUpperInvariant()} IS READY. SIGN IN WITH IT.";
+                continue;
             }
 
             var profile = new FfxiServerProfile

@@ -16,9 +16,16 @@ public static class SignInScreen
     /// What the player filled in, or null if they closed the window or asked to
     /// quit - either way, a caller should stop rather than ask again.
     /// </summary>
-    public sealed record Credentials(string Host, string Username, string Password);
+    /// <param name="MakeAccount">
+    /// Set when the player asked for an account rather than offering one. The
+    /// server is still needed to ask, which is why this comes back through the
+    /// same record instead of being a separate answer.
+    /// </param>
+    public sealed record Credentials(string Host, string Username, string Password,
+                                     bool MakeAccount = false);
 
     private const string SignIn = "SIGN IN";
+    private const string NewAccount = "NEW ACCOUNT";
     private const string Remember = "REMEMBER SERVER";
     private const string Quit = "QUIT";
 
@@ -29,7 +36,12 @@ public static class SignInScreen
     /// the first showing, and the reason it failed on any showing after that,
     /// which is why a caller loops on this rather than calling it once.
     /// </summary>
-    public static Credentials? Show(ScreenHost screens, string message = "")
+    /// <param name="account">
+    /// An account to start with, for the one that was just created - it should
+    /// not have to be typed a second time. The saved profile fills the field in
+    /// otherwise.
+    /// </param>
+    public static Credentials? Show(ScreenHost screens, string message = "", string? account = null)
     {
         // Whatever was used last, so a returning player presses one button. The
         // store keeps passwords obfuscated rather than encrypted, so it is
@@ -37,8 +49,12 @@ public static class SignInScreen
         FfxiServerProfile? saved = FfxiServerProfileStore.Profiles.FirstOrDefault();
 
         string host = saved?.Host ?? "";
-        string username = saved?.Username ?? "";
-        string password = saved?.Password ?? "";
+        string username = account ?? saved?.Username ?? "";
+
+        // Never the saved password beside a different account than it belongs
+        // to - a freshly made one has no password here, and offering the old
+        // one would be offering the wrong one.
+        string password = account is null ? saved?.Password ?? "" : "";
 
         while (true)
         {
@@ -48,6 +64,7 @@ public static class SignInScreen
                 NativeFormRow.Field("ACCOUNT", username),
                 NativeFormRow.Secret("PASSWORD", password),
                 NativeFormRow.Button(SignIn),
+                NativeFormRow.Button(NewAccount),
                 NativeFormRow.Button(Remember),
                 NativeFormRow.Button(Quit),
             ];
@@ -74,9 +91,15 @@ public static class SignInScreen
                     message = Save(host, username, password);
                     continue;
 
+                case NewAccount when host.Length == 0:
                 case SignIn when host.Length == 0:
                     message = "A SERVER IS NEEDED.";
                     continue;
+
+                case NewAccount:
+                    // Only the server is needed to ask; the account and its
+                    // password are chosen on the screen that follows.
+                    return new Credentials(host, username, password, MakeAccount: true);
 
                 case SignIn when username.Length == 0 || password.Length == 0:
                     message = "AN ACCOUNT AND PASSWORD ARE NEEDED.";

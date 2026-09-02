@@ -3677,38 +3677,59 @@ constexpr float kGravity = 26.0f;
                 }
                 else if (key == SDLK_TAB)
                 {
-                    // Round the fields, so the whole form can be filled in from
-                    // the keyboard. Shift goes back the way people expect.
+                    // Round the form, so all of it can be worked from the
+                    // keyboard. Shift goes back the way people expect.
+                    //
+                    // Buttons are in the round, not just the fields. A screen
+                    // with more than one - sign in, make an account, quit -
+                    // otherwise had every button but the first reachable only
+                    // with the mouse, because Return presses the first.
                     const bool backwards = (event.key.mod & SDL_KMOD_SHIFT) != 0;
                     const int count = static_cast<int>(formValues.size());
                     for (int step = 1; step <= count; ++step)
                     {
                         const int offset = backwards ? -step : step;
                         const int candidate = ((formFocus + offset) % count + count) % count;
-                        const mh::FormRowKind kind = activeForm.rows[static_cast<size_t>(candidate)].kind;
-                        if ((kind == mh::FormRowKind::Field || kind == mh::FormRowKind::Secret) &&
-                            activeForm.rows[static_cast<size_t>(candidate)].enabled)
+                        const mh::FormRow& row = activeForm.rows[static_cast<size_t>(candidate)];
+                        if (row.kind != mh::FormRowKind::Label && row.enabled)
                         {
                             formFocus = candidate;
                             break;
                         }
                     }
                 }
-                else if (key == SDLK_RETURN || key == SDLK_KP_ENTER)
+                else if (key == SDLK_RETURN || key == SDLK_KP_ENTER || key == SDLK_SPACE)
                 {
-                    // Return presses the first button that can be pressed,
-                    // which is what a login form is for.
-                    for (size_t i = 0; i < activeForm.rows.size(); ++i)
+                    // The button being looked at, if one is. Otherwise the
+                    // first that can be pressed, which is what a sign-in form
+                    // is for - typing a password and pressing return should
+                    // sign in rather than do nothing.
+                    int pressing = -1;
+                    if (formFocus >= 0 && formFocus < static_cast<int>(activeForm.rows.size()) &&
+                        activeForm.rows[static_cast<size_t>(formFocus)].kind == mh::FormRowKind::Button &&
+                        activeForm.rows[static_cast<size_t>(formFocus)].enabled)
                     {
-                        if (activeForm.rows[i].kind == mh::FormRowKind::Button &&
-                            activeForm.rows[i].enabled)
+                        pressing = formFocus;
+                    }
+                    else if (key != SDLK_SPACE)
+                    {
+                        // Space only presses the button under the focus. In a
+                        // text field it is a space, and typing one should not
+                        // submit the form.
+                        for (size_t i = 0; i < activeForm.rows.size(); ++i)
                         {
-                            if (link)
+                            if (activeForm.rows[i].kind == mh::FormRowKind::Button &&
+                                activeForm.rows[i].enabled)
                             {
-                                link->submitForm(static_cast<int>(i), formValues);
+                                pressing = static_cast<int>(i);
+                                break;
                             }
-                            break;
                         }
+                    }
+
+                    if (pressing >= 0 && link)
+                    {
+                        link->submitForm(pressing, formValues);
                     }
                 }
             }
@@ -6443,14 +6464,20 @@ constexpr float kGravity = 26.0f;
                                       pointerY < cursorY + buttonHigh;
                     const bool held = formPressed == static_cast<int>(formButtons.size());
 
+                    // Tab reaches buttons, so one can be the thing being looked
+                    // at with no pointer anywhere near it. Lit the same as
+                    // hovered: what return will press has to be visible, or
+                    // tabbing past sign-in to quit is done blind.
+                    const bool focused = enabled && item.formRow == formFocus;
+
                     form.rects[item.drawRow][0] = buttonLeft;
                     form.rects[item.drawRow][1] = cursorY;
                     form.rects[item.drawRow][2] = buttonWide;
                     form.rects[item.drawRow][3] = buttonHigh;
 
                     const float* fill = !enabled  ? kDialogButtonOff
-                                        : (over || held) ? kDialogButtonHot
-                                                         : kDialogButton;
+                                        : (over || held || focused) ? kDialogButtonHot
+                                                                    : kDialogButton;
                     form.fills[item.drawRow][0] = fill[0];
                     form.fills[item.drawRow][1] = fill[1];
                     form.fills[item.drawRow][2] = fill[2];
