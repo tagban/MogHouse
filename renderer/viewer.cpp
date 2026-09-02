@@ -2890,6 +2890,10 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // The railway through Sel Phiner, if this zone has one. Nothing else does.
     mh::Monorail monorail;
 
+    /// What this viewer has said to itself. The client keeps its chat on the
+    /// link; the standalone viewer has no link and still has things to say.
+    std::vector<std::string> viewerChat = options.testChat;
+
     /// Whether the character is aboard, as this viewer knows it. The client
     /// says so through the link; the standalone viewer has no link and says so
     /// with the T key, so both have to be asked.
@@ -2925,12 +2929,15 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             }
         }
 
-        // Where it calls, as distances along the line. Picked by riding it and
-        // marking the places a stop belongs, rather than spaced evenly - a
-        // station goes where there is a reason to get off, and the line runs
-        // past a signpost, a bridge and a walled mill before it reaches the
-        // far end. The two ends are stops as well and setStops adds them.
-        std::vector<float> stops{127.0f, 262.0f, 468.0f, 1050.0f};
+        // Where it calls, as distances along the line.
+        //
+        // Nowhere, by default: it runs end to end and a rider steps off where
+        // they like. Stops at 127, 262, 468 and 1050 were tried - beside a
+        // signpost, a bridge and a walled mill - and they felt forced. Waiting
+        // out a halt you did not ask for is worse than the walk you saved, on a
+        // line you can leave at any point along it. The ends remain stops
+        // because the train has to turn round somewhere.
+        std::vector<float> stops;
         if (const char* wanted = SDL_getenv("MOGHOUSE_TRAIN_STOPS"))
         {
             stops.clear();
@@ -4338,6 +4345,38 @@ constexpr float kGravity = 26.0f;
                         link->setRiding(ridingHere);
                     }
                     std::printf("%s the train\n", ridingHere ? "boarded" : "left");
+
+                    // Announced the way a conductor would, in the chat log
+                    // where announcements go. It names where the line runs when
+                    // the zone has a name to give - the standalone viewer is
+                    // often handed a DAT and nothing else.
+                    std::string said;
+                    if (ridingHere)
+                    {
+                        said = "All aboard! The train";
+                        if (currentZoneName && !currentZoneName->empty())
+                        {
+                            said += " through " + *currentZoneName;
+                        }
+                        said += ".";
+                    }
+                    else
+                    {
+                        said = "Mind the step.";
+                    }
+
+                    if (link)
+                    {
+                        link->pushChat(said);
+                    }
+                    else
+                    {
+                        viewerChat.push_back(said);
+                        while (viewerChat.size() > 8)
+                        {
+                            viewerChat.erase(viewerChat.begin());
+                        }
+                    }
                 }
                 else if (event.key.key == SDLK_P)
                 {
@@ -4709,7 +4748,12 @@ constexpr float kGravity = 26.0f;
 
             camera.orbiting = true;
             camera.target = {characterAt.x, characterAt.y + 1.2f, characterAt.z};
-            wantedDistance = std::clamp(wantedDistance - zoom * 0.6f, 1.5f, 25.0f);
+
+            // Much further out than walking allows. Riding is sightseeing: the
+            // whole point is watching the country go past, and twenty-five
+            // units - which is the right leash for a person on foot - keeps the
+            // camera inside the carriage with them.
+            wantedDistance = std::clamp(wantedDistance - zoom * 2.0f, 1.5f, 220.0f);
             camera.distance = wantedDistance;
         }
         else if (driving && character)
@@ -6170,12 +6214,24 @@ constexpr float kGravity = 26.0f;
                           kPositionScale, kHudDim, 0.55f);
                 }
 
+                // Aboard the train, and how to stop being aboard it.
+                //
+                // Held on screen the whole ride rather than said once when
+                // boarding: the line takes a minute end to end, a rider who
+                // looks away has no way back to a message that has scrolled
+                // off, and there is nothing else on screen to say that walking
+                // will not work because the train has them.
+                if (aboard)
+                {
+                    label("PRESS T TO STEP OFF", 0.0f, -0.82f, 0.5f, kHudBright, 0.55f);
+                }
+
                 // Chat, bottom left, oldest at the top. Same atlas as
                 // everything else: this was the last thing still drawing from
                 // the 4x6 bitmap font, which had no lower case at all.
                 if (showHud)
                 {
-                    std::vector<std::string> lines = link ? link->chat() : options.testChat;
+                    std::vector<std::string> lines = link ? link->chat() : viewerChat;
                     if (lines.empty())
                     {
                         lines.push_back("Chat - waiting for the server");

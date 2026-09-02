@@ -287,7 +287,7 @@ private:
     /// How fast it runs, in world units a second. Slow: it is scenery at the
     /// far side of a valley, and something crossing a backdrop at a sprint
     /// reads as a mistake.
-    static constexpr float kSpeed = 20.0f;
+    static constexpr float kSpeed = 22.0f;
 
     /// How long it stands at each end before setting off again.
     static constexpr float kDwellSeconds = 9.0f;
