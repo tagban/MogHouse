@@ -306,16 +306,13 @@ public static class ClientFlow
 
         // The server sends entities, the tracker ages them, the renderer draws
         // their nameplates. Without this the world is right and empty of
-        // everyone else.
+        // everyone else. WorldLoop takes over feeding it once the zone is up.
         var tracker = new FfxiEntityTracker { SelfUniqueNo = state.UniqueNo };
-        game.EntitiesChanged += updates =>
+        DateTimeOffset firstSeen = DateTimeOffset.UtcNow;
+        foreach (FfxiEntityUpdate update in game.KnownEntities())
         {
-            DateTimeOffset now = DateTimeOffset.UtcNow;
-            foreach (FfxiEntityUpdate update in updates)
-            {
-                tracker.Observe(update, now);
-            }
-        };
+            tracker.Observe(update, firstSeen);
+        }
 
         // Who the player turned out to be. None of this was known when the
         // window opened, which is the whole reason it can be said now.
@@ -337,19 +334,11 @@ public static class ClientFlow
         // something again.
         world.ShowHud(true);
 
-        while (!world.Closed)
-        {
-            // Where the player has walked to. Only the client talks to the
-            // server, so without this a character walks around on screen while
-            // standing still in the world.
-            if (!world.IsLoading && world.Position() is (float x, float vertical, float depth, sbyte facing))
-            {
-                game.PlaceAt(x, vertical, depth, facing);
-            }
-
-            world.Publish(tracker);
-            Thread.Sleep(100);
-        }
+        // Everything that happens while somebody is in the world - what they
+        // typed, what they jumped over, what killed them, which zone they
+        // walked into - lives in WorldLoop rather than here, and used to live
+        // in a view model that also drew things.
+        new WorldLoop(game, world, tracker, state.ZoneNo, character.Name, say).Run();
 
         say.WriteLine("the window closed; leaving the world");
         return null;

@@ -1,3 +1,4 @@
+using MogHouse.Core.Ffxi;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;

@@ -2,7 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 
-namespace MogHouse.App;
+namespace MogHouse.Core.Ffxi;
 
 /// <summary>
 /// Finding links in text, and opening them.
