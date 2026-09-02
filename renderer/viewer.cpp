@@ -69,8 +69,11 @@ constexpr wgpu::TextureFormat kDepthFormat = wgpu::TextureFormat::Depth24Plus;
 /// How far below a carriage's own origin somebody riding in it stands.
 ///
 /// The cars hang from the beam, so their origin is up at the coupling rather
-/// than at the floor.
-inline constexpr float kRideDrop = 3.6f;
+/// than at the floor. Measured rather than guessed: mono_b1's geometry runs
+/// from 2.00 below that origin to 3.80 above it, so its floor is the 2.00 and
+/// this sits a rider a fraction inside it. Guessing 3.6 put their feet more
+/// than a unit under the carriage and their legs hung out of the bottom.
+inline constexpr float kRideDrop = 1.9f;
 
 /// How much of a faded character is drawn. Enough to read the shape and the
 /// colours, little enough that the one being pointed at is obviously the one in
