@@ -55,6 +55,15 @@ struct Scene
     std::vector<float> instances;   ///< 16 floats per placement, column major
     std::vector<InstancedDraw> draws;
 
+    /// Where each model's placements sit in `instances`: first index and count.
+    ///
+    /// They are grouped by model as the scene is built, so every copy of one
+    /// model is contiguous. Kept because a draw records the texture it uses and
+    /// not the model it came from, which leaves no way to find a particular
+    /// thing again afterwards - and the monorail in Sel Phiner has to be found
+    /// again on every frame it moves.
+    std::unordered_map<std::string, std::pair<uint32_t, uint32_t>> instanceRanges;
+
     /// Water surfaces, as flat quads. Not instanced - each cell's plane is its
     /// own rectangle - and not placed by the placement table: water comes from a
     /// height carried on each collision grid entry.

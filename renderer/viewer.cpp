@@ -36,6 +36,7 @@
 #include "scene.h"
 #include "surface.h"
 #include "sky_shader.h"
+#include "monorail.h"
 #include "music.h"
 #include "water_shader.h"
 #include "zone_shader.h"
@@ -1576,8 +1577,10 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                                         wgpu::BufferUsage::Vertex);
             indexBuffer = createBuffer(device, zone->indices.data(), zone->indices.size() * sizeof(uint32_t),
                                        wgpu::BufferUsage::Index);
+            // CopyDst as well as Vertex: the monorail rewrites its cars'
+            // transforms in here every frame it moves.
             instanceBuffer = createBuffer(device, zone->instances.data(), zone->instances.size() * sizeof(float),
-                                          wgpu::BufferUsage::Vertex);
+                                          wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst);
             indexCount = static_cast<uint32_t>(zone->indices.size());
             std::printf("buffers created\n");
 
@@ -2823,6 +2826,18 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // fog with the interface still drawn over it, which looks like a zone that
     // failed to load rather than one being thrown away by the projection.
     float radius = zone ? std::max(zone->radius(), 1.0f) : 1.0f;
+
+    // The railway through Sel Phiner, if this zone has one. Nothing else does.
+    mh::Monorail monorail;
+    const auto findMonorail = [&]()
+    {
+        if (zone && monorail.find(*zone))
+        {
+            std::printf("monorail: %zu cars on %.0f units of track\n", monorail.cars().size(),
+                        static_cast<double>(monorail.routeLength()));
+        }
+    };
+    findMonorail();
 
     // Where a character-select line-up stands, and which way it faces.
     //
@@ -4420,6 +4435,43 @@ constexpr float kGravity = 26.0f;
 
         const uint64_t nowTicks = SDL_GetTicksNS();
         const float delta = static_cast<float>(nowTicks - previousTicks) / 1e9f;
+
+        // The train, moved on and written straight into the instance buffer the
+        // zone is drawn from - it is scenery like everything else in there, and
+        // the only difference is that these four rows change.
+        if (monorail.advance(delta) && instanceBuffer)
+        {
+            // Where it has got to, every couple of seconds. A train on a
+            // thousand units of track is mostly somewhere you are not looking,
+            // so "is it moving" is otherwise a question you answer by waiting.
+            if (SDL_getenv("MOGHOUSE_TRAIN_WATCH") != nullptr)
+            {
+                static float sinceReport = 0.0f;
+                sinceReport += delta;
+                if (sinceReport >= 2.0f)
+                {
+                    sinceReport = 0.0f;
+                    const mh::Vec3 at = monorail.head();
+                    std::printf("train at %.1f %.1f %.1f\n", at.x, at.y, at.z);
+                }
+            }
+
+            for (const mh::Monorail::Car& car : monorail.cars())
+            {
+                const float c = std::cos(car.heading);
+                const float sn = std::sin(car.heading);
+
+                // The same shape the placement transforms have: a turn about Y
+                // with the position in the last row, column major.
+                const float transform[16] = {c,      0.0f, -sn,     0.0f,
+                                             0.0f,   1.0f, 0.0f,    0.0f,
+                                             sn,     0.0f, c,       0.0f,
+                                             car.at.x, car.at.y, car.at.z, 1.0f};
+                queue.WriteBuffer(instanceBuffer, static_cast<uint64_t>(car.instance) * sizeof(transform),
+                                  transform, sizeof(transform));
+            }
+        }
+
 
         // A trail to back up along, sampled on a timer. Only recorded when the
         // character has actually moved, so standing still does not fill the
@@ -6927,6 +6979,7 @@ constexpr float kGravity = 26.0f;
                 // The new zone's size, for the far plane and the light.
                 radius = zone ? std::max(zone->radius(), 1.0f) : 1.0f;
                 findLineupSpot();
+                findMonorail();
 
                 characterAt = {pending.x, pending.y, pending.z};
                 characterFacing = pending.heading;

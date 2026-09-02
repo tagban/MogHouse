@@ -186,6 +186,7 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
         {
             scene.instances.insert(scene.instances.end(), transform.m, transform.m + 16);
         }
+        scene.instanceRanges[name] = {instanceOffset, static_cast<uint32_t>(transforms.size())};
 
         uint32_t meshIndex = 0;
         for (const ffxi::ModelMesh& mesh : model.meshes)
@@ -406,6 +407,15 @@ void append(Scene& into, const Scene& extra)
         draw.indexOffset += indexBase;
         draw.instanceOffset += instanceBase;
         into.draws.push_back(std::move(draw));
+    }
+
+    // The ranges move with the instances they name. A model that appears in
+    // both scenes keeps the first, which is the one the draws already point at
+    // - the interiors this appends are separate buildings, and nothing in them
+    // shares a model with something that has to be found again.
+    for (const auto& [name, range] : extra.instanceRanges)
+    {
+        into.instanceRanges.emplace(name, std::pair<uint32_t, uint32_t>{range.first + instanceBase, range.second});
     }
 
     const auto waterBase = static_cast<uint32_t>(into.waterVertices.size());
