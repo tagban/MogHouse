@@ -522,6 +522,34 @@ public:
     /// track separately.
     bool takeFormResult(int& button, std::vector<std::string>& values);
 
+    /// Who the player is, for their own nameplate.
+    ///
+    /// Set after the window exists rather than when it is made: the client now
+    /// opens the window first and draws its sign-in inside it, so at the moment
+    /// the renderer starts there is no character yet and no name to give it.
+    void setPlayerName(std::string name);
+    std::string playerName() const;
+
+    /// What the player looks like - race,face,head,body,hands,legs,feet, as
+    /// ViewerOptions::look takes it.
+    ///
+    /// Taken rather than read, and applied at the next zone load. Building a
+    /// character means reading a skeleton, its motions and a file per slot, so
+    /// it is not something to redo mid-frame; a zone load is already rebuilding
+    /// the world, and until one happens there is nowhere for a body to stand.
+    void setLook(std::string look);
+    bool takeLook(std::string& out);
+
+    /// The server's clock, in Earth seconds since the Vana'diel epoch.
+    ///
+    /// Carries the moment it was set alongside it, which ViewerOptions did not
+    /// have to: that seed was fixed before the window opened, so time since
+    /// startup was time since the seed. Now the window opens first and the
+    /// clock only arrives at zone-in, so counting from startup would put the
+    /// sky ahead by however long the player spent signing in.
+    void setServerClock(uint32_t clock);
+    bool serverClock(uint32_t& clock, uint64_t& setAtNs) const;
+
 private:
     mutable std::mutex mutex_;
     std::vector<RadarEntity> entities_;
@@ -568,6 +596,16 @@ private:
     std::string music_;
     bool musicChanged_{false};
     std::atomic<int> deathChoice_{0};
+
+    // Under the form mutex with everything else the screens touch. A name is
+    // read every frame the character is drawn, so it is copied out rather than
+    // held by reference.
+    std::string playerName_;
+    std::string look_;
+    bool lookChanged_{false};
+    uint32_t serverClock_{0};
+    uint64_t serverClockSetAtNs_{0};
+    bool serverClockKnown_{false};
 };
 
 /// Reads the options the standalone viewer has always taken: the zone from

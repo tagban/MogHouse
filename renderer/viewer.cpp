@@ -1124,6 +1124,68 @@ bool mh::ViewerLink::takeFormResult(int& button, std::vector<std::string>& value
     return true;
 }
 
+void mh::ViewerLink::setPlayerName(std::string name)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    playerName_ = std::move(name);
+}
+
+std::string mh::ViewerLink::playerName() const
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    return playerName_;
+}
+
+void mh::ViewerLink::setLook(std::string look)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (look == look_)
+    {
+        // Same as it was, so nothing to rebuild. Worth checking here: the
+        // client has no reason to track whether it has said this before, and
+        // rebuilding a character on every zone load would be a visible stall
+        // for no change.
+        return;
+    }
+
+    look_ = std::move(look);
+    lookChanged_ = true;
+}
+
+bool mh::ViewerLink::takeLook(std::string& out)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (!lookChanged_)
+    {
+        return false;
+    }
+
+    out = look_;
+    lookChanged_ = false;
+    return true;
+}
+
+void mh::ViewerLink::setServerClock(uint32_t clock)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    serverClock_ = clock;
+    serverClockSetAtNs_ = SDL_GetTicksNS();
+    serverClockKnown_ = true;
+}
+
+bool mh::ViewerLink::serverClock(uint32_t& clock, uint64_t& setAtNs) const
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (!serverClockKnown_)
+    {
+        return false;
+    }
+
+    clock = serverClock_;
+    setAtNs = serverClockSetAtNs_;
+    return true;
+}
+
 void mh::ViewerLink::stop() { stop_ = true; }
 
 bool mh::ViewerLink::stopping() const { return stop_; }
@@ -2311,8 +2373,17 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     float mapCentreZ = 0.0f;
     float mapHalf = 1.0f;
 
-    if (mapTexture && !collision.empty())
+    // Also a lambda, and for the same reason: the radar is built from the map
+    // baked out of the zone and from its collision, neither of which exists
+    // when the window opens onto a sign-in screen. Run once here for the
+    // standalone viewer, and again whenever a zone arrives.
+    const auto setUpRadar = [&]()
     {
+        if (!mapTexture || collision.empty())
+        {
+            return;
+        }
+
         constexpr uint32_t kMaskSize = 1024;
         const mh::Vec3 middle = zone->centre();
         const float half = std::max(zone->boundsMax.x - zone->boundsMin.x, zone->boundsMax.z - zone->boundsMin.z) * 0.5f;
@@ -2408,7 +2479,8 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         radarBindGroup = device.CreateBindGroup(&radarBindGroupDescriptor);
 
         std::printf("radar: ready, %zu entities to show\n", options.testEntities.size());
-    }
+    };
+    setUpRadar();
 
     // `characterPath` is a semicolon-separated list of DATs to assemble
     // one character from, and MOGHOUSE_CHARACTER_AT is where to stand it.
@@ -2419,58 +2491,67 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // race,face,head,body,hands,legs,feet, all model ids. The skeleton comes
     // from the race and each slot from its own file, which is how a change of
     // outfit is one number rather than a different character.
-    if (const char* lookEnv = options.look ? options.look->c_str() : nullptr)
+    // A named lambda rather than a block, because this now runs twice: once
+    // here for whatever the options carried, and again when the client says who
+    // the player turned out to be. The window opens before the sign-in screen
+    // does, so at this point the answer is usually a placeholder.
+    auto buildFromLook = [&textures](const char* lookText) -> std::optional<LoadedCharacter>
     {
         ffxi::Look look;
-        if (!ffxi::parseLook(lookEnv, look))
+        if (!ffxi::parseLook(lookText, look))
         {
             std::printf("MOGHOUSE_LOOK wants race,face,head,body,hands,legs,feet\n");
+            return std::nullopt;
         }
-        else
+
+        try
         {
-            try
-            {
-                const ffxi::FileTable table{ffxi::defaultInstallRoot()};
-                std::vector<std::string> paths;
+            const ffxi::FileTable table{ffxi::defaultInstallRoot()};
+            std::vector<std::string> paths;
 
-                // The skeleton file first: it carries the bones every piece is
-                // hung on, and nothing but the race decides it.
-                if (auto skeleton = table.path(ffxi::skeletonFileId(look.race)))
-                {
-                    paths.push_back(skeleton->string());
-                }
-
-                // Then the movement motions. Only the first of the four: the
-                // rest repeat the same clip names for other weapon stances,
-                // and loading them all would just overwrite these.
-                const std::vector<size_t> motions = ffxi::motionFileIds(look.race);
-                if (!motions.empty())
-                {
-                    if (auto motion = table.path(motions.front()))
-                    {
-                        paths.push_back(motion->string());
-                    }
-                }
-                std::printf("look: %s", ffxi::raceName(look.race));
-                for (size_t i = 0; i < static_cast<size_t>(ffxi::LookSlot::Count); ++i)
-                {
-                    const auto slot = static_cast<ffxi::LookSlot>(i);
-                    const size_t fileId = ffxi::modelFileId(look.race, slot, look.model[i]);
-                    auto path = fileId ? table.path(fileId) : std::nullopt;
-                    std::printf(", %s %u%s", ffxi::slotName(slot), look.model[i], path ? "" : " (missing)");
-                    if (path)
-                    {
-                        paths.push_back(path->string());
-                    }
-                }
-                std::printf("\n");
-                character = loadCharacter(paths, textures);
-            }
-            catch (const std::exception& e)
+            // The skeleton file first: it carries the bones every piece is
+            // hung on, and nothing but the race decides it.
+            if (auto skeleton = table.path(ffxi::skeletonFileId(look.race)))
             {
-                std::printf("could not read the file table: %s\n", e.what());
+                paths.push_back(skeleton->string());
             }
+
+            // Then the movement motions. Only the first of the four: the
+            // rest repeat the same clip names for other weapon stances,
+            // and loading them all would just overwrite these.
+            const std::vector<size_t> motions = ffxi::motionFileIds(look.race);
+            if (!motions.empty())
+            {
+                if (auto motion = table.path(motions.front()))
+                {
+                    paths.push_back(motion->string());
+                }
+            }
+            std::printf("look: %s", ffxi::raceName(look.race));
+            for (size_t i = 0; i < static_cast<size_t>(ffxi::LookSlot::Count); ++i)
+            {
+                const auto slot = static_cast<ffxi::LookSlot>(i);
+                const size_t fileId = ffxi::modelFileId(look.race, slot, look.model[i]);
+                auto path = fileId ? table.path(fileId) : std::nullopt;
+                std::printf(", %s %u%s", ffxi::slotName(slot), look.model[i], path ? "" : " (missing)");
+                if (path)
+                {
+                    paths.push_back(path->string());
+                }
+            }
+            std::printf("\n");
+            return loadCharacter(paths, textures);
         }
+        catch (const std::exception& e)
+        {
+            std::printf("could not read the file table: %s\n", e.what());
+            return std::nullopt;
+        }
+    };
+
+    if (const char* lookEnv = options.look ? options.look->c_str() : nullptr)
+    {
+        character = buildFromLook(lookEnv);
     }
     else if (const char* charEnv = options.characterPath ? options.characterPath->c_str() : nullptr)
     {
@@ -2514,8 +2595,24 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     wgpu::Buffer characterInstanceBuffer;
     std::vector<wgpu::Texture> characterTextures;
     std::vector<wgpu::BindGroup> characterBindGroups;
-    if (character && !character->geometry.indices.empty() && pipeline)
+    // A lambda rather than a block, because the client now opens its window
+    // before it has either a zone or a character: this has to run again when
+    // they arrive. Left as a one-off, a character signed in through the
+    // in-window screens had its model built and never uploaded, so it drew as
+    // nothing at all while its nameplate hung in the air above it.
+    const auto uploadCharacter = [&]()
     {
+        if (!character || character->geometry.indices.empty() || !pipeline)
+        {
+            return;
+        }
+
+        // Cleared first: these are appended to, and the draw loop indexes them
+        // by batch, so a second call would leave it reading the previous
+        // character's bind groups.
+        characterTextures.clear();
+        characterBindGroups.clear();
+
         characterVertexBuffer = createBuffer(device, character->geometry.vertices.data(),
                                              character->geometry.vertices.size() * sizeof(mh::Vertex),
                                              wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst);
@@ -2571,14 +2668,30 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                 .layout = zoneBindGroupLayout, .entryCount = 3, .entries = entries};
             characterBindGroups.push_back(device.CreateBindGroup(&bindGroupDescriptor));
         }
-    }
-    else if (character)
+    };
+    uploadCharacter();
+    if (character && !pipeline)
     {
+        // Not fatal any more. It used to be: a character could only ever be
+        // drawn with the zone that was loaded at startup, so no zone meant no
+        // character for the rest of the run. Now a zone can arrive later and
+        // uploadCharacter runs again with it.
         std::printf("a character needs a zone loaded: it draws with the zone pipelines\n");
     }
 
     const mh::Vec3 centre = zone ? zone->centre() : mh::Vec3{};
-    const float radius = zone ? std::max(zone->radius(), 1.0f) : 1.0f;
+
+    // How big the world is, which decides the far plane and how wide the light
+    // is projected. Not const, because it belongs to the zone rather than to
+    // the session: a client that opens its window before it has a zone starts
+    // with no bounds at all, and one that walks from a small zone to a large
+    // one would otherwise keep the small one's.
+    //
+    // Left fixed at the 1.0 fallback, the far plane sits four units from the
+    // eye and everything further away is clipped - the world renders as empty
+    // fog with the interface still drawn over it, which looks like a zone that
+    // failed to load rather than one being thrown away by the projection.
+    float radius = zone ? std::max(zone->radius(), 1.0f) : 1.0f;
 
     mh::Camera camera;
     camera.target = centre;
@@ -3482,6 +3595,25 @@ constexpr float kGravity = 26.0f;
         return true;
     };
 
+    // What the player wants the interface scaled by, on top of the display's
+    // own correction below. "The right physical size" and "the size I want to
+    // read" are not the same thing, and on a large monitor at a distance they
+    // are quite far apart.
+    float uiScaleSetting = 1.0f;
+    if (const char* wanted = SDL_getenv("MOGHOUSE_UI_SCALE"))
+    {
+        const float parsed = std::strtof(wanted, nullptr);
+        if (parsed > 0.0f)
+        {
+            uiScaleSetting = std::clamp(parsed, 0.5f, 4.0f);
+            std::printf("interface scaled by %.2f\n", uiScaleSetting);
+        }
+        else
+        {
+            std::printf("MOGHOUSE_UI_SCALE wants a number, like 1.25\n");
+        }
+    }
+
     uint64_t previousTicks = SDL_GetTicksNS();
     bool running = true;
     while (running)
@@ -4041,9 +4173,25 @@ constexpr float kGravity = 26.0f;
         // side by side showed different hours and different light, which is
         // precisely when you want them to agree.
         int clockMinutes = 0;
+
+        // What the client has said the server's clock is, if it has said
+        // anything. Read before the branches because two of them want it.
+        uint32_t liveClock = 0;
+        uint64_t clockSetAtNs = 0;
+        const bool haveLiveClock = link && link->serverClock(liveClock, clockSetAtNs);
+
         if (timeFixed)
         {
             clockMinutes = fixedMinutes;
+        }
+        else if (haveLiveClock)
+        {
+            // Counted from when the client handed the clock over, not from
+            // startup - the window is open through the whole sign-in, and that
+            // time is not time the world has passed through.
+            const uint64_t elapsed = (SDL_GetTicksNS() - clockSetAtNs) / 1000000000ull;
+            vanaSeconds = (static_cast<uint64_t>(liveClock) + elapsed) * 25ull;
+            clockMinutes = static_cast<int>((vanaSeconds / 60ull) % 1440ull);
         }
         else if (options.serverClock)
         {
@@ -4627,6 +4775,30 @@ constexpr float kGravity = 26.0f;
         const uint32_t width = surfaceTexture.texture.GetWidth();
         const uint32_t height = surfaceTexture.texture.GetHeight();
 
+        // How much bigger the interface has to be drawn to come out the same
+        // physical size on any display.
+        //
+        // It is laid out in pixels, and a Retina or 4K panel has around twice
+        // as many of them per inch as a 1080p one - so text and buttons sized
+        // in pixels came out at half the size on a Mac that they do on a
+        // 1080p Windows machine, which is exactly how it looked. SDL reports
+        // the window in points as well as pixels and the ratio between the two
+        // is the correction; on a display where they are the same it is 1 and
+        // nothing changes.
+        //
+        // Per frame rather than once, because a window can be dragged from one
+        // display to another and the ratio changes with it.
+        float uiScale = uiScaleSetting;
+        {
+            int pointsAcross = 0;
+            int pointsDown = 0;
+            SDL_GetWindowSize(window, &pointsAcross, &pointsDown);
+            if (pointsDown > 0)
+            {
+                uiScale *= static_cast<float>(height) / static_cast<float>(pointsDown);
+            }
+        }
+
         wgpu::RenderPassColorAttachment colour{.view = surfaceTexture.texture.CreateView(),
                                                .loadOp = wgpu::LoadOp::Clear,
                                                .storeOp = wgpu::StoreOp::Store,
@@ -5170,7 +5342,7 @@ constexpr float kGravity = 26.0f;
                 // glyph that reaches the screen. The atlas is generated near
                 // display size for the same reason; a scale far from 1.0 will
                 // soften again, so the labels stay close to it.
-                hud.counts[1] = static_cast<float>(textFont.cell) * 2.0f / static_cast<float>(height);
+                hud.counts[1] = static_cast<float>(textFont.cell) * 2.0f * uiScale / static_cast<float>(height);
                 hud.counts[2] = windowAspect;
                 hud.atlas[0] = static_cast<float>(textFont.columns);
                 hud.atlas[1] = static_cast<float>(textFont.cell);
@@ -5513,7 +5685,7 @@ constexpr float kGravity = 26.0f;
                 // Smaller than 1:1 with the atlas. Names sit out in the world
                 // rather than pinned to a panel, and a dozen of them at full
                 // size cover more of the zone than they label.
-                plate.counts[1] = static_cast<float>(textFont.cell) * 2.0f * 0.6f / static_cast<float>(height);
+                plate.counts[1] = static_cast<float>(textFont.cell) * 2.0f * uiScale * 0.6f / static_cast<float>(height);
                 plate.counts[2] = windowAspect;
                 plate.atlas[0] = static_cast<float>(textFont.columns);
                 plate.atlas[1] = static_cast<float>(textFont.cell);
@@ -5583,7 +5755,17 @@ constexpr float kGravity = 26.0f;
                 // Our own name, over our own head. The game shows everyone
                 // their own nameplate; leaving it off made our character the
                 // only anonymous one on screen.
-                if (options.playerName && !options.playerName->empty() && character)
+                // The link first: the client learns the name at character
+                // select, which is long after the options were fixed. The
+                // options are the fallback, for the standalone viewer that has
+                // no client to tell it anything.
+                std::string shownPlayerName = link ? link->playerName() : std::string{};
+                if (shownPlayerName.empty() && options.playerName)
+                {
+                    shownPlayerName = *options.playerName;
+                }
+
+                if (!shownPlayerName.empty() && character)
                 {
                     plate.positions[named][0] = characterAt.x;
                     plate.positions[named][1] = characterAt.y + character->geometry.height() + kPlateClearance;
@@ -5591,7 +5773,7 @@ constexpr float kGravity = 26.0f;
                     plate.colours[named][0] = kNameWhite[0];
                     plate.colours[named][1] = kNameWhite[1];
                     plate.colours[named][2] = kNameWhite[2];
-                    named = layOutPlate(plate, named, *options.playerName);
+                    named = layOutPlate(plate, named, shownPlayerName);
                 }
 
                 for (const mh::RadarEntity& entity : radarEntities)
@@ -5730,7 +5912,7 @@ constexpr float kGravity = 26.0f;
 
             // 1:1 with the atlas, as the HUD is - see there for why the size
             // is derived from the window rather than chosen.
-            box.counts[1] = static_cast<float>(textFont.cell) * 2.0f / static_cast<float>(height);
+            box.counts[1] = static_cast<float>(textFont.cell) * 2.0f * uiScale / static_cast<float>(height);
             box.counts[2] = windowAspect;
             box.counts[3] = 0.42f;
             box.atlas[0] = static_cast<float>(textFont.columns);
@@ -5985,7 +6167,7 @@ constexpr float kGravity = 26.0f;
 
             DialogUniforms form{};
             const float windowAspect = static_cast<float>(width) / static_cast<float>(height);
-            form.counts[1] = static_cast<float>(textFont.cell) * 2.0f / static_cast<float>(height);
+            form.counts[1] = static_cast<float>(textFont.cell) * 2.0f * uiScale / static_cast<float>(height);
             form.counts[2] = windowAspect;
             form.counts[3] = 0.62f;   // dimmer than the death box: there may be no world behind it
             form.atlas[0] = static_cast<float>(textFont.columns);
@@ -6373,6 +6555,48 @@ constexpr float kGravity = 26.0f;
 
             if (readZone() == 0)
             {
+                // Who the player turned out to be. The sign-in happens in this
+                // window now, so the character is only known well after the
+                // renderer started, and this is the first moment there is a
+                // world for the body to stand in.
+                //
+                // After readZone, never before it: reading a zone clears the
+                // texture cache, so a character built first loses its textures
+                // to the zone that follows and renders as white nothing. This
+                // is the order the startup path uses for the same reason.
+                if (std::string wanted; link && link->takeLook(wanted) && !wanted.empty())
+                {
+                    if (auto rebuilt = buildFromLook(wanted.c_str()))
+                    {
+                        character = std::move(rebuilt);
+
+                        // "A character in the world starts in the second" - and
+                        // this is the first moment there is one. `driving` is
+                        // decided once before the loop, from a character that
+                        // does not exist yet when the client signs in inside
+                        // this window, so without this the camera stays in
+                        // free-fly for the rest of the session: it never
+                        // follows anyone, and the world is viewed from
+                        // wherever the empty screen happened to leave it.
+                        driving = true;
+                    }
+                }
+
+                // The character needs uploading through the pipelines the zone
+                // brought with it. This was one-off setup back when a zone was
+                // always present at startup.
+                //
+                // setUpRadar is deliberately NOT called here. Re-running it
+                // took the world and the whole interface with it: the radar
+                // builds resources that the pipelines set up after it are bound
+                // to, and replacing those leaves every one of those bind groups
+                // pointing at something that no longer exists. The radar is
+                // built once, from whatever zone the window opened with.
+                uploadCharacter();
+
+                // The new zone's size, for the far plane and the light.
+                radius = zone ? std::max(zone->radius(), 1.0f) : 1.0f;
+
                 characterAt = {pending.x, pending.y, pending.z};
                 characterFacing = pending.heading;
                 placeCharacter(characterAt, 60.0f, true);

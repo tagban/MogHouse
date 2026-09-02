@@ -360,6 +360,32 @@ void mh_viewer_stop(MhViewerHandle viewer)
     }
 }
 
+void mh_viewer_set_player(MhViewerHandle viewer, const char* name, const char* look)
+{
+    if (viewer == nullptr)
+    {
+        return;
+    }
+
+    if (name != nullptr)
+    {
+        viewer->link.setPlayerName(name);
+    }
+
+    if (look != nullptr)
+    {
+        viewer->link.setLook(look);
+    }
+}
+
+void mh_viewer_set_clock(MhViewerHandle viewer, uint32_t server_clock)
+{
+    if (viewer != nullptr)
+    {
+        viewer->link.setServerClock(server_clock);
+    }
+}
+
 // Pinned because the C# side declares this layout a second time, by hand, and
 // a mismatch would not fail to build on either side - it would just read the
 // wrong bytes. If one of these fires, NativeFormRowData needs the same edit.

@@ -563,6 +563,44 @@ public sealed partial class NativeViewer : IDisposable
     }
 
     /// <summary>
+    /// Tells the renderer who the player is, once that is known.
+    ///
+    /// <para>
+    /// The window opens before the sign-in screen is drawn in it, so neither of
+    /// these is known when the viewer is made. Either may be left null to keep
+    /// what is there.
+    /// </para>
+    ///
+    /// <para>
+    /// <paramref name="look"/> is applied at the next zone load rather than at
+    /// once - building a character reads a skeleton, its motions and a file per
+    /// slot, and before a zone is up there is nowhere for a body to stand.
+    /// </para>
+    /// </summary>
+    public void SetPlayer(string? name = null, string? look = null)
+    {
+        if (!_disposed && _handle != IntPtr.Zero)
+        {
+            mh_viewer_set_player(_handle, name, look);
+        }
+    }
+
+    /// <summary>
+    /// Hands the renderer the server's clock, in Earth seconds since the
+    /// Vana'diel epoch, so the sky agrees with everyone else's.
+    ///
+    /// Set at zone-in: the window is open through the whole sign-in, and the
+    /// renderer counts from when this arrives rather than from startup.
+    /// </summary>
+    public void SetClock(uint serverClock)
+    {
+        if (!_disposed && _handle != IntPtr.Zero)
+        {
+            mh_viewer_set_clock(_handle, serverClock);
+        }
+    }
+
+    /// <summary>
     /// Puts a form up in the renderer, replacing whatever was showing.
     ///
     /// <para>
@@ -812,6 +850,12 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static unsafe partial int mh_viewer_take_chat(IntPtr viewer, byte* buffer, int capacity);
+
+    [LibraryImport(LibraryName)]
+    private static partial void mh_viewer_set_clock(IntPtr viewer, uint serverClock);
+
+    [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial void mh_viewer_set_player(IntPtr viewer, string? name, string? look);
 
     [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
     private static unsafe partial void mh_viewer_set_form(IntPtr viewer, string title, string message,

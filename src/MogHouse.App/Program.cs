@@ -9,11 +9,25 @@ sealed class Program
     // SynchronizationContext-reliant code before AppMain is called: things aren't initialized
     // yet and stuff might break.
     [STAThread]
-    public static void Main(string[] args)
+    public static int Main(string[] args)
     {
         StartLogging();
         HideRuntimeFolder();
+
+        // The client drawing its own screens, in the renderer's window, with no
+        // Avalonia anywhere. Behind a flag while both exist; it becomes the
+        // only path once it has been through everything the old one had.
+        //
+        // Note what is NOT here: no await, and no thread of its own. This call
+        // hands the main thread to the renderer, and the main thread is the
+        // only one AppKit will make a window on.
+        if (Array.IndexOf(args, "--screens") >= 0)
+        {
+            return MogHouse.Core.Screens.ClientFlow.Run();
+        }
+
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        return 0;
     }
 
     /// <summary>

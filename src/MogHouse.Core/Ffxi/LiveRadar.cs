@@ -185,6 +185,113 @@ public sealed class LiveRadar : IDisposable
     }
 
     /// <summary>
+    /// Why a zone could not be drawn, or null when one could.
+    ///
+    /// <para>
+    /// Worth asking before it matters. <see cref="Open"/> refuses to open at
+    /// all without these and says so, but a window opened by
+    /// <see cref="OpenEmpty"/> comes up perfectly well and only fails later,
+    /// when a zone is asked for - and it fails inside the renderer, whose
+    /// complaint goes to its own log. What the player sees is a sign-in that
+    /// works followed by a black world, which is a miserable way to be told
+    /// that a 256-byte file is missing.
+    /// </para>
+    /// </summary>
+    public static string? MissingZoneKeys() =>
+        KeyTable("MOGHOUSE_FFXI_KEYTABLE", "mzb_key_table.bin").Length == 0
+            ? "The MZB key table was not found. It should be in keys/ beside the client, " +
+              "or named by MOGHOUSE_FFXI_KEYTABLE; tools/keytables.py builds one."
+            : null;
+
+    /// <summary>
+    /// Opens the window with nothing in it, for the screens that come before
+    /// there is a character standing anywhere - signing in, picking who to
+    /// play. A zone arrives later through <see cref="LoadZone"/>, which is the
+    /// same path zoning between areas already takes.
+    ///
+    /// <para>
+    /// This is what lets the client draw its own screens instead of putting a
+    /// separate toolkit's window in front of the game. The screens are forms in
+    /// the renderer, so the world can be behind them rather than replaced by
+    /// them.
+    /// </para>
+    /// </summary>
+    /// <param name="ownThread">
+    /// As <see cref="Open"/>. False is right for the client, where the main
+    /// thread runs the loop because AppKit insists on it.
+    /// </param>
+    public static LiveRadar OpenEmpty(bool ownThread = false)
+    {
+        var options = new NativeViewerOptions
+        {
+            // No zone, no keys needed to read one. The renderer clears to
+            // black and draws whatever is put in front of it.
+            ZonePath = string.Empty,
+            KeyTablePath = KeyTable("MOGHOUSE_FFXI_KEYTABLE", "mzb_key_table.bin"),
+            KeyTable2Path = KeyTable("MOGHOUSE_FFXI_KEYTABLE2", "mmb_key_table2.bin"),
+            ScreenshotPath = Environment.GetEnvironmentVariable("MOGHOUSE_SCREENSHOT"),
+            ScreenshotAfterFrames =
+                int.TryParse(Environment.GetEnvironmentVariable("MOGHOUSE_SCREENSHOT_AFTER"), out int after)
+                    ? after
+                    : 0,
+        };
+
+        return new LiveRadar(new NativeViewer(options), ownThread);
+    }
+
+    /// <summary>
+    /// Tells the renderer who the player turned out to be - their name for the
+    /// nameplate, and their look for the body, which is applied at the next
+    /// zone load.
+    /// </summary>
+    public void SetPlayer(string? name = null, string? look = null)
+    {
+        if (!_closed)
+        {
+            _viewer.SetPlayer(name, look);
+        }
+    }
+
+    /// <summary>
+    /// Hands the renderer the server's clock, so the sky matches everyone
+    /// else's. Known at zone-in, which is after the window opened.
+    /// </summary>
+    public void SetClock(uint serverClock)
+    {
+        if (!_closed)
+        {
+            _viewer.SetClock(serverClock);
+        }
+    }
+
+    /// <summary>
+    /// Puts a screen up, replacing whatever was showing. Taking it down is
+    /// <see cref="HideForm"/>.
+    /// </summary>
+    public void ShowForm(string title, string message, IReadOnlyList<NativeFormRow> rows)
+    {
+        if (!_closed)
+        {
+            _viewer.ShowForm(title, message, rows);
+        }
+    }
+
+    /// <summary>Takes the current screen down.</summary>
+    public void HideForm()
+    {
+        if (!_closed)
+        {
+            _viewer.HideForm();
+        }
+    }
+
+    /// <summary>
+    /// What the player pressed, or null while they are still filling the screen
+    /// in. Consumed, like <see cref="TakeChat"/>.
+    /// </summary>
+    public NativeFormResult? TakeFormResult() => _closed ? null : _viewer.TakeFormResult();
+
+    /// <summary>
     /// Whether the player has asked to jump since this was last called.
     /// Consumed, so each jump reaches the server once.
     /// </summary>

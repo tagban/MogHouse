@@ -135,6 +135,17 @@ public static class FfxiInstall
     /// </summary>
     public static string? Confirmed()
     {
+        // Someone who set this said where the game is as plainly as someone who
+        // picked it from a chooser, so it counts as confirmed and the first-run
+        // screen stays away. It also gives a script a way past a prompt that
+        // waits for a person - which is what a headless run would otherwise
+        // hang on forever.
+        if (Environment.GetEnvironmentVariable("MOGHOUSE_FFXI_INSTALL") is { Length: > 0 } fromEnv &&
+            IsInstall(fromEnv))
+        {
+            return fromEnv;
+        }
+
         string? remembered = LoadRemembered();
         return remembered is not null && IsInstall(remembered) ? remembered : null;
     }

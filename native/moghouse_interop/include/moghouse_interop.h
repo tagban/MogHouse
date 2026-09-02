@@ -244,6 +244,26 @@ MH_API void mh_viewer_stop(MhViewerHandle viewer);
 /// Frees the viewer. Stop it and let mh_viewer_run return first.
 MH_API void mh_viewer_destroy(MhViewerHandle viewer);
 
+/// Who the player is and what they look like, once the client knows.
+///
+/// The window now opens before the sign-in screen is drawn in it, so at the
+/// moment the viewer is made there is no character yet - the name and the look
+/// arrive at character select, long after. Either may be null to leave it as it
+/// was.
+///
+/// `look` is race,face,head,body,hands,legs,feet, and is applied at the next
+/// zone load: building a character reads a skeleton, its motions and a file per
+/// slot, and until a zone is up there is nowhere for a body to stand.
+MH_API void mh_viewer_set_player(MhViewerHandle viewer, const char* name, const char* look);
+
+/// The server's clock, in Earth seconds since the Vana'diel epoch, once the
+/// client has been told it.
+///
+/// Set at zone-in rather than when the viewer is made, because the window is
+/// now open through the whole sign-in. The renderer counts from the moment this
+/// arrives, so the sky is not ahead by the time someone spent typing.
+MH_API void mh_viewer_set_clock(MhViewerHandle viewer, uint32_t server_clock);
+
 /// One row of a form the client asks the renderer to draw.
 ///
 /// Fixed-width strings for the same reason MhRadarEntity uses them: the array
