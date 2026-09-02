@@ -13,7 +13,11 @@ public static class FfxiZoneNames
 {
     private static readonly Dictionary<uint, string> Names = new()
     {
-        [0] = "unknown",
+        // Not a zone anyone plays in: it is the backdrop the retail client
+        // stands its characters in, and the server's own table has nothing here.
+        // Named anyway, because it is a real place with a name and the radar has
+        // a line to put it on.
+        [0] = "Remnants_of_Sel_Phiner",
         [1] = "Phanauet_Channel",
         [2] = "Carpenters_Landing",
         [3] = "Manaclipper",

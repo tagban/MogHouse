@@ -29,7 +29,18 @@ ENTRY_SIZE = 0x64
 
 
 def load_key_table_from_lotus(path):
-    text = path.read_text(encoding="utf-8")
+    """The 256-byte MZB key table, from a raw binary or from C++ source.
+
+    Both forms exist: tools/keytables.py writes the binary the renderer is
+    given, and the table was originally read out of a source file that declared
+    it. Taking either means the tools work from a checkout that only has the
+    binary, which is every checkout that is not the one it was first written on.
+    """
+    data = Path(path).read_bytes()
+    if len(data) == 256:
+        return data
+
+    text = data.decode("utf-8", errors="replace")
     body = text.split("key_table[0x100]", 1)[1].split("{", 1)[1].split("}", 1)[0]
     values = [int(v, 16) for v in re.findall(r"0x([0-9A-Fa-f]{2})", body)]
     if len(values) != 256:

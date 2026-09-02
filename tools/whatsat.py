@@ -10,6 +10,7 @@ the Y in the file. X and Z are unchanged, and are what matter here.
 """
 
 import argparse
+import os
 import math
 import struct
 import sys
@@ -80,7 +81,13 @@ def main():
     parser.add_argument("x", type=float)
     parser.add_argument("z", type=float)
     parser.add_argument("--radius", type=float, default=40.0)
-    parser.add_argument("--key-table-from-lotus", required=True)
+    # Defaults to the binary in keys/, which is what the renderer is given and
+    # what tools/keytables.py writes. Required, it meant naming a path on
+    # another machine every time.
+    parser.add_argument(
+        "--key-table-from-lotus",
+        default=os.environ.get("MOGHOUSE_FFXI_KEYTABLE")
+        or str(Path(__file__).resolve().parent.parent / "keys" / "mzb_key_table.bin"))
     args = parser.parse_args()
 
     keys = load_key_table_from_lotus(Path(args.key_table_from_lotus))

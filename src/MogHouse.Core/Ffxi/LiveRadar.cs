@@ -283,11 +283,10 @@ public sealed class LiveRadar : IDisposable
             // No look, deliberately. The scene wants nobody standing in it, and
             // the character is built and uploaded when one is actually chosen.
             //
-            // No name either: the backdrop is scenery, not somewhere the player
-            // is, and labelling it in the corner of a sign-in screen only
-            // invites the question of how to walk there. Sel Phiner has no name
-            // worth showing in any case.
-            ZoneName = string.Empty,
+            // The name is set even though the sign-in screen hides the radar
+            // that would show it: anyone who opens the client onto a zone to
+            // look around it should be told which one they are looking at.
+            ZoneName = FfxiZoneNames.Get((uint)sceneZone) ?? string.Empty,
 
             // Holds the hour still, as the standalone viewer's own
             // MOGHOUSE_TIME does. Worth having in the client too: the light a
