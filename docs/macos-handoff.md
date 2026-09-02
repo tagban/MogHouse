@@ -351,3 +351,86 @@ and the picker is a native macOS file dialog that works.
 - **Notarization** - above.
 - **Architecture** - arm64 only. Dawn, SDL3 and the publish are all arm64;
   nothing here is universal, and an Intel Mac is untested.
+
+---
+
+# The black screen on zone load, and why
+
+Found 2026-09-02. The client signs in, selects a character, joins the zone
+server, hands the zone to the renderer - and the window stays black. The
+managed log ends at `--view: opening zone 107 from .../ROM/0/124.DAT` and says
+nothing more.
+
+## What it is
+
+    SDL_Init failed: No available video device
+
+One line, in `moghouse.log.renderer`. The renderer never gets a video device,
+so nothing is ever drawn.
+
+The cause is `LiveRadar.cs`:
+
+    _thread = new Thread(() => _viewer.Run()) { IsBackground = true, Name = "moghouse-renderer" };
+
+`Run()` blocks in `mh_viewer_run` -> `runViewer`, which calls
+`SDL_Init(SDL_INIT_VIDEO)`. **On macOS that has to happen on the main thread.**
+Windows has no such rule, which is why this has always worked there.
+
+## Two wrong theories, recorded so nobody pays for them twice
+
+Both looked right and both were wrong. They were killed by a small Avalonia
+harness that calls `SDL_Init` directly - worth rebuilding if this area is
+touched again, because reasoning about it produced two confident wrong answers
+in a row and one experiment settled it in minutes.
+
+**"Avalonia owns NSApplication and SDL cannot take it over."** It can.
+`SDL_Init(SDL_INIT_VIDEO)` on Avalonia's UI thread, with Avalonia fully
+running, returns OK. There is no ownership conflict, and the large rebuild this
+theory implied - replace SDL windowing with Avalonia's own NSWindow - would
+have solved a problem that does not exist.
+
+**"Initialise SDL video early on the main thread and the background thread can
+then use it."** The init does succeed that way, because `SDL_Init` is
+reference-counted - but the window still cannot be created:
+
+    [background] SDL_CreateWindow -> NULL: NSWindow should only be instantiated on the main thread!
+
+AppKit refuses at the window, not at the init. A first measurement suggested
+this worked; it was confounded, because the background call was not the first
+caller and merely incremented a refcount. Beware that shape - it reads as
+success.
+
+## What is actually true
+
+| | |
+|---|---|
+| `SDL_Init(VIDEO)`, background thread, first caller | FAILED: No available video device |
+| `SDL_Init(VIDEO)`, main thread | OK |
+| `SDL_CreateWindow`, background thread | NULL, NSWindow main-thread error |
+| `SDL_CreateWindow`, main thread, Avalonia running | **OK** |
+
+So SDL and Avalonia coexist in one process without complaint. The only rule
+being broken is that the renderer's window - and therefore its loop - is not on
+the main thread.
+
+## The fix, and one option that looks smaller than it is
+
+**Drive the renderer from the main thread.** `mh_viewer_run` currently owns a
+blocking loop, so this means splitting that loop into a step the host can call
+per frame - a `mh_viewer_pump` alongside `mh_viewer_run` - and having
+`LiveRadar` drive it from the main thread instead of starting a `Thread`. The
+standalone renderer can keep calling `mh_viewer_run`, which is why it works
+today and is the thing to test against.
+
+**Do not simply hand the main thread to `mh_viewer_run`.** It is a three-line
+change and it looks tempting: the launcher hides itself while the world is up,
+so a frozen Avalonia window seems harmless. It is not. Every session event the
+client depends on is delivered through `Dispatcher.UIThread.Post` -
+`OnZoneChanged`, `OnChat`, `OnEntities`, `OnMusicChanged`, `OnMovedByServer` -
+and none of them would ever run while the main thread sits inside the render
+loop. Zone changes, chat and entity updates would all stop.
+
+Nothing about this is specific to Metal, WGSL, Dawn or the surface code. All of
+those work: the standalone renderer draws zone 107 with 130 models, water,
+25 textures and zero `webgpu error`. It is purely which thread creates the
+window.
