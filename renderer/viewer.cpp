@@ -4519,7 +4519,14 @@ constexpr float kGravity = 26.0f;
         // The train, moved on and written straight into the instance buffer the
         // zone is drawn from - it is scenery like everything else in there, and
         // the only difference is that these four rows change.
-        if (monorail.advance(delta) && instanceBuffer)
+        // Holding it still leaves the cars exactly where the zone placed them,
+        // which is the only place their collision is: that is baked once at
+        // load and does not move with them. So this is how to stand inside a
+        // carriage and walk about in it - with the train running, the floor you
+        // can feel is back at the depot and the one you can see is not there.
+        static const bool trainHeld = SDL_getenv("MOGHOUSE_TRAIN_HOLD") != nullptr;
+
+        if (!trainHeld && monorail.advance(delta) && instanceBuffer)
         {
             // Where it has got to, every couple of seconds. A train on a
             // thousand units of track is mostly somewhere you are not looking,
