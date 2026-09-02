@@ -78,11 +78,17 @@ constexpr wgpu::TextureFormat kDepthFormat = wgpu::TextureFormat::Depth24Plus;
 /// rather than following each other round it. The first attempt at 150 put the
 /// row immediately after a forty-seven degree bend, which is the worst place on
 /// the line to watch from.
-inline constexpr float kLineupAlongTrack = 300.0f;
+///
+/// These two numbers are tied together. The train starts its run a whole
+/// approach behind the row - at twenty-two units a second that is
+/// 400 - 22*5 - 63 = 227 - and 227 is past 168, so it is on the straight from
+/// the first frame rather than rounding the bend in shot. Lengthening the
+/// approach without moving the row back is what breaks that.
+inline constexpr float kLineupAlongTrack = 400.0f;
 inline constexpr float kLineupFromTrack = 26.0f;
 
 /// How long after the line-up appears the train reaches it.
-inline constexpr float kLineupTrainSeconds = 3.0f;
+inline constexpr float kLineupTrainSeconds = 5.0f;
 
 /// How far below a carriage's own origin somebody riding in it stands.
 ///
