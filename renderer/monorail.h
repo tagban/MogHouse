@@ -40,6 +40,22 @@ public:
         uint32_t instance{}; ///< index into Scene::instances
         Vec3 at{};
         float heading{}; ///< radians, 0 along +z
+
+        /// Ready to write straight into the instance buffer, column major.
+        ///
+        /// Built from the transform the car was placed with rather than from
+        /// the heading alone. This is a suspended railway - the cars hang from
+        /// the beam rather than sitting on top of it - and that hang is a flip
+        /// in the placement's own rotation. Composing a fresh Y turn and
+        /// calling it the transform threw the flip away and stood all four cars
+        /// upright on top of the track, like a train set.
+        float transform[16]{};
+
+        /// The rotation it was placed with, and which way the track ran there.
+        /// The difference between that heading and the current one is the only
+        /// part this is allowed to change.
+        float placed[16]{};
+        float placedHeading{};
     };
 
     /// Looks for a railway in this scene. False when there is none, which is
@@ -67,7 +83,14 @@ public:
             for (uint32_t i = 0; i < found->second.second; ++i)
             {
                 const uint32_t instance = found->second.first + i;
-                cars_.push_back(Car{instance, translationOf(scene, instance), 0.0f});
+
+                Car car;
+                car.instance = instance;
+                car.at = translationOf(scene, instance);
+                const float* m = &scene.instances[static_cast<size_t>(instance) * 16];
+                std::copy(m, m + 16, car.placed);
+                std::copy(m, m + 16, car.transform);
+                cars_.push_back(car);
             }
         }
 
@@ -108,6 +131,11 @@ public:
             route_.clear();
             cars_.clear();
             return false;
+        }
+
+        for (Car& car : cars_)
+        {
+            car.placedHeading = headingNear(car.at);
         }
 
         travelled_ = 0.0f;
@@ -182,7 +210,7 @@ private:
     /// How fast it runs, in world units a second. Slow: it is scenery at the
     /// far side of a valley, and something crossing a backdrop at a sprint
     /// reads as a mistake.
-    static constexpr float kSpeed = 14.0f;
+    static constexpr float kSpeed = 18.0f;
 
     /// How long it stands at each end before setting off again.
     static constexpr float kDwellSeconds = 9.0f;
@@ -274,6 +302,26 @@ private:
         return ordered;
     }
 
+    /// Which way the track runs nearest a point, as a heading.
+    float headingNear(const Vec3& point) const
+    {
+        float best = 0.0f;
+        float nearest = -1.0f;
+        for (size_t i = 0; i + 1 < route_.size(); ++i)
+        {
+            const Vec3 from = route_[i];
+            const Vec3 to = route_[i + 1];
+            const Vec3 middle = (from + to) * 0.5f;
+            const float d = distance(middle, point);
+            if (nearest < 0.0f || d < nearest)
+            {
+                nearest = d;
+                best = std::atan2(to.x - from.x, to.z - from.z);
+            }
+        }
+        return best;
+    }
+
     /// Puts a car at a distance along the route, facing the way it is going.
     void placeAlong(Car& car, float along) const
     {
@@ -298,11 +346,45 @@ private:
                 // other way - a train reverses rather than driving backwards.
                 const Vec3 way = forward_ ? (to - from) : (from - to);
                 car.heading = std::atan2(way.x, way.z);
+
+                writeTransform(car);
                 return;
             }
 
             remaining -= span;
         }
+    }
+
+    /// Turns the car by however much the track has turned since it was parked,
+    /// and puts it where it is now.
+    ///
+    /// The rotation it came with is kept and added to rather than replaced.
+    /// That rotation is what hangs it under the beam - this is a suspended
+    /// railway, and the cars are upside down relative to anything that rides on
+    /// top of a rail. Building a transform out of the heading alone lost it.
+    static void writeTransform(Car& car)
+    {
+        const float turn = car.heading - car.placedHeading;
+        const float c = std::cos(turn);
+        const float sn = std::sin(turn);
+
+        // A turn about Y applied to each of the placed rotation's columns.
+        for (int column = 0; column < 3; ++column)
+        {
+            const float x = car.placed[column * 4 + 0];
+            const float y = car.placed[column * 4 + 1];
+            const float z = car.placed[column * 4 + 2];
+
+            car.transform[column * 4 + 0] = c * x + sn * z;
+            car.transform[column * 4 + 1] = y;
+            car.transform[column * 4 + 2] = -sn * x + c * z;
+            car.transform[column * 4 + 3] = 0.0f;
+        }
+
+        car.transform[12] = car.at.x;
+        car.transform[13] = car.at.y;
+        car.transform[14] = car.at.z;
+        car.transform[15] = 1.0f;
     }
 
     std::vector<Vec3> route_;

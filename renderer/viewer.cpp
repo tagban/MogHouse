@@ -4458,17 +4458,8 @@ constexpr float kGravity = 26.0f;
 
             for (const mh::Monorail::Car& car : monorail.cars())
             {
-                const float c = std::cos(car.heading);
-                const float sn = std::sin(car.heading);
-
-                // The same shape the placement transforms have: a turn about Y
-                // with the position in the last row, column major.
-                const float transform[16] = {c,      0.0f, -sn,     0.0f,
-                                             0.0f,   1.0f, 0.0f,    0.0f,
-                                             sn,     0.0f, c,       0.0f,
-                                             car.at.x, car.at.y, car.at.z, 1.0f};
-                queue.WriteBuffer(instanceBuffer, static_cast<uint64_t>(car.instance) * sizeof(transform),
-                                  transform, sizeof(transform));
+                queue.WriteBuffer(instanceBuffer, static_cast<uint64_t>(car.instance) * sizeof(car.transform),
+                                  car.transform, sizeof(car.transform));
             }
         }
 
