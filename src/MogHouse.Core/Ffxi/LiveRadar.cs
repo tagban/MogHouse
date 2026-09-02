@@ -12,15 +12,58 @@ namespace MogHouse.Core.Ffxi;
 public sealed class LiveRadar : IDisposable
 {
     private readonly NativeViewer _viewer;
-    private readonly Thread _thread;
+    private readonly Thread? _thread;
     private bool _closed;
 
-    private LiveRadar(NativeViewer viewer)
+    /// <param name="ownThread">
+    /// Whether to start the render loop on a thread of its own.
+    ///
+    /// True is what this has always done, and it is wrong on macOS: the loop
+    /// creates the window, and AppKit refuses to make an NSWindow anywhere but
+    /// the main thread - SDL reports it as "No available video device", which
+    /// reads like a driver fault and is not one. Windows has no such rule,
+    /// which is why it went unnoticed.
+    ///
+    /// False leaves the loop unstarted so the caller can run it itself with
+    /// <see cref="Run"/>, from whichever thread it knows to be the main one.
+    /// </param>
+    private LiveRadar(NativeViewer viewer, bool ownThread)
     {
         _viewer = viewer;
-        _thread = new Thread(() => _viewer.Run()) { IsBackground = true, Name = "moghouse-renderer" };
-        _thread.Start();
+        if (ownThread)
+        {
+            _thread = new Thread(() => _viewer.Run()) { IsBackground = true, Name = "moghouse-renderer" };
+            _thread.Start();
+        }
     }
+
+    /// <summary>
+    /// Runs the render loop on the calling thread, blocking until the window
+    /// closes. Only for a radar opened with <c>ownThread: false</c>; one opened
+    /// the old way is already running on a thread of its own.
+    /// </summary>
+    public int Run()
+    {
+        if (_thread is not null)
+        {
+            throw new InvalidOperationException(
+                "This LiveRadar already runs on its own thread; open it with ownThread: false to run it here.");
+        }
+
+        try
+        {
+            return _viewer.Run();
+        }
+        finally
+        {
+            // Run returning is the window closing, and it is the only signal
+            // there is when no thread is being watched for.
+            _finished = true;
+        }
+    }
+
+    /// <summary>Set when <see cref="Run"/> returns, for a radar with no thread of its own.</summary>
+    private bool _finished;
 
     /// <summary>
     /// Whether the window has gone. Run() owns the event loop and returns when
@@ -29,8 +72,13 @@ public sealed class LiveRadar : IDisposable
     /// Someone shutting the window is them ending the session, and nothing was
     /// watching for it: the window went and the session held on for the rest of
     /// its time, skipping the logout it would have done on the way out.
+    ///
+    /// With no thread of its own there is nothing to test for life, so the
+    /// answer comes from Run having returned instead. Reading _thread directly
+    /// here would throw the moment a main-thread radar was asked whether it had
+    /// closed.
     /// </summary>
-    public bool Closed => !_thread.IsAlive;
+    public bool Closed => _thread is not null ? !_thread.IsAlive : _finished;
 
     /// <summary>
     /// Opens the zone the character is actually standing in, at the position
@@ -62,7 +110,7 @@ public sealed class LiveRadar : IDisposable
     }
 
     public static LiveRadar? Open(int zoneId, float x, float vertical, float depth, uint serverClock = 0,
-                                  string? playerName = null, string? playerLook = null)
+                                  string? playerName = null, string? playerLook = null, bool ownThread = true)
     {
         // Beside the executable when nothing points elsewhere, so a copied
         // folder runs with no environment set - the same portability the
@@ -133,7 +181,7 @@ public sealed class LiveRadar : IDisposable
                     : 0,
         };
 
-        return new LiveRadar(new NativeViewer(options));
+        return new LiveRadar(new NativeViewer(options), ownThread);
     }
 
     /// <summary>
