@@ -291,6 +291,13 @@ MH_API void mh_viewer_set_lineup(MhViewerHandle viewer, int32_t on);
 /// they sit over the very thing being looked at.
 MH_API void mh_viewer_set_hud(MhViewerHandle viewer, int32_t on);
 
+/// Puts the character aboard the monorail, or takes them off it.
+///
+/// While aboard the train carries them: walking, gravity and collision are all
+/// skipped, because a carriage is scenery that happens to move and would not
+/// hold anybody up. Only meaningful in a zone that has a railway.
+MH_API void mh_viewer_set_riding(MhViewerHandle viewer, int32_t aboard);
+
 /// One row of a form the client asks the renderer to draw.
 ///
 /// Fixed-width strings for the same reason MhRadarEntity uses them: the array

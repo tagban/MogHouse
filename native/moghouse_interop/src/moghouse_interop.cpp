@@ -403,6 +403,14 @@ void mh_viewer_set_hud(MhViewerHandle viewer, int32_t on)
     }
 }
 
+void mh_viewer_set_riding(MhViewerHandle viewer, int32_t aboard)
+{
+    if (viewer != nullptr)
+    {
+        viewer->link.setRiding(aboard != 0);
+    }
+}
+
 // Pinned because the C# side declares this layout a second time, by hand, and
 // a mismatch would not fail to build on either side - it would just read the
 // wrong bytes. If one of these fires, NativeFormRowData needs the same edit.

@@ -66,6 +66,12 @@ constexpr uint32_t kWidth = 1280;
 constexpr uint32_t kHeight = 720;
 constexpr wgpu::TextureFormat kDepthFormat = wgpu::TextureFormat::Depth24Plus;
 
+/// How far below a carriage's own origin somebody riding in it stands.
+///
+/// The cars hang from the beam, so their origin is up at the coupling rather
+/// than at the floor.
+inline constexpr float kRideDrop = 3.6f;
+
 /// How much of a faded character is drawn. Enough to read the shape and the
 /// colours, little enough that the one being pointed at is obviously the one in
 /// front.
@@ -1229,6 +1235,10 @@ bool mh::ViewerLink::takeLook(std::string& out)
     lookChanged_ = false;
     return true;
 }
+
+void mh::ViewerLink::setRiding(bool aboard) { riding_ = aboard; }
+
+bool mh::ViewerLink::riding() const { return riding_; }
 
 void mh::ViewerLink::setHud(bool on) { hud_ = on; }
 
@@ -2852,6 +2862,11 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // The railway through Sel Phiner, if this zone has one. Nothing else does.
     mh::Monorail monorail;
 
+    /// Whether the character is aboard, as this viewer knows it. The client
+    /// says so through the link; the standalone viewer has no link and says so
+    /// with the T key, so both have to be asked.
+    bool ridingHere = false;
+
     /// Which of the zone's draws are the train, so they can be drawn again to
     /// light them. Indices into zone->draws.
     std::vector<size_t> monorailDraws;
@@ -3437,6 +3452,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     std::printf("u to back up the trail if collision traps you, n for no collision,\n");
     std::printf("numpad 8/2 to move and 4/6 to turn, numpad minus to walk, shift to invert it,\n");
     std::printf("f to swap between driving the character and flying the camera,\n");
+    std::printf("t to get on and off the monorail where there is one,\n");
     std::printf("escape to quit\n");
 
     // `screenshotPath` writes one frame to a BMP and quits. Without it
@@ -4258,6 +4274,19 @@ constexpr float kGravity = 26.0f;
                     walkByDefault = !walkByDefault;
                     std::printf("%s\n", walkByDefault ? "walking" : "running");
                 }
+                else if (event.key.key == SDLK_T && monorail.present())
+                {
+                    // On and off the train. The client will do this from a
+                    // conversation with somebody standing at a stop; this is
+                    // how to try it without one, which means it cannot go
+                    // through the link - the standalone viewer has none.
+                    ridingHere = !ridingHere;
+                    if (link)
+                    {
+                        link->setRiding(ridingHere);
+                    }
+                    std::printf("%s the train\n", ridingHere ? "boarded" : "left");
+                }
                 else if (event.key.key == SDLK_P)
                 {
                     const mh::Vec3 at = camera.eye();
@@ -4602,7 +4631,29 @@ constexpr float kGravity = 26.0f;
         // drive the character and have the camera follow. A character in the
         // world starts in the second.
         float moved = 0.0f;
-        if (driving && character)
+        // Aboard the train, which carries the character rather than the
+        // character walking. Everything below - the walk, the fall, the
+        // collision - is skipped, because the carriage is scenery and would not
+        // hold anybody up.
+        const bool aboard = (ridingHere || (link && link->riding())) && monorail.present() && character;
+        if (aboard)
+        {
+            const std::vector<mh::Monorail::Car>& cars = monorail.cars();
+            const mh::Vec3 at = cars[cars.size() / 2].at;
+
+            // Down inside the carriage rather than on the roof. The cars hang
+            // from the beam, so their own origin is up at the coupling.
+            characterAt = {at.x, at.y - kRideDrop, at.z};
+            characterFacing = cars[cars.size() / 2].heading;
+            fallSpeed = 0.0f;
+            writeCharacterInstance();
+
+            camera.orbiting = true;
+            camera.target = {characterAt.x, characterAt.y + 1.2f, characterAt.z};
+            wantedDistance = std::clamp(wantedDistance - zoom * 0.6f, 1.5f, 25.0f);
+            camera.distance = wantedDistance;
+        }
+        else if (driving && character)
         {
             // Movement is relative to where the camera is looking, which is
             // what makes it read as steering a person rather than nudging a

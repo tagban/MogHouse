@@ -549,6 +549,16 @@ public:
     void setLook(std::string look);
     bool takeLook(std::string& out);
 
+    /// Whether the character is aboard the monorail.
+    ///
+    /// While they are, the train carries them: walking is ignored, gravity is
+    /// ignored, and their position is whatever the car's is. Letting the usual
+    /// movement run underneath would have them fall through the floor of a
+    /// carriage that is not solid, because none of this is collision - the
+    /// train is scenery that happens to move.
+    void setRiding(bool aboard);
+    bool riding() const;
+
     /// Whether to draw the game's own furniture: the radar, the chat panel, the
     /// clock and the zone's name.
     ///
@@ -638,6 +648,7 @@ private:
     bool lookChanged_{false};
     std::atomic<bool> lineup_{false};
     std::atomic<bool> hud_{true};
+    std::atomic<bool> riding_{false};
     uint32_t serverClock_{0};
     uint64_t serverClockSetAtNs_{0};
     bool serverClockKnown_{false};

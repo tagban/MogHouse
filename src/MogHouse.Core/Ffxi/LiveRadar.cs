@@ -385,6 +385,18 @@ public sealed class LiveRadar : IDisposable
         }
     }
 
+    /// <summary>
+    /// Puts the character aboard the monorail, or takes them off. The train
+    /// carries them while they are on it.
+    /// </summary>
+    public void SetRiding(bool aboard)
+    {
+        if (!_closed)
+        {
+            _viewer.SetRiding(aboard);
+        }
+    }
+
     /// <summary>Takes the line-up down, leaving the world as it was.</summary>
     public void HideLineup()
     {

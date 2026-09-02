@@ -608,6 +608,21 @@ public sealed partial class NativeViewer : IDisposable
     }
 
     /// <summary>
+    /// Puts the character aboard the monorail, or takes them off.
+    ///
+    /// While aboard the train carries them - walking and gravity are ignored -
+    /// so the client should keep reporting the position it reads back rather
+    /// than the one it last sent.
+    /// </summary>
+    public void SetRiding(bool aboard)
+    {
+        if (!_disposed && _handle != IntPtr.Zero)
+        {
+            mh_viewer_set_riding(_handle, aboard ? 1 : 0);
+        }
+    }
+
+    /// <summary>
     /// Whether to draw the game's own furniture - the radar and the chat panel.
     /// Off while the client is showing its own screens.
     /// </summary>
@@ -889,6 +904,9 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static unsafe partial int mh_viewer_take_chat(IntPtr viewer, byte* buffer, int capacity);
+
+    [LibraryImport(LibraryName)]
+    private static partial void mh_viewer_set_riding(IntPtr viewer, int aboard);
 
     [LibraryImport(LibraryName)]
     private static partial void mh_viewer_set_hud(IntPtr viewer, int on);
