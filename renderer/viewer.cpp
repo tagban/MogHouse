@@ -6231,11 +6231,57 @@ constexpr float kGravity = 26.0f;
                 // the 4x6 bitmap font, which had no lower case at all.
                 if (showHud)
                 {
-                    std::vector<std::string> lines = link ? link->chat() : viewerChat;
-                    if (lines.empty())
+                    std::vector<std::string> said = link ? link->chat() : viewerChat;
+                    if (said.empty())
                     {
-                        lines.push_back("Chat - waiting for the server");
+                        said.push_back("Chat - waiting for the server");
                     }
+
+                    // Wrapped, not cut. A HUD string holds kHudChars glyphs and
+                    // everything past that was dropped without a mark, so a
+                    // sentence any longer than the panel simply lost its end -
+                    // which is how "the train through Remnants of Sel Phiner"
+                    // turned into "the train through Remnants of Sel Ph".
+                    //
+                    // Broken at a space where there is one in reach, and mid
+                    // word only when a single word is wider than the panel.
+                    std::vector<std::string> lines;
+                    for (const std::string& whole : said)
+                    {
+                        if (whole.empty())
+                        {
+                            lines.push_back(whole);
+                            continue;
+                        }
+
+                        for (size_t at = 0; at < whole.size();)
+                        {
+                            size_t take = std::min<size_t>(mh::kHudChars, whole.size() - at);
+                            if (at + take < whole.size())
+                            {
+                                const size_t space = whole.find_last_of(' ', at + take);
+                                if (space != std::string::npos && space > at)
+                                {
+                                    take = space - at;
+                                }
+                            }
+
+                            lines.push_back(whole.substr(at, take));
+                            at += take;
+                            while (at < whole.size() && whole[at] == ' ')
+                            {
+                                ++at;
+                            }
+                        }
+                    }
+
+                    // Wrapping makes more lines than were said, and the panel
+                    // holds what it holds. The newest survive.
+                    while (lines.size() > static_cast<size_t>(mh::kChatLines))
+                    {
+                        lines.erase(lines.begin());
+                    }
+
                     const float line = hud.counts[1] * 0.4f;
 
                     // The panel stacks upwards from the bottom, so the line
