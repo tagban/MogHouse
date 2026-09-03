@@ -188,6 +188,7 @@ step "Copying assets"
 mkdir -p "$data/assets"
 cp "$root/renderer/assets/font."* "$data/assets/"
 cp "$root/renderer/assets/subrooms.txt" "$data/assets/"
+cp "$root/renderer/assets/hidden-models.txt" "$data/assets/"
 
 if [ "$NO_WATER" -eq 1 ]; then
     warn "No water: canals and seas will be dry."

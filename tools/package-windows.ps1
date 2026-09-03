@@ -149,6 +149,7 @@ $assets = Join-Path $data "assets"
 New-Item -ItemType Directory -Force -Path $assets | Out-Null
 Copy-Item (Join-Path $root "renderer\assets\font.*") $assets -Force
 Copy-Item (Join-Path $root "renderer\assets\subrooms.txt") $assets -Force
+Copy-Item (Join-Path $root "renderer\assets\hidden-models.txt") $assets -Force
 
 if ($NoWater) {
     Warn "No water: canals and seas will be dry."

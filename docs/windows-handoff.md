@@ -1,11 +1,133 @@
 # Handing back from Windows
 
-Written on Windows, 2026-09-02, after the session that took the Mac's
-in-renderer screens and ran them here for the first time. Everything below is
-on `master`, which is the branch - there is no `main`.
+Two Windows sessions have been written into this file. The **2026-09-03**
+handoff is immediately below and is the one to read; the 2026-09-02 sections
+that follow it are the previous session's, kept because their fixes and
+"still open" list have not gone anywhere.
 
-The previous version of this file was the Mac's brief to Windows. Its open
-questions are answered here; what it parked is still parked at the bottom.
+Everything is on `master`, which is the branch - there is no `main`.
+
+## Handoff, end of 2026-09-03 - read this first
+
+Going back to the Mac. Nothing in the day's work is Windows-specific, but
+**none of it has been compiled with clang or run on macOS**; see "What the
+Mac should check first" at the end of this section.
+
+### State
+
+- Everything is committed on `master`; the working tree is clean. **Nothing
+  has been pushed** - two days of commits are local only.
+- All four native targets build with no warnings (MSVC). Managed tests: 146
+  pass, 12 skipped.
+- At session end LandSandBoat was running on Windows (four exes under
+  `C:\Users\Gaming\Desktop\LandSandBoat`) and the client was signed in as
+  Jerk, a GM character, in Bastok Markets.
+
+### What the day was about
+
+The user asked how the retail client produces its water, which turned out to
+be the thread that unravelled most of the zone's effects. The answer:
+**a zone DAT places its water, sky, flames and effects with "effect
+generator" chunks (type 0x05)** that the MZB placement table never mentions,
+and this project had been deriving all of it from the server's collision
+meshes instead. Two wiki pages carry the formats and, deliberately, how each
+was found and what was ruled out:
+
+- `docs/wiki/Effect-Generators.md` - the generator chunk and its opcodes, the
+  0x19 day/night intensity curves, the 0x1f effect meshes, the 0x21 sprite
+  animations, the sky, and the corrections made along the way.
+- `docs/wiki/Water.md` - what the artists actually built and how MogHouse
+  draws it now.
+
+`docs/generator-format.md` is the developer-facing version of the same.
+
+### Verified by eye against a retail client, side by side
+
+Water from the zone's own meshes (East Ronfaure's stream, Bastok's canal,
+fountain basin and harbour); fountain jets running by day and off at night;
+torch and lamp flames lit at night; the deep blue night sky; cloud dome and
+star field around the camera; the auction house as its stone building rather
+than the launch-day tent; stairs that walk like a ramp instead of catching.
+
+### All of it is generic
+
+The generators, curves, sprites, sky and water are read from whatever DAT a
+zone loads, so **every other zone gets this with no further work**. The only
+hand-written per-zone data is `renderer/assets/hidden-models.txt` - one line,
+Bastok Markets' auction house tent - and `assets/subrooms.txt`, which
+predates today. Both are copied by CMake and, as of the last commit, by all
+three packaging scripts.
+
+### Open, in the user's order
+
+1. **Lamp glows and the fountain's big flames staying lit by day.** Fixed at
+   the very end and **not judged by eye**: the generator length byte keeps
+   its length in the low five bits, and reading the whole byte made op 0x12
+   look 164 words long, dropping the curve that follows it.
+   `MOGHOUSE_LIST_GENERATORS=1 ffxi-datdump <zone.DAT>` now shows
+   `bll1 -> fflt`, `bfl1 -> frtm`, `gl01 -> lttm`. If anything is still lit
+   at noon, check its curve there first.
+2. **The harbour ripple.** `allsea` spans the whole zone with UVs running
+   0..1, so its sheet stretched over five hundred units and read as flat;
+   water meshes that sparse now use the world-space mapping. Also unjudged.
+   Retail's harbour is a darker teal with foam along the wall - the tint is a
+   choice in `water_shader.h`, and the foam is `allsea`'s second, lighter
+   mesh, which we currently draw with the same look as the body.
+3. **Smoke** (`bsmk`) is a still one-frame sprite; retail rises it as
+   particles. The particle opcodes - 0x15 a box, 0x07 on the fountain's foam,
+   0x2d naming a life curve, 0x13 - are the next format to read.
+4. **Light sources cast no light.** `lt` and `ligh` sprites are skipped now
+   because they are light markers rather than art, which is right, but the
+   lamps therefore light nothing. Point lights are a renderer feature that
+   does not exist yet.
+5. **Sprite frame rate** is a guess at ten a second; size uses op 0x0f and
+   looked right on flames and lamps.
+6. **Weather.** Only "fine" is read, for both the sky objects and the
+   lighting sets. The server sends the weather in packet 0x057; reading it
+   would pick the matching `weat/<x>` directory.
+7. **Sun and moon** spheres are not drawn: they are untextured and get their
+   look from a `k000` curve that is not understood.
+8. From earlier and still open: fish and birds, the nation flag behind the
+   character-creation figure, child race models, clickable chat links, the
+   standalone renderer's startup crash, and what op 0x27 actually means.
+
+### What the Mac should check first
+
+- **It compiles.** New files `renderer/ffxi/generator.{h,cpp}`, `d3m.{h,cpp}`
+  and `sprite.{h,cpp}`, plus `renderer/effect_shader.h`. Includes were chosen
+  with clang's strictness in mind but only MSVC has seen them.
+- **`renderer/assets/hidden-models.txt` is found.** CMake copies the whole
+  assets directory; the packaging scripts name files one by one and were
+  updated for it. A missing file is not an error - the auction house just
+  goes back to showing both buildings.
+- The zone DATs are read from the retail install; the paths come from the
+  file table as before, so nothing new is hardcoded to a Windows path.
+
+### Traps that cost time, so they are not paid for twice
+
+- LandSandBoat holds a killed character's session for about sixty seconds.
+  Relaunching inside that window fails with `checksum FAILED` from the zone
+  server, which looks like a protocol bug and is not one. Wait it out.
+- A generator's model id is four characters and **is not unique in a file**:
+  `auc_` names both the auction house stand and its lamp glow. Resolve by
+  the directory the generator sits in.
+- The type 0x1f meshes are not for drawing. Placed, `hi12`'s ribbon stands as
+  a pale streak over every lamp; retail shows only the sprite.
+- The sky generators share their opcodes with the effects and must be
+  filtered by the `weat` directory, or a zone's stars become a flock of grey
+  triangles over the city.
+- Do not hide things by an opcode whose meaning is unknown. Reading 0x27 as
+  "hidden" took the entire harbour away for a day.
+- Writing patch scripts: a bash heredoc eats doubled backslashes and a long
+  one gets truncated, PowerShell here-strings are CRLF and will not match LF
+  source, and a Python string containing `C:\U...` needs to be raw. Write
+  scripts with an editor tool instead.
+
+# The 2026-09-02 session
+
+The first Windows session: taking the Mac's in-renderer screens and running
+them here for the first time. Its fixes are still in force and its parked
+items are still parked.
 
 ## What happened, in one paragraph
 
@@ -291,58 +413,9 @@ is. One update behind the server, invisibly. **Not yet judged by eye** - it
 was built at the end of the session and needs someone to stand near a walking
 NPC and say whether it is better.
 
-## Handoff, end of 2026-09-03 (read this first)
+# The 2026-09-03 session, in detail
 
-The next session is a different model; the long section after this is the
-day's narrative and the wiki pages carry the formats.
-
-**State.** Everything is committed on `master` (last commit: harbour water
-back, nested curves, this handoff). Nothing pushed today. Tests 146 pass, 12
-skipped. LandSandBoat was running at session end (four exes from
-`C:\Users\Gaming\Desktop\LandSandBoat`). Jerk (GM) is in Bastok Markets.
-
-**Verified against retail today:** water from the zone's own meshes placed by
-effect generators; fountain jets (on by day) and lamp flames (on by night)
-from the 0x19 curves; deep blue night sky from the fine-weather lighting set;
-cloud dome and stars around the camera; the auction house as the stone
-building (tent halves struck in `assets/hidden-models.txt`); stairs walk as a
-ramp; harbour water rippling beside the bridge.
-
-**Everything today is generic**, read from whatever DAT a zone loads: the
-generators, curves, sprites, sky and water all come from the file. The only
-hand-written per-zone data is `renderer/assets/hidden-models.txt` (one line,
-Bastok Markets' auction house tent) and `assets/subrooms.txt`, which predates
-today. Other zones get the same behaviour with no work.
-
-**Open, in the user's order:**
-
-1. Lamp glows and the fountain's big flames staying lit by day - fixed at
-   the very end: the generator length byte's top three bits are flags, and
-   read whole it made op 0x12 look 164 words long and dropped the curve
-   after it. `MOGHOUSE_LIST_GENERATORS=1 ffxi-datdump` now shows `bll1 ->
-   fflt`, `bfl1 -> frtm`, `gl01 -> lttm`. **Not yet judged by eye** in the
-   client; if anything is still lit at noon, check its curve name there.
-2. Smoke (`bsmk`) is a still one-frame sprite; retail rises it as particles.
-   The particle opcodes (0x15 box, 0x07 on the foam, 0x2d life curve, 0x13)
-   are the next format.
-3. Sprite frame rate is a guess at 10/s; sprite size uses op 0x0f and looked
-   right on flames and lamps.
-4. Weather: read packet 0x057, pick `weat/<x>` objects and lighting to match.
-5. Sun and moon spheres not drawn (untextured, `k000` curve).
-6. From earlier: fish/birds, nation flag at creation, child race models,
-   clickable chat links, standalone renderer crash, meaning of op 0x27.
-
-**Traps that cost time today:** LandSandBoat holds a killed session ~60 s
-(relaunch inside it -> `checksum FAILED`, wait it out); a Bash heredoc
-collapses doubled backslashes in patch scripts and a very long heredoc gets
-cut (write scripts with the Write tool); PowerShell here-strings are CRLF
-and will not match LF source; a Python string with `C:\U...` needs a raw
-string; generator model ids collide (`auc_`) - resolve by directory; 0x1f
-meshes are not for drawing; the sky generators share opcodes with the
-effects and are filtered by `weat`; hiding things by an unknown opcode
-(0x27) took the harbour away.
-
-## 2026-09-03: water from the DATs, and the first effects
+## Water from the DATs, and the first effects
 
 The overnight water work was thrown away in the morning, for the right reason:
 the user asked how retail places its water, and the answer is in the DAT. The
