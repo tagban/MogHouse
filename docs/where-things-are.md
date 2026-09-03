@@ -3,7 +3,7 @@
 Start here. The other handoff documents are chronological and long; this one is
 short and current, and says what is true today rather than how it got that way.
 
-Last updated after the monorail and the in-engine screens, 2026-09-02.
+Last updated after the torchlight, the weather and NPC dialogue, 2026-09-03.
 
 ## The environment, which is the part you cannot guess
 
@@ -84,6 +84,23 @@ underground zone lit by the outdoor day and night cycle; only the thirteen rooms
 that ship their own lighting escape it. Not the same fault as zones shipping no
 lighting at all, which is fixed. `MOGHOUSE_TIME=1200` shows it at once.
 
+**NPC menus.** Clicking somebody talks to them now, and a plain line comes
+back as words. A conversation with choices does not: the dialogue, the choices
+and the branching are all in an event script in the game's own DATs, and
+nothing here can read one. `docs/npc-dialogue.md` has the whole exchange, what
+works, and where the scripts have already been ruled out.
+
+**The torches light the ground, but nothing measures how far.** The reach is
+the light marker's own size times eight, picked by eye against a wall in West
+Ronfaure. A retail client standing in the same place would settle it;
+`MOGHOUSE_LAMP_REACH` changes it without a rebuild.
+
+**The weather picks a sky, but only when a zone loads.** Turning weather is
+read and carried, and takes effect on the next zone change - swapping a sky in
+place needs a rebuild path that does not exist. Which of the four skies each of
+the twenty weathers calls for is also a reading rather than a measurement; see
+`skyForWeather`.
+
 **A seated pose on the train, and sound effects.** Both written up with working
 notes in `docs/windows-handoff.md`. The sitting clips are `si00` through `si21`;
 the sound format is solved and on the wiki, and what is missing is a mixer
@@ -95,6 +112,7 @@ rather than a decoder.
 |---|---|
 | `docs/macos-handoff.md` | how the Mac build happened, and two wrong theories worth not repeating |
 | `docs/windows-handoff.md` | what is parked for the Windows session, and what blocks deleting Avalonia |
+| `docs/npc-dialogue.md` | talking to NPCs: what works, and why menus need an event-script reader |
 | `docs/local-test-server.md` | building and running LandSandBoat here |
 | `docs/networking-handoff.md` | a false lead, kept so nobody pays for it twice |
 | the wiki | data formats: object mapping, and audio |
