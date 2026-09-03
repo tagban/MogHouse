@@ -35,6 +35,26 @@ namespace MogHouse.Core.Screens;
 public static class ClientFlow
 {
     /// <summary>
+    /// How long to wait on a server before giving up on it.
+    ///
+    /// <para>
+    /// None of the sockets underneath have a timeout of their own, so a server
+    /// that accepts the connection and then says nothing - which is what a
+    /// half-up lobby looks like from here, and is not the same as one that is
+    /// down - left the client sitting on SIGNING IN forever, with no way back
+    /// to the screen and nothing in the log after "connecting to...".
+    /// </para>
+    ///
+    /// <para>
+    /// Waited here rather than inside the protocol classes on purpose: how long
+    /// somebody watching a screen will wait is a question about them, not about
+    /// the wire. Note that this abandons the attempt rather than cancelling it -
+    /// the read underneath runs on until the socket closes.
+    /// </para>
+    /// </summary>
+    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(20);
+
+    /// <summary>
     /// Runs the client, returning a process exit code.
     ///
     /// <b>Call this from the main thread</b>, and from a Main that is not
@@ -201,7 +221,17 @@ public static class ClientFlow
             IReadOnlyList<FfxiCharacter> characters;
             try
             {
-                (login, characters) = game.LoginAsync(profile).GetAwaiter().GetResult();
+                (login, characters) = game.LoginAsync(profile).WaitAsync(Patience)
+                                          .GetAwaiter().GetResult();
+            }
+            catch (TimeoutException)
+            {
+                // Worth saying apart from a refusal: the server took the
+                // connection and then went quiet, which is a different thing to
+                // being down and a different thing to saying no.
+                say.WriteLine($"{credentials.Host} accepted the connection and then said nothing");
+                message = $"{credentials.Host.ToUpperInvariant()} IS NOT ANSWERING. TRY AGAIN.";
+                continue;
             }
             catch (Exception error)
             {
@@ -314,7 +344,8 @@ public static class ClientFlow
 
         try
         {
-            game.ConnectToZoneAsync(character, sessionHash, host).GetAwaiter().GetResult();
+            game.ConnectToZoneAsync(character, sessionHash, host).WaitAsync(Patience)
+                .GetAwaiter().GetResult();
             game.StartHeartbeatAsync().GetAwaiter().GetResult();
         }
         catch (FfxiLoginErrorException refused)
