@@ -269,8 +269,26 @@ public sealed class WorldLoop
             return;
         }
 
-        _say.WriteLine($"talking to {(who.Name.Length > 0 ? who.Name : $"{uniqueNo:X8}")}");
-        Wait(_session.TalkToAsync(uniqueNo, who.ActIndex));
+        // A tracked entity's name is nullable and plenty of them have none -
+        // the server sends NPCs without one and the zone's own name table
+        // fills them in later, if at all. Reading it as though it were always
+        // there ended the whole session the first time somebody clicked a
+        // nameless one, because an exception here unwinds out of the pump and
+        // past everything to RunSession's catch.
+        string called = string.IsNullOrEmpty(who.Name) ? $"{uniqueNo:X8}" : who.Name;
+
+        try
+        {
+            _say.WriteLine($"talking to {called}");
+            Wait(_session.TalkToAsync(uniqueNo, who.ActIndex));
+        }
+        catch (Exception failed)
+        {
+            // Nothing a click can do is worth ending the session over. The
+            // world carries on and the log says what happened, which beats a
+            // window that stops responding because somebody clicked a rock.
+            _say.WriteLine($"could not talk to {called}: {failed}");
+        }
     }
 
     private void OnChat(FfxiChatLine line) => _world.Say(line.Sender, line.Text);

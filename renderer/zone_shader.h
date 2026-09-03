@@ -85,16 +85,24 @@ fn shade(in : VertexOut, cutout : bool) -> vec4<f32> {
     // a shading term on terrain and folding it into a discard test takes the
     // ground with it.
     //
-    // Cut at the midpoint, which is what an alpha test is for. It used to cut
-    // at 0.03, which discards only an exact zero: DXT3 alpha is four bits, so
-    // the smallest step above nothing is 1/15 - about 0.067 - and a texel the
-    // artist meant as invisible but stored one step up survived. These
-    // pipelines do not blend, so surviving means drawn at full strength, and
-    // what a cutout texture holds where it is transparent is black. That is
-    // where the black cards around every leaf came from. Bilinear filtering
-    // makes it worse by putting intermediate alpha along each edge, which is
-    // exactly the band a midpoint test is meant to split.
-    if (cutout && sampled.a < 0.5) {
+    // Just above nothing, not at the midpoint.
+    //
+    // A midpoint is what an alpha test is for when the mask is binary. These
+    // are not: San d'Oria's tree measures 53% of its texels exactly
+    // transparent, 47% somewhere in between and almost none fully opaque. It
+    // is a soft mask drawn for a blend, and cutting it at half threw away most
+    // of the leaf - the tree came out as branches with a few green specks on
+    // them.
+    //
+    // Low works because the part that must go is at exactly zero. The black
+    // cards this was blamed for were never the threshold's doing: those were
+    // textures failing to be treated as cutouts at all, which is a different
+    // fault and fixed elsewhere. Above 1/15 because that is DXT3's smallest
+    // step above nothing, and a texel one step up is meant to be invisible.
+    //
+    // The real answer for a soft mask is to blend it rather than test it, and
+    // these pipelines do not blend. Until they do, this keeps the leaf.
+    if (cutout && sampled.a < 0.1) {
         discard;
     }
 

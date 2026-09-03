@@ -648,6 +648,24 @@ bool isLightDirectory(const std::string& directory)
            (directory.size() >= 5 && directory.compare(directory.size() - 5, 5, "/ligh") == 0);
 }
 
+/// Whether a light directory holds markers rather than anything to look at.
+///
+/// The distinction is `mode` against `effe`, and getting it wrong put out
+/// every lamp in San d'Oria. West Ronfaure's markers - the pale discs three
+/// units across that hung over each torch - are `mode/ligh/taki` and
+/// `mode/ligh/s_li`. Southern San d'Oria's `effe/ligh` is a different thing
+/// entirely: a hundred and eighty-four `lig1` flames at scale 0.4, one in each
+/// wall sconce, and they are meant to be seen.
+///
+/// Bastok Markets has markers under `effe/ligh` too, so the directory alone
+/// cannot settle it there - those are caught by their sheet being called
+/// "light" or "light2", which is what isLightSource() is for. Between the two
+/// tests every marker seen so far is excluded and no flame is.
+bool isMarkerOnlyDirectory(const std::string& directory)
+{
+    return directory.find("/mode/ligh") != std::string::npos;
+}
+
 /// Which of a zone's four skies the weather calls for.
 ///
 /// A zone's DAT ships exactly four - `suny`, `fine`, `clod` and `mist`, each
@@ -1219,16 +1237,30 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
             // it. Drawn, they were the white flares hanging beside every
             // lantern and over the player's head. The lighting they should
             // cast is not built yet, so for now they are simply left out.
-            if (animation != sprites.end() &&
-                (isLightSource(animation->second.texture) || isLightDirectory(effect.directory)))
+            // Anything in a light directory lights something, whether or not
+            // it is itself drawn. A marker is invisible and lights the ground;
+            // a sconce's flame is visible and lights the ground too, and only
+            // the first of those was being collected.
+            const bool marker = animation != sprites.end() &&
+                                (isLightSource(animation->second.texture) ||
+                                 isMarkerOnlyDirectory(effect.directory));
+            if (marker || isLightDirectory(effect.directory))
             {
-                // Not drawn, but not thrown away either: this is the one thing
-                // in the zone that says where a flame stands and how far its
-                // light was meant to carry. Until now that was discarded, which
-                // is why a torch at night was a bright sprite lighting nothing.
+                // The one thing in the zone that says where a flame stands.
+                // Until this was kept, a torch at night was a bright sprite
+                // lighting nothing at all.
+                //
+                // How far it carries is keyed off the size, but a marker's size
+                // is the patch it lights while a flame's is the flame - a
+                // sconce is 0.4 across and lights a good deal more than that -
+                // so a floor keeps the small ones from lighting nothing.
                 const float size = std::max(effect.scale[0], effect.scale[1]);
                 lamps.push_back(Lamp{effect.translate[0], -effect.translate[1], -effect.translate[2],
-                                     std::max(size, 0.5f) * lampReach});
+                                     std::max(size, 1.0f) * lampReach});
+            }
+
+            if (marker)
+            {
                 animation = sprites.end();
             }
             if (animation != sprites.end())
@@ -1347,7 +1379,17 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
             // second. A generator with no rate still animates in the game,
             // by its keyframe chunk, which is not read yet; a slow slide is
             // the stand-in. The direction is a guess until checked.
-            const float perSecond = effect.scroll != 0.0f ? effect.scroll * 30.0f : -0.25f;
+            // Only what the file says. A rate of zero used to become a slow
+            // slide, on the reasoning that a generator with no 0x28 still
+            // animates in the game by a keyframe chunk this does not read -
+            // but only six to nine per cent of texture-animated generators
+            // carry a rate, so that stand-in was inventing motion for well
+            // over ninety per cent of them. It shows: a wall sconce in San
+            // d'Oria had its texture running down it like water.
+            //
+            // Still rather than wrong. When the keyframe chunk is read this
+            // can animate properly.
+            const float perSecond = effect.scroll * 30.0f;
             mh::EffectParams params{0.0f, perSecond, effect.nightOnly, effect.textureAnimation};
             // A flame from the shared file adds to what is behind it; a
             // zone's own jets and waterfalls blend.
