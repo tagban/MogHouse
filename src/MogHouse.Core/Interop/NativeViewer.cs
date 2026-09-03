@@ -658,6 +658,15 @@ public sealed partial class NativeViewer : IDisposable
         }
     }
 
+    /// <summary>Writes the next frame to a BMP without stopping the world.</summary>
+    public void Capture(string path)
+    {
+        if (!_disposed && _handle != IntPtr.Zero)
+        {
+            mh_viewer_capture(_handle, path);
+        }
+    }
+
     /// <summary>
     /// Puts the character aboard the monorail, or takes them off.
     ///
@@ -983,6 +992,9 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static partial void mh_viewer_set_weather(IntPtr viewer, int weather);
+
+    [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial void mh_viewer_capture(IntPtr viewer, string path);
 
     [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
     private static partial void mh_viewer_set_player(IntPtr viewer, string? name, string? look);

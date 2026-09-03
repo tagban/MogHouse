@@ -217,6 +217,10 @@ public sealed class WorldLoop
                 _leaving = true;
                 return;
 
+            case FfxiClientCommandKind.Bug:
+                ReportBug(command.Rest);
+                return;
+
             case FfxiClientCommandKind.HomePoint:
                 Wait(_session.ReturnToHomePointAsync());
                 return;
@@ -288,6 +292,65 @@ public sealed class WorldLoop
             // world carries on and the log says what happened, which beats a
             // window that stops responding because somebody clicked a rock.
             _say.WriteLine($"could not talk to {called}: {failed}");
+        }
+    }
+
+    /// <summary>
+    /// Writes down what is wrong and where, and sends it on if there is
+    /// anywhere to send it.
+    ///
+    /// <para>
+    /// The picture is taken first and waited for briefly: the renderer writes
+    /// it on its next frame, and a report of a graphics fault without the
+    /// frame it was seen in is most of the way to useless.
+    /// </para>
+    ///
+    /// <para>
+    /// Nothing here is allowed to fail loudly. Somebody reporting a bug is
+    /// already having a bad time, and a crash while reporting one would be a
+    /// poor joke.
+    /// </para>
+    /// </summary>
+    private void ReportBug(string what)
+    {
+        try
+        {
+            uint zone = _session.ZoneState?.ZoneNo ?? _openZone;
+            string shot = Path.Combine(Path.GetTempPath(),
+                                       $"moghouse-bug-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.bmp");
+            _world.Capture(shot);
+
+            var now = new FfxiBugReport.Context(
+                What: what,
+                Who: _who,
+                ZoneNo: zone,
+                ZoneName: FfxiZoneNames.Label(zone) ?? $"zone {zone}",
+                X: _session.PosX,
+                Vertical: _session.PosVertical,
+                Depth: _session.PosDepth,
+                Facing: _session.Facing,
+                VanadielHour: _session.VanadielHour,
+                GameTime: _session.ZoneState?.GameTime ?? 0,
+                Weather: _session.CurrentWeather);
+
+            string? written = FfxiBugReport.Append(now);
+            _say.WriteLine($"bug reported: {what}");
+            _say.WriteLine($"  written to {written ?? "(nowhere - could not write the file)"}");
+
+            // Give the renderer a few frames to put the picture on disk. It is
+            // drawing at sixty a second, so this is a long wait by its
+            // standards and an unnoticeable one by anybody else's.
+            Thread.Sleep(200);
+
+            string outcome = FfxiBugReport.SendAsync(now, File.Exists(shot) ? shot : null)
+                                          .GetAwaiter().GetResult();
+            _say.WriteLine($"  {outcome}");
+            _world.Say(null, $"Reported: {what} ({outcome}).");
+        }
+        catch (Exception failed)
+        {
+            _say.WriteLine($"could not report a bug: {failed}");
+            _world.Say(null, "Could not write that report down - it is in the log.");
         }
     }
 

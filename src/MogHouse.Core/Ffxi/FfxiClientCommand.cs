@@ -24,6 +24,15 @@ public enum FfxiClientCommandKind
     /// <summary>Accept the home point after dying.</summary>
     HomePoint,
 
+    /// <summary>
+    /// Report something wrong, from where it is wrong.
+    ///
+    /// The words are the easy half. What makes a report worth having is the
+    /// zone, the spot, the facing, the hour and the weather - all of which the
+    /// client knows and a person should not have to type.
+    /// </summary>
+    Bug,
+
     /// <summary>Recognised, but the line was missing something it needed.</summary>
     Incomplete,
 
@@ -75,6 +84,13 @@ public static class FfxiClientCommands
             "shutdown" or "quit" => new FfxiClientCommand(FfxiClientCommandKind.Shutdown, name, rest),
             "homepoint" or "hp" or "return" => new FfxiClientCommand(FfxiClientCommandKind.HomePoint, name, rest),
             "talk" or "trigger" => new FfxiClientCommand(FfxiClientCommandKind.Talk, name, rest),
+
+            // Said rather than sent: a bug report goes to the people building
+            // this, not to the zone.
+            "bug" or "report" => rest.Length == 0
+                ? new FfxiClientCommand(FfxiClientCommandKind.Incomplete, name,
+                                        $"needs something to report, as /{name} the torch is not lit")
+                : new FfxiClientCommand(FfxiClientCommandKind.Bug, name, rest),
 
             // The channels, under the names the real client answers to. Every
             // one has a short form because nobody types /linkshell twice.

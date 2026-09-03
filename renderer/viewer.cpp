@@ -1950,6 +1950,24 @@ void mh::ViewerLink::requestTalk(uint32_t entityId) { talk_ = entityId; }
 
 void mh::ViewerLink::setWeather(int32_t weather) { weather_ = weather; }
 
+void mh::ViewerLink::requestCapture(const std::string& path)
+{
+    std::lock_guard<std::mutex> held(captureMutex_);
+    capturePath_ = path;
+}
+
+bool mh::ViewerLink::takeCapture(std::string& path)
+{
+    std::lock_guard<std::mutex> held(captureMutex_);
+    if (capturePath_.empty())
+    {
+        return false;
+    }
+    path = capturePath_;
+    capturePath_.clear();
+    return true;
+}
+
 int32_t mh::ViewerLink::weather() const { return weather_.load(); }
 
 /// Exchange rather than a read and a clear, for the same reason takeJump is.
@@ -9345,9 +9363,21 @@ constexpr float kGravity = 26.0f;
         // A texture copy has to start on a 256-byte row, so the readback is
         // padded and the padding is skipped when the rows are written out.
         const uint32_t bytesPerRow = (width * 4 + 255) / 256 * 256;
-        const bool takingShot = screenshotPath && ++shotIndex >= 0 && (sequenceCount == 0 || shotIndex < sequenceCount);
+        // Somebody typing /bug wants this frame written and the game to carry
+        // on; MOGHOUSE_SCREENSHOT wants one frame and an exit. Same readback,
+        // and only the second one breaks out of the loop below.
+        std::string onDemandPath;
+        const bool onDemand = link && link->takeCapture(onDemandPath);
+
+        const bool takingShot = onDemand ||
+                                (screenshotPath && ++shotIndex >= 0 &&
+                                 (sequenceCount == 0 || shotIndex < sequenceCount));
         char shotPath[1024] = {};
-        if (takingShot)
+        if (onDemand)
+        {
+            std::snprintf(shotPath, sizeof(shotPath), "%s", onDemandPath.c_str());
+        }
+        else if (takingShot)
         {
             if (sequenceCount > 0)
             {
@@ -9518,7 +9548,7 @@ constexpr float kGravity = 26.0f;
                 std::printf("could not read the frame back\n");
             }
 
-            if (sequenceCount == 0 || shotIndex + 1 >= sequenceCount)
+            if (!onDemand && (sequenceCount == 0 || shotIndex + 1 >= sequenceCount))
             {
                 break;
             }

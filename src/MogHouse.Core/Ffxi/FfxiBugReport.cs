@@ -29,6 +29,52 @@ namespace MogHouse.Core.Ffxi;
 /// </summary>
 public static class FfxiBugReport
 {
+    /// <summary>
+    /// Where reports are also sent, when there is somewhere to send them.
+    ///
+    /// <para>
+    /// A Discord webhook, because it is the only destination that asks nothing
+    /// of the person reporting: no account, no token, no browser. Text,
+    /// context and a picture go in one request, and if it is ever abused the
+    /// URL is revoked in a click.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Read from the environment or a file beside the settings, never from
+    /// the repository.</b> Anything compiled into a client that ships can be
+    /// pulled back out of it, and a webhook URL in a public repository is a
+    /// webhook URL for everybody.
+    /// </para>
+    ///
+    /// <para>
+    /// It is also write-only by design: a webhook posts and cannot read. Which
+    /// is why the local file is not a fallback but the other half - it is what
+    /// can be read back afterwards.
+    /// </para>
+    /// </summary>
+    public static string? Webhook()
+    {
+        if (Environment.GetEnvironmentVariable("MOGHOUSE_BUG_WEBHOOK") is { Length: > 0 } fromEnvironment)
+        {
+            return fromEnvironment.Trim();
+        }
+
+        try
+        {
+            string beside = Path.Combine(FfxiServerProfileStore.DefaultConfigDirectory(), "bug-webhook.txt");
+            if (File.Exists(beside))
+            {
+                string url = File.ReadAllText(beside).Trim();
+                return url.Length > 0 ? url : null;
+            }
+        }
+        catch (Exception)
+        {
+        }
+
+        return null;
+    }
+
     /// <summary>Where the reports go - beside moghouse.log, which is already writable.</summary>
     public static string FilePath =>
         Path.Combine(FfxiServerProfileStore.DefaultConfigDirectory(), "bug-reports.md");
@@ -52,7 +98,11 @@ public static class FfxiBugReport
     /// not be written - which is worth telling the reporter, because a bug
     /// report that silently went nowhere is worse than none.
     /// </summary>
-    public static string? Append(Context now, DateTimeOffset? at = null)
+    /// <param name="directory">
+    /// Where to write, for a test that must not touch the real one. Left alone
+    /// this is the config directory.
+    /// </param>
+    public static string? Append(Context now, DateTimeOffset? at = null, string? directory = null)
     {
         var report = new StringBuilder();
         report.Append('\n');
@@ -78,7 +128,7 @@ public static class FfxiBugReport
 
         try
         {
-            string path = FilePath;
+            string path = directory is null ? FilePath : Path.Combine(directory, "bug-reports.md");
             if (!File.Exists(path))
             {
                 File.WriteAllText(path,
@@ -95,6 +145,57 @@ public static class FfxiBugReport
             // Best effort. A full disk or a read-only directory is not worth
             // ending somebody's session over.
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Sends one report to the webhook, with the screenshot attached when
+    /// there is one.
+    ///
+    /// Returns what to tell the reporter. Never throws: somebody in the middle
+    /// of playing should not have their session interrupted because a POST
+    /// failed, and a report that only made it to the local file is still a
+    /// report.
+    /// </summary>
+    public static async Task<string> SendAsync(Context now, string? screenshot, CancellationToken ct = default)
+    {
+        if (Webhook() is not { } url)
+        {
+            return "saved locally - no webhook is configured, so nobody else has seen it";
+        }
+
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+            using var form = new MultipartFormDataContent();
+
+            string body =
+                $"**{Summarise(now.What)}**\n{now.What}\n\n" +
+                $"`{now.ZoneName}` ({now.ZoneNo}) at `{now.X:F1} {now.Vertical:F1} {now.Depth:F1}` " +
+                $"facing `{now.Facing}` - {now.VanadielHour:D2}:00, {now.Weather}, as {now.Who}";
+
+            // content is what Discord shows; the rest of the object is left
+            // alone so the webhook's own name and avatar are used.
+            form.Add(new StringContent(
+                         System.Text.Json.JsonSerializer.Serialize(new { content = body }),
+                         Encoding.UTF8, "application/json"),
+                     "payload_json");
+
+            if (screenshot is not null && File.Exists(screenshot))
+            {
+                var picture = new ByteArrayContent(await File.ReadAllBytesAsync(screenshot, ct));
+                picture.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/bmp");
+                form.Add(picture, "files[0]", Path.GetFileName(screenshot));
+            }
+
+            HttpResponseMessage sent = await http.PostAsync(url, form, ct);
+            return sent.IsSuccessStatusCode
+                ? "sent"
+                : $"saved locally - the webhook answered {(int)sent.StatusCode}";
+        }
+        catch (Exception failed)
+        {
+            return $"saved locally - could not send it: {failed.Message}";
         }
     }
 

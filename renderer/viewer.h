@@ -682,6 +682,14 @@ public:
     /// decided in skyForWeather(); this only carries the number across.
     void setWeather(int32_t weather);
     int32_t weather() const;
+
+    /// Asks for the next frame to be written to this path as a BMP, without
+    /// ending the session the way the MOGHOUSE_SCREENSHOT path does. What
+    /// /bug attaches to a report.
+    void requestCapture(const std::string& path);
+
+    /// Takes the pending capture path, if there is one, and clears it.
+    bool takeCapture(std::string& path);
     bool serverClock(uint32_t& clock, uint64_t& setAtNs) const;
 
 private:
@@ -742,6 +750,8 @@ private:
     std::atomic<bool> hud_{true};
     std::atomic<bool> riding_{false};
     std::atomic<int32_t> weather_{-1};   ///< -1 until the server has said
+    mutable std::mutex captureMutex_;    ///< a path is not an atomic
+    std::string capturePath_;
     uint32_t serverClock_{0};
     uint64_t serverClockSetAtNs_{0};
     bool serverClockKnown_{false};

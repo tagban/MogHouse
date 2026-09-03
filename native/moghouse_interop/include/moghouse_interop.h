@@ -281,6 +281,10 @@ MH_API void mh_viewer_set_clock(MhViewerHandle viewer, uint32_t server_clock);
 /// nobody has said, which reads as the clear one.
 MH_API void mh_viewer_set_weather(MhViewerHandle viewer, int32_t weather);
 
+/// Writes the next frame to this path as a BMP and carries on drawing - what
+/// /bug attaches to a report. Unlike MOGHOUSE_SCREENSHOT, does not exit.
+MH_API void mh_viewer_capture(MhViewerHandle viewer, const char* path);
+
 /// Whether the entities set on this viewer are a character-select line-up
 /// rather than a zone's population.
 ///

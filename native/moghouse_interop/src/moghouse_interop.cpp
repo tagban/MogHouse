@@ -396,6 +396,14 @@ void mh_viewer_set_weather(MhViewerHandle viewer, int32_t weather)
     }
 }
 
+void mh_viewer_capture(MhViewerHandle viewer, const char* path)
+{
+    if (viewer != nullptr && path != nullptr)
+    {
+        viewer->link.requestCapture(path);
+    }
+}
+
 void mh_viewer_set_lineup(MhViewerHandle viewer, int32_t on)
 {
     if (viewer != nullptr)

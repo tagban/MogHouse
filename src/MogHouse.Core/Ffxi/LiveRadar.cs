@@ -448,6 +448,18 @@ public sealed class LiveRadar : IDisposable
     }
 
     /// <summary>
+    /// Writes the next frame to a BMP and keeps drawing. A picture of what the
+    /// reporter was looking at is worth more than any description of it.
+    /// </summary>
+    public void Capture(string path)
+    {
+        if (!_closed)
+        {
+            _viewer.Capture(path);
+        }
+    }
+
+    /// <summary>
     /// Puts a screen up, replacing whatever was showing. Taking it down is
     /// <see cref="HideForm"/>.
     /// </summary>
