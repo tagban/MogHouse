@@ -92,11 +92,32 @@ ViewerOptions optionsFromEnvironment(int argc, char** argv)
             // there too. The short form leaves it at ground level facing +z,
             // which is what a radar-only test wants.
             char name[24] = {};
-            const int read =
-                std::sscanf(one.c_str(), "%f,%f,%d,%f,%f,%23[^;]", &x, &z, &kind, &y, &heading, name);
+            unsigned model = 0;
+            // "x,z,kind" still works, "x,z,kind,y,heading" stands a body, and
+            // a sixth field is a model id - which is the only way to watch a
+            // worm come out of the ground without a server that has one.
+            const int read = std::sscanf(one.c_str(), "%f,%f,%d,%f,%f,%u,%23[^;]", &x, &z, &kind, &y,
+                                         &heading, &model, name);
+            if (read == 6 || read < 6)
+            {
+                // The name is the sixth field in the old form and the seventh
+                // in the new one, so a line without a model is read again.
+                if (read < 6)
+                {
+                    std::sscanf(one.c_str(), "%f,%f,%d,%f,%f,%23[^;]", &x, &z, &kind, &y, &heading, name);
+                    model = 0;
+                }
+            }
             if (read >= 3)
             {
-                options.testEntities.push_back(mh::RadarEntity{x, z, y, heading, kind, std::string{name}});
+                mh::RadarEntity made{x, z, y, heading, kind, std::string{name}};
+                made.modelId = static_cast<uint16_t>(model);
+
+                // Counted as arriving the moment the window opens, so the
+                // spawn effect actually plays. Without this they are simply
+                // there, which is what every other test entity wants.
+                made.spawnedSecondsAgo = 0.0f;
+                options.testEntities.push_back(std::move(made));
             }
             if (end == std::string::npos)
             {

@@ -4903,12 +4903,46 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         // position without coming through here the character stopped moving.
         drawnBodies = 0;
 
+        // A test entity's age has to move for a spawn effect to play. With a
+        // client attached the tracker does that; standing one up with
+        // MOGHOUSE_ENTITIES there is nobody to, so it is counted from when the
+        // window opened - and it is done here, immediately before the bodies
+        // are written, because that is what reads it. Set further up the frame
+        // it was a frame behind, which on a single screenshot means never set
+        // at all.
+        //
+        // MOGHOUSE_TEST_SPAWN_PHASE pins the age instead of running it, so one
+        // still frame can be taken at any point in the effect - the only
+        // practical way to look at it, since a sequence long enough to cover it
+        // is gigabytes of uncompressed frames.
+        if (!link)
+        {
+            static const float pinned = [] {
+                const char* set = std::getenv("MOGHOUSE_TEST_SPAWN_PHASE");
+                return set != nullptr ? static_cast<float>(std::atof(set)) : -1.0f;
+            }();
+
+            const float since = static_cast<float>(SDL_GetTicksNS() / 1000000ull) / 1000.0f;
+            for (mh::RadarEntity& entity : radarEntities)
+            {
+                if (entity.spawnedSecondsAgo >= 0.0f)
+                {
+                    entity.spawnedSecondsAgo = pinned >= 0.0f ? pinned : since;
+                }
+            }
+        }
+
         // How long this zone has been up. Nothing is seen arriving in the
         // first few moments of one - see emergeOffset.
+        // The settle exists because a client clears its tracker on a zone
+        // change and everything then looks new. With no client there is no
+        // tracker and nothing to settle, so it would only stop a test entity
+        // ever being seen to arrive.
         const float sinceZoneSeconds =
-            zoneLoadedAtMs == 0
-                ? 0.0f
-                : static_cast<float>((SDL_GetTicksNS() / 1000000ull) - zoneLoadedAtMs) / 1000.0f;
+            !link ? 1e6f
+                  : zoneLoadedAtMs == 0
+                        ? 0.0f
+                        : static_cast<float>((SDL_GetTicksNS() / 1000000ull) - zoneLoadedAtMs) / 1000.0f;
 
         for (const mh::RadarEntity& entity : radarEntities)
         {
@@ -4932,9 +4966,19 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                 static std::set<uint32_t> announced;
                 if (announced.insert(entity.id).second)
                 {
+                    const bool burrows = burrowerModels().contains(entity.modelId);
                     std::printf("spawned %08X model %u %-20s %s\n", entity.id, entity.modelId,
                                 entity.name.c_str(),
-                                burrowerModels().contains(entity.modelId) ? "(burrows)" : "");
+                                burrows ? "(burrows)" : "(add its model to assets/burrowers.txt to burrow)");
+                }
+
+                // Every frame while it is coming up, so a curve that looks
+                // wrong can be read as numbers rather than guessed at from
+                // screenshots.
+                if (const float offset = emergeOffset(entity, grow, sinceZoneSeconds); offset != 0.0f)
+                {
+                    std::printf("  emerging %08X age %.2f offset %.2f\n", entity.id,
+                                entity.spawnedSecondsAgo, offset);
                 }
             }
 
