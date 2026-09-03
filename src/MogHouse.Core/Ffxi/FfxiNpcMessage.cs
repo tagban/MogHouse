@@ -16,8 +16,34 @@ namespace MogHouse.Core.Ffxi;
 /// </summary>
 public sealed record FfxiNpcMessage(uint UniqueNo, ushort ActIndex, ushort MessageId, byte Type)
 {
+    /// <summary>
+    /// Whether this line should appear without a name in front of it - which
+    /// the server also sets for anything a player says. See
+    /// <see cref="NamelessFlag"/>.
+    /// </summary>
+    public bool Nameless { get; init; }
+
     public const ushort TalkNumPacketId = 0x036;
     public const ushort TalkNumWorkPacketId = 0x02A;
+
+    /// <summary>
+    /// The top bit of MesNum is a flag, not part of the id.
+    ///
+    /// From the server's own builder:
+    ///
+    /// <code>
+    /// packet.MesNum = (PEntity->objtype == TYPE_PC || !showName)
+    ///                 ? (messageID + 0x8000) : messageID;
+    /// </code>
+    ///
+    /// So it is set when a player is speaking, or when the line is meant to
+    /// appear without a name in front of it. Taken as part of the id it puts
+    /// every such line 32,768 past the end of the zone's table, which is
+    /// exactly what "(line 48555)" was: 48555 - 32768 is 15787, an ordinary
+    /// line in Southern San d'Oria, and 39207 - 32768 is 6439, an ordinary
+    /// line in West Ronfaure.
+    /// </summary>
+    private const ushort NamelessFlag = 0x8000;
 
     private const int Body = 4; // id/size/sync sub-packet header
 
@@ -59,10 +85,15 @@ public sealed record FfxiNpcMessage(uint UniqueNo, ushort ActIndex, ushort Messa
             return null;
         }
 
+        ushort raw = BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(mesNum, 2));
+
         return new FfxiNpcMessage(
             BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(Body, 4)),
             BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(actIndex, 2)),
-            BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(mesNum, 2)),
-            subPacket[type]);
+            (ushort)(raw & ~NamelessFlag),
+            subPacket[type])
+        {
+            Nameless = (raw & NamelessFlag) != 0,
+        };
     }
 }

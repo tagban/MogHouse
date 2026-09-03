@@ -126,6 +126,17 @@ public sealed class WorldLoop
                 Typed(typed);
             }
 
+            // Somebody clicked on somebody. The renderer decides who was
+            // pointed at and hands back their id; this side is the only half
+            // with a socket to ask them a question.
+            //
+            // The click was being collected and dropped: character select read
+            // it, the world never did, so clicking an NPC did nothing at all.
+            if (_world.TakeTalk() is uint clicked && clicked != 0)
+            {
+                Talk(clicked);
+            }
+
             // Space: a jump on your feet, a wave lying down. A corpse has no
             // other way to be noticed.
             if (_world.TakeJump())
@@ -240,6 +251,26 @@ public sealed class WorldLoop
         // to us, so without this talking leaves no trace on screen.
         _world.Say(_who, text);
         Wait(_session.SayAsync(text));
+    }
+
+    /// <summary>
+    /// Asks whoever was clicked what they have to say.
+    ///
+    /// The renderer knows only a UniqueNo; the packet wants an ActIndex too,
+    /// and the tracker is the one thing holding both. Somebody clicked who we
+    /// have never had an update for cannot be addressed, which in practice
+    /// means they are out of range or already gone.
+    /// </summary>
+    private void Talk(uint uniqueNo)
+    {
+        if (_tracker.Find(uniqueNo) is not { } who)
+        {
+            _say.WriteLine($"clicked {uniqueNo:X8}, who is not in the tracker");
+            return;
+        }
+
+        _say.WriteLine($"talking to {(who.Name.Length > 0 ? who.Name : $"{uniqueNo:X8}")}");
+        Wait(_session.TalkToAsync(uniqueNo, who.ActIndex));
     }
 
     private void OnChat(FfxiChatLine line) => _world.Say(line.Sender, line.Text);

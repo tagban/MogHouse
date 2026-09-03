@@ -1103,10 +1103,14 @@ public sealed class FfxiGameSession : IDisposable
             if (spoken is not null)
             {
                 string? said = Dialogue().Line(spoken.MessageId);
+
+                // The server asks for some lines to appear with nobody in
+                // front of them - narration, and anything a player character
+                // says through this path.
                 ChatReceived?.Invoke(new FfxiChatLine(
                     DateTimeOffset.Now,
                     FfxiChatMessageType.System1,
-                    Speaker(spoken.UniqueNo),
+                    spoken.Nameless ? "" : Speaker(spoken.UniqueNo),
                     said ?? $"(line {spoken.MessageId})"));
             }
 

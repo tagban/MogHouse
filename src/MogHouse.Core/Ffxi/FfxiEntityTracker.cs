@@ -285,5 +285,14 @@ public sealed class FfxiEntityTracker
     /// indices are reused per zone, so carrying one across would attach an old
     /// entity's name and kind to a new one at the same index.
     /// </summary>
+    /// <summary>
+    /// The entity with this id, or null if it is not one we have seen.
+    ///
+    /// Wanted because a click comes back from the renderer as a UniqueNo and
+    /// nothing else, while talking to somebody needs their ActIndex too.
+    /// </summary>
+    public FfxiTrackedEntity? Find(uint uniqueNo) =>
+        _entities.TryGetValue(uniqueNo, out FfxiTrackedEntity? found) ? found : null;
+
     public void Clear() => _entities.Clear();
 }
