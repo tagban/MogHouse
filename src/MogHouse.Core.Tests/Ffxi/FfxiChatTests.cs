@@ -171,3 +171,70 @@ public class FfxiTellPacketTests
         Assert.Equal(0, packet[6 + 14]);
     }
 }
+
+/// <summary>
+/// Telling somebody whose name has a space in it.
+///
+/// The retail client cannot: it takes the first word as the name and sends the
+/// rest, so a character called "Donald Trump" is reachable by nobody. Nothing
+/// on the wire objects - the 0x0B6's recipient field is fifteen bytes and a
+/// space is a byte like any other - so the whole limitation is in the parsing,
+/// and quoting lifts it.
+/// </summary>
+public class FfxiTwoWordNameTests
+{
+    [Theory]
+    [InlineData("/tell \"Donald Trump\" hello")]
+    [InlineData("/tell 'Donald Trump' hello")]
+    [InlineData("/t \"Donald Trump\" hello")]
+    public void QuotedRecipientKeepsBothWords(string line)
+    {
+        FfxiClientCommand command = FfxiClientCommands.Parse(line);
+
+        Assert.Equal(FfxiClientCommandKind.Tell, command.Kind);
+        Assert.Equal("Donald Trump", command.Recipient);
+        Assert.Equal("hello", command.Rest);
+    }
+
+    [Fact]
+    public void QuotingKeepsTheRestOfTheMessageIntact()
+    {
+        FfxiClientCommand command = FfxiClientCommands.Parse("/tell \"Donald Trump\" how are you");
+
+        Assert.Equal("Donald Trump", command.Recipient);
+        Assert.Equal("how are you", command.Rest);
+    }
+
+    /// <summary>The ordinary case is untouched - no quotes, one word, as before.</summary>
+    [Fact]
+    public void AnUnquotedNameStillEndsAtTheFirstSpace()
+    {
+        FfxiClientCommand command = FfxiClientCommands.Parse("/tell Tagban hello there");
+
+        Assert.Equal(FfxiClientCommandKind.Tell, command.Kind);
+        Assert.Equal("Tagban", command.Recipient);
+        Assert.Equal("hello there", command.Rest);
+    }
+
+    [Theory]
+    [InlineData("/tell \"Donald Trump hello")]   // never closed
+    [InlineData("/tell \"Donald Trump\"")]        // nobody said anything
+    [InlineData("/tell \"\" hello")]              // quoted nobody
+    public void AnIncompleteTellIsRefusedRatherThanSaidOutLoud(string line)
+    {
+        Assert.Equal(FfxiClientCommandKind.Incomplete, FfxiClientCommands.Parse(line).Kind);
+    }
+
+    /// <summary>
+    /// And the packet carries it: the space is written into the recipient field
+    /// like any other byte, so what the server reads is the whole name.
+    /// </summary>
+    [Fact]
+    public void TheSpaceSurvivesOntoTheWire()
+    {
+        byte[] packet = FfxiTellPacket.Build("Donald Trump", "hello", sync: 1);
+
+        Assert.Equal("Donald Trump", System.Text.Encoding.ASCII.GetString(packet, 6, 12));
+        Assert.Equal(0, packet[6 + 12]);
+    }
+}

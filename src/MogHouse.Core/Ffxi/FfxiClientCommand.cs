@@ -102,18 +102,68 @@ public static class FfxiClientCommands
             ? new FfxiClientCommand(FfxiClientCommandKind.Incomplete, name, "needs something to say")
             : new FfxiClientCommand(FfxiClientCommandKind.Chat, name, rest, channel);
 
-    /// <summary>A tell, split into who and what.</summary>
+    /// <summary>
+    /// A tell, split into who and what.
+    ///
+    /// <para>
+    /// The name is the first word, and everything after it is the message -
+    /// which is the rule the retail client follows and the reason a character
+    /// whose name has a space in it can never be told anything there. Such
+    /// characters do exist: a GM command makes one without going near the rules
+    /// the creation screen applies, and the server carries the space happily
+    /// enough - the 15-byte recipient field in a 0x0B6 has no trouble with it.
+    /// It is only the typing that has nowhere to put it.
+    /// </para>
+    ///
+    /// <para>
+    /// So the name may also be quoted, which gives this client a way to say
+    /// something retail cannot:
+    /// </para>
+    ///
+    /// <code>/tell "Donald Trump" hello</code>
+    ///
+    /// <para>
+    /// Quoting costs the ordinary case nothing, because a quote is not a
+    /// character any name may contain.
+    /// </para>
+    /// </summary>
     private static FfxiClientCommand Whisper(string name, string rest)
     {
-        int space = rest.IndexOf(' ');
-        if (space <= 0)
+        string recipient;
+        string message;
+
+        if (rest.Length > 0 && (rest[0] == '"' || rest[0] == '\''))
         {
-            return new FfxiClientCommand(FfxiClientCommandKind.Incomplete, name,
-                                         "needs a name and a message, as /" + name + " Someone hello");
+            char quote = rest[0];
+            int close = rest.IndexOf(quote, 1);
+            if (close < 0)
+            {
+                return new FfxiClientCommand(FfxiClientCommandKind.Incomplete, name,
+                                             $"is missing the closing {quote} after the name");
+            }
+
+            recipient = rest[1..close];
+            message = rest[(close + 1)..].Trim();
+        }
+        else
+        {
+            int space = rest.IndexOf(' ');
+            if (space <= 0)
+            {
+                return new FfxiClientCommand(FfxiClientCommandKind.Incomplete, name,
+                                             $"needs a name and a message, as /{name} Someone hello - " +
+                                             $"or /{name} \"Two Words\" hello for a name with a space in it");
+            }
+
+            recipient = rest[..space];
+            message = rest[(space + 1)..].Trim();
         }
 
-        string recipient = rest[..space];
-        string message = rest[(space + 1)..].Trim();
+        if (recipient.Length == 0)
+        {
+            return new FfxiClientCommand(FfxiClientCommandKind.Incomplete, name, "needs somebody to tell");
+        }
+
         return message.Length == 0
             ? new FfxiClientCommand(FfxiClientCommandKind.Incomplete, name, "needs a message after the name")
             : new FfxiClientCommand(FfxiClientCommandKind.Tell, name, message, FfxiChatKind.Say, recipient);
