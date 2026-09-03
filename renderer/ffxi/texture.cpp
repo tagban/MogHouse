@@ -136,6 +136,8 @@ Texture parseTexture(const Chunk& chunk)
 
             texture.alphaZero = texels ? static_cast<float>(clear) / static_cast<float>(texels) : 0.0f;
             texture.blackWhereClear = 0.0f;
+            // One bit of alpha: there is no middle of the range to sit in.
+            texture.alphaMidway = 0.0f;
             break;
         }
 
@@ -145,6 +147,7 @@ Texture parseTexture(const Chunk& chunk)
         size_t texels = 0;
         size_t clearBlocks = 0;
         size_t clearAndBlack = 0;
+        size_t midway = 0;
         for (size_t block = 0; block + 16 <= texture.pixels.size(); block += 16)
         {
             size_t blockZero = 0;
@@ -156,6 +159,17 @@ Texture parseTexture(const Chunk& chunk)
             }
             zero += blockZero;
             texels += 16;
+
+            // Neither end of the four-bit range. A mask is 0 or 15; a blend
+            // texture lives in between.
+            for (size_t i = 0; i < 8; ++i)
+            {
+                const uint8_t byte = texture.pixels[block + i];
+                const uint8_t low = byte & 0x0F;
+                const uint8_t high = byte >> 4;
+                midway += low != 0 && low != 15;
+                midway += high != 0 && high != 15;
+            }
 
             // Half the block transparent is enough to ask what colour it hides.
             if (blockZero >= 8)
@@ -175,6 +189,7 @@ Texture parseTexture(const Chunk& chunk)
         texture.alphaZero = texels ? static_cast<float>(zero) / static_cast<float>(texels) : 0.0f;
         texture.blackWhereClear =
             clearBlocks ? static_cast<float>(clearAndBlack) / static_cast<float>(clearBlocks) : 0.0f;
+        texture.alphaMidway = texels ? static_cast<float>(midway) / static_cast<float>(texels) : 0.0f;
         break;
     }
     case 0x81:
@@ -230,6 +245,42 @@ Texture parseTexture(const Chunk& chunk)
                 const uint32_t entry = read<uint32_t>(data, kPaletteOffset + static_cast<size_t>(index) * 4);
                 std::memcpy(texture.pixels.data() + (static_cast<size_t>(target) * texture.width + x) * 4, &entry, 4);
             }
+        }
+
+        // The same two measurements BC2 makes, which nothing made here - they
+        // were left at zero, and zero means "not a cutout" however low the
+        // shader's threshold goes. Every texture in zone 0 is this format, so
+        // every leaf there drew its own black card and no amount of adjusting
+        // the alpha test could have helped: the test was never reached.
+        //
+        // Measured per texel rather than per block, because there are no blocks
+        // here. "Near black" is the 8-bit reading of the RGB565 bound the BC2
+        // path uses - about six per cent of full on each channel.
+        {
+            constexpr uint8_t kNearBlack = 16;
+            size_t clear = 0;
+            size_t clearAndBlack = 0;
+            size_t midway = 0;
+            const size_t texels = wanted;
+            for (size_t i = 0; i + 4 <= texture.pixels.size(); i += 4)
+            {
+                const uint8_t alpha = texture.pixels[i + 3];
+                midway += alpha > 16 && alpha < 240;
+                if (alpha != 0)
+                {
+                    continue;
+                }
+                ++clear;
+                if (texture.pixels[i] <= kNearBlack && texture.pixels[i + 1] <= kNearBlack &&
+                    texture.pixels[i + 2] <= kNearBlack)
+                {
+                    ++clearAndBlack;
+                }
+            }
+            texture.alphaZero = texels ? static_cast<float>(clear) / static_cast<float>(texels) : 0.0f;
+            texture.blackWhereClear =
+                clear ? static_cast<float>(clearAndBlack) / static_cast<float>(clear) : 0.0f;
+            texture.alphaMidway = texels ? static_cast<float>(midway) / static_cast<float>(texels) : 0.0f;
         }
         break;
     }

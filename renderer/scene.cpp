@@ -343,7 +343,20 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
             // punched the ground out: terrain textures carry transparency that
             // is a blend factor, not a mask, so alpha testing them discards
             // the paving. See docs/dxt3-format.md - which said so already.
-            const bool cutout = texture != textures.end() && texture->second.blackWhereClear > kCutoutSignal;
+            const bool cutout = texture != textures.end() && texture->second.isCutoutMask();
+
+            // MOGHOUSE_CUTOUT_WATCH=1 says what each texture measured and what
+            // was decided from it. A leaf drawing its own black card and a leaf
+            // drawing correctly differ only in these two numbers, and there is
+            // no way to tell them apart by looking at the zone.
+            static const bool watchCutout = std::getenv("MOGHOUSE_CUTOUT_WATCH") != nullptr;
+            if (watchCutout && texture != textures.end())
+            {
+                std::printf("texture %-20s alphaZero %.2f  black %.2f  midway %.3f  %s\n", mesh.texture.c_str(),
+                            texture->second.alphaZero, texture->second.blackWhereClear,
+                            texture->second.alphaMidway, cutout ? "CUTOUT" : "-");
+            }
+
             const float layerOffset = static_cast<float>(meshIndex) * kLayerSeparation;
 
             const uint32_t vertexBase = static_cast<uint32_t>(scene.vertices.size());

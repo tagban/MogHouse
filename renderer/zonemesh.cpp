@@ -176,7 +176,7 @@ ZoneMesh buildPlacedMesh(const ffxi::Zone& zone, const std::unordered_map<std::s
             // transparent a texture is says nothing - grass is 0.19 to 0.25
             // alpha-zero, *less* than rock at 0.51 or ground at 0.60.
             auto texture = textures.find(mesh.texture);
-            const bool cutout = texture != textures.end() && texture->second.blackWhereClear > kCutoutSignal;
+            const bool cutout = texture != textures.end() && texture->second.isCutoutMask();
 
             Group& group = groups[{mesh.texture, cutout}];
             const uint32_t base = static_cast<uint32_t>(group.vertices.size());

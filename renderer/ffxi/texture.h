@@ -42,6 +42,38 @@ struct Texture
     /// Transparency alone does not work: grass is only 0.19 to 0.25 alpha-zero,
     /// less than rock at 0.51 or ground at 0.60.
     float blackWhereClear{};
+
+    /// How much of the texture sits at neither end of the alpha range.
+    ///
+    /// A mask is binary - a texel is leaf or it is nothing - so this is near
+    /// zero. A blend texture uses the middle of the range for what it is for,
+    /// so this is not. It is the question `blackWhereClear` was reaching for
+    /// and could not ask of a format whose clear texels are not black.
+    float alphaMidway{};
+
+    /// Whether this texture's alpha is a mask to cut with rather than a
+    /// factor to blend by - which decides whether a draw gets the alpha test.
+    ///
+    /// Two ways of being sure, because one is not enough. A texture that is
+    /// black where it is clear is a mask: nobody paints the hidden part black
+    /// unless it will never be seen. That is the original test, and it works
+    /// for the block-compressed textures it was measured on.
+    ///
+    /// It says nothing about the paletted ones the early zones use, whose
+    /// clear texels carry whatever colour the palette left there - Sel Phiner's
+    /// `tree` is 37% fully transparent and none of it black, so it failed the
+    /// test and every leaf drew its own card. Hence the second way: alpha that
+    /// is binary is a mask, because a blend uses the middle of the range and a
+    /// mask has no use for it. Terrain measures 0.39 to 1.00 midway; foliage
+    /// measures 0.00.
+    bool isCutoutMask() const
+    {
+        constexpr float kBlackWhereClear = 0.2f;
+        constexpr float kSomeTransparency = 0.02f;
+        constexpr float kEssentiallyBinary = 0.05f;
+        return blackWhereClear > kBlackWhereClear ||
+               (alphaZero > kSomeTransparency && alphaMidway < kEssentiallyBinary);
+    }
 };
 
 /// Reads one texture chunk. Texture chunks are not obfuscated, unlike MZB and
