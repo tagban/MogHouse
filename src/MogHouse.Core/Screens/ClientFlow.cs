@@ -404,7 +404,13 @@ public static class ClientFlow
         // their nameplates. Without this the world is right and empty of
         // everyone else. WorldLoop takes over feeding it once the zone is up.
         var tracker = new FfxiEntityTracker { SelfUniqueNo = state.UniqueNo };
-        DateTimeOffset firstSeen = DateTimeOffset.UtcNow;
+
+        // Dated well back on purpose. Everything in this first burst was
+        // already standing there when we walked in - it is new to us and old to
+        // the world - and the renderer plays a spawn effect for anything it has
+        // only just heard about. Stamped with now, zoning into a field would
+        // have every worm in sight heave itself out of the ground at once.
+        DateTimeOffset firstSeen = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(1);
         foreach (FfxiEntityUpdate update in game.KnownEntities())
         {
             tracker.Observe(update, firstSeen);

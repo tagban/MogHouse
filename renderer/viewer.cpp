@@ -63,6 +63,7 @@
 #include <unordered_map>
 #include <string>
 #include <fstream>
+#include <set>
 #include <sstream>
 
 namespace
@@ -530,21 +531,12 @@ std::optional<LoadedCharacter> loadCharacter(const std::vector<std::string>& dat
 /// The words after "<zone dat>:" in an asset file of that shape - subrooms.txt,
 /// hidden-models.txt - for the zone at zonePath. Empty when the file or the
 /// zone's line is absent.
-std::vector<std::string> assetWordsFor(const char* fileName, const char* envOverride,
-                                       const std::filesystem::path& zonePath)
+/// Opens an asset by name, wherever the renderer happens to have been started
+/// from - as a library inside the app, as a standalone binary from the build
+/// directory, or from the source tree. Only the first of those has an assets/
+/// beside its working directory, which is why this looks in four places.
+std::ifstream openAsset(const char* fileName, const char* envOverride)
 {
-    const std::filesystem::path root = ffxi::defaultInstallRoot();
-    std::error_code ignored;
-    std::string key = std::filesystem::relative(zonePath, root, ignored).generic_string();
-    if (key.empty())
-    {
-        return {};
-    }
-
-    // Looked for in every place the renderer gets launched from. It runs as a
-    // DLL inside the app, as a standalone exe from the build directory, and
-    // from the source tree under tools/play.sh, and only the first of those has
-    // a working directory with an assets/ beside it.
     std::vector<std::filesystem::path> candidates;
     if (const char* fromEnv = envOverride ? std::getenv(envOverride) : nullptr)
     {
@@ -558,6 +550,14 @@ std::vector<std::string> assetWordsFor(const char* fileName, const char* envOver
     {
         candidates.push_back(std::filesystem::path{fontDir} / fileName);
     }
+    // Beside the executable, which is where CMake puts them and where the
+    // working directory is not. Running the standalone renderer from the
+    // repository root found no assets at all - the relative path below only
+    // works when it happens to be launched from inside build-renderer.
+    if (const char* base = SDL_GetBasePath())
+    {
+        candidates.push_back(std::filesystem::path{base} / "assets" / fileName);
+    }
     candidates.push_back(std::filesystem::path{"assets"} / fileName);
 
     std::ifstream file;
@@ -566,10 +566,105 @@ std::vector<std::string> assetWordsFor(const char* fileName, const char* envOver
         file.open(candidate);
         if (file)
         {
-            break;
+            return file;
         }
         file.clear();
     }
+    return file;
+}
+
+/// The models that come up out of the ground, from assets/burrowers.txt.
+///
+/// Read once. A worm heaving itself out of the earth is half of what makes one
+/// recognisable, and the list is a file rather than a constant because most of
+/// the common worms carry model 0 in the server's own tables and had to be
+/// found by looking - see the note in that file.
+const std::set<uint16_t>& burrowerModels()
+{
+    static const std::set<uint16_t> models = [] {
+        std::set<uint16_t> found;
+        std::ifstream file = openAsset("burrowers.txt", "MOGHOUSE_BURROWERS");
+        std::string line;
+        while (std::getline(file, line))
+        {
+            const size_t hash = line.find('#');
+            if (hash != std::string::npos)
+            {
+                line.erase(hash);
+            }
+            std::istringstream words{line};
+            int model = 0;
+            while (words >> model)
+            {
+                if (model > 0 && model <= 0xFFFF)
+                {
+                    found.insert(static_cast<uint16_t>(model));
+                }
+            }
+        }
+        if (std::getenv("MOGHOUSE_SPAWN_WATCH") != nullptr)
+        {
+            std::printf("burrowers: %zu models that come up out of the ground\n", found.size());
+        }
+        return found;
+    }();
+    return models;
+}
+
+/// How far below the ground to draw something that is still coming up, and
+/// zero once it has arrived.
+///
+/// The client cannot know when a mob spawned, only when it first heard about
+/// one - an entity walking into range is new to us and old to the world. That
+/// is a small lie for a worm and a smaller one than never emerging at all, so
+/// this keys off first sighting.
+///
+/// Eased rather than linear: a worm shoves itself clear and then settles,
+/// which is a curve that starts fast. Linear reads as a lift.
+float emergeOffset(const mh::RadarEntity& entity, float scale, float sinceZoneSeconds)
+{
+    constexpr float kEmergeSeconds = 1.1f;
+
+    // Nothing emerges in the first moments of a zone. Everything the server
+    // names then was already there, and the client cannot tell the difference -
+    // it has only just heard of all of it.
+    constexpr float kSettleSeconds = 3.0f;
+    if (sinceZoneSeconds < kSettleSeconds)
+    {
+        return 0.0f;
+    }
+
+    if (entity.spawnedSecondsAgo < 0.0f || entity.spawnedSecondsAgo >= kEmergeSeconds)
+    {
+        return 0.0f;
+    }
+    if (!burrowerModels().contains(entity.modelId))
+    {
+        return 0.0f;
+    }
+
+    // Far enough under to be out of sight at the start, in the model's own
+    // terms so a big one does not peek over the edge of its hole.
+    constexpr float kBuried = 2.4f;
+    const float t = entity.spawnedSecondsAgo / kEmergeSeconds;
+    const float eased = 1.0f - (1.0f - t) * (1.0f - t);   // fast, then settling
+    return -(1.0f - eased) * kBuried * scale;
+}
+
+std::vector<std::string> assetWordsFor(const char* fileName, const char* envOverride,
+                                       const std::filesystem::path& zonePath)
+{
+    const std::filesystem::path root = ffxi::defaultInstallRoot();
+    std::error_code ignored;
+    std::string key = std::filesystem::relative(zonePath, root, ignored).generic_string();
+    if (key.empty())
+    {
+        return {};
+    }
+
+    // One search, shared with openAsset - it used to have its own copy, and
+    // the copy was the one missing "beside the executable".
+    std::ifstream file = openAsset(fileName, envOverride);
     if (!file)
     {
         return {};
@@ -2481,6 +2576,12 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // Scratch for choosing the nearest few, kept out of the frame loop so it is
     // not reallocated sixty times a second.
     std::vector<std::pair<float, size_t>> lampOrder;
+
+    // When the zone last finished loading. Everything the server mentions in
+    // the burst after that was already standing there, so nothing should be
+    // seen arriving for a moment - otherwise walking through a zone line has
+    // every worm in the new zone heave itself out of the ground at once.
+    uint64_t zoneLoadedAtMs = 0;
     wgpu::Buffer spriteVertexBuffer;
     wgpu::Buffer spriteIndexBuffer;
     wgpu::Buffer spriteInstanceBuffer;       ///< one identity matrix
@@ -2607,6 +2708,15 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                             lighting, collision, interiors, skyObjects, curves, sprites, spriteInstances,
                             weatherNow, lamps);
             std::printf("lamps: %zu torches to light by\n", lamps.size());
+            zoneLoadedAtMs = SDL_GetTicksNS() / 1000000ull;
+
+            // Touched here so the list is read - and reported - at startup
+            // rather than the first time something spawns. Whether the file was
+            // found at all is the thing worth knowing early.
+            if (std::getenv("MOGHOUSE_SPAWN_WATCH") != nullptr)
+            {
+                (void)burrowerModels();
+            }
             if (!zone)
             {
                 return 1;
@@ -4792,6 +4902,14 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         // comment above says so, and the last time something updated a
         // position without coming through here the character stopped moving.
         drawnBodies = 0;
+
+        // How long this zone has been up. Nothing is seen arriving in the
+        // first few moments of one - see emergeOffset.
+        const float sinceZoneSeconds =
+            zoneLoadedAtMs == 0
+                ? 0.0f
+                : static_cast<float>((SDL_GetTicksNS() / 1000000ull) - zoneLoadedAtMs) / 1000.0f;
+
         for (const mh::RadarEntity& entity : radarEntities)
         {
             if (drawnBodies >= bodiesInRange)
@@ -4802,8 +4920,31 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             const float grow = mh::bodyScale(entity.size) * (mh::isChildRace(entity.look[0]) ? mh::kChildScale : 1.0f);
             const float bc = std::cos(bodyTurn) * grow;
             const float bs = std::sin(bodyTurn) * grow;
+            // MOGHOUSE_SPAWN_WATCH=1 names what just turned up and whether it
+            // is on the burrower list. Most of the common worms carry model 0
+            // in the server's own tables and take their real one from
+            // elsewhere, so the list in assets/burrowers.txt could not be built
+            // by reading the database - this is how to fill it in: stand near
+            // one, watch it spawn, add the number.
+            static const bool watchSpawns = std::getenv("MOGHOUSE_SPAWN_WATCH") != nullptr;
+            if (watchSpawns && entity.spawnedSecondsAgo >= 0.0f && entity.spawnedSecondsAgo < 1.0f)
+            {
+                static std::set<uint32_t> announced;
+                if (announced.insert(entity.id).second)
+                {
+                    std::printf("spawned %08X model %u %-20s %s\n", entity.id, entity.modelId,
+                                entity.name.c_str(),
+                                burrowerModels().contains(entity.modelId) ? "(burrows)" : "");
+                }
+            }
+
+            // A worm comes up out of the ground rather than appearing on it.
+            // Zero for everything else, and for anything that has been here
+            // longer than the effect lasts.
             const float body[16] = {bc, 0, -bs, 0, 0, grow, 0, 0, bs, 0, bc, 0,
-                                    entity.x, entity.y, entity.z, 1};
+                                    entity.x,
+                                    entity.y + emergeOffset(entity, grow, sinceZoneSeconds),
+                                    entity.z, 1};
             queue.WriteBuffer(characterInstanceBuffer, sizeof(body) * (drawnBodies + 1), body, sizeof(body));
             ++drawnBodies;
         }

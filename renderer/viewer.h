@@ -140,6 +140,10 @@ struct RadarEntity
     /// GM level, 0 for an ordinary player.
     int gmLevel{};
 
+    /// How long ago the client first saw this one, in seconds; negative when
+    /// nothing is known. Drives the emerging-from-the-ground effect.
+    float spawnedSecondsAgo{-1.0f};
+
     /// A creature's own model, when the server describes it as one fixed
     /// model rather than as a race wearing equipment.
     ///

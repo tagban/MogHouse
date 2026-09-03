@@ -150,6 +150,7 @@ New-Item -ItemType Directory -Force -Path $assets | Out-Null
 Copy-Item (Join-Path $root "renderer\assets\font.*") $assets -Force
 Copy-Item (Join-Path $root "renderer\assets\subrooms.txt") $assets -Force
 Copy-Item (Join-Path $root "renderer\assets\hidden-models.txt") $assets -Force
+Copy-Item (Join-Path $root "renderer\assets\burrowers.txt") $assets -Force
 
 # --- where bug reports go -----------------------------------------------------
 

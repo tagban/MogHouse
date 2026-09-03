@@ -1,0 +1,22 @@
+# Models that come up out of the ground rather than simply being there.
+#
+# A worm does not walk into view. It heaves itself out of the earth where it
+# was waiting, which is half of what makes one recognisable - and drawing it
+# standing on the surface the instant the server mentions it loses that
+# entirely.
+#
+# One model id per line, decimal, with anything after a '#' ignored. The
+# numbers come from the server's own mob_pools: the modelid column is a
+# twenty-byte look blob and the model is bytes two and three, little-endian.
+#
+# This list is short because most of the common worms in that database carry
+# model 0 and take their real one from elsewhere, so they could not be read
+# out of it. Rather than guess, MOGHOUSE_SPAWN_WATCH=1 prints the model of
+# everything that appears - stand near a worm, watch it spawn, and add the
+# number it prints. That is a ten second job and beats a list assembled by
+# somebody who could not see the thing.
+
+426    # Leujaoam Worm, Mineral Eater
+2027   # Lambton Worm, Veiled Sandworm
+2029   # Veiled Gigaworm
+3021   # Iron Eater

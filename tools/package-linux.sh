@@ -129,6 +129,7 @@ mkdir -p "$out/assets"
 cp "$root/renderer/assets/font."* "$out/assets/"
 cp "$root/renderer/assets/subrooms.txt" "$out/assets/"
 cp "$root/renderer/assets/hidden-models.txt" "$out/assets/"
+cp "$root/renderer/assets/burrowers.txt" "$out/assets/"
 
 # --- where bug reports go -----------------------------------------------------
 

@@ -93,6 +93,11 @@ typedef struct MhRadarEntity
     /// Plus one so that a caller who never sets it gets medium rather than
     /// small, which is what a zeroed struct would otherwise mean.
     int32_t size;
+
+    /// How long ago this one turned up, in seconds, or a negative number when
+    /// nothing is known. What a spawn effect keys off - a worm heaving itself
+    /// out of the ground has to know it has only just arrived.
+    float spawned_seconds_ago;
 } MhRadarEntity;
 
 /// What to open. Every string is borrowed for the duration of the create call

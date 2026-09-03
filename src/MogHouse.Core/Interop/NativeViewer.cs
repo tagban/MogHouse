@@ -90,6 +90,12 @@ public struct NativeRadarEntity
     /// </summary>
     public int Size;
 
+    /// <summary>
+    /// How long ago this one turned up, in seconds; negative when nothing is
+    /// known. Matches MhRadarEntity.spawned_seconds_ago.
+    /// </summary>
+    public float SpawnedSecondsAgo;
+
     public unsafe void SetLook(Ffxi.FfxiEntityLook? look)
     {
         if (look is null)

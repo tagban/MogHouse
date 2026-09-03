@@ -735,6 +735,12 @@ public sealed class LiveRadar : IDisposable
             entity.GmLevel = visible[i].GmLevel;
             entity.HealthPercent = visible[i].HealthPercent ?? -1;
             entity.Triggerable = visible[i].Triggerable ? 1 : 0;
+
+            // How long we have known about it. The renderer uses this to play
+            // a spawn effect, and only the first second or two of it matters -
+            // but the number is sent for everything, because "how old is this
+            // one" is not the renderer's to work out.
+            entity.SpawnedSecondsAgo = (float)(DateTimeOffset.UtcNow - visible[i].FirstSeen).TotalSeconds;
             entity.Size = visible[i].ModelSize is { } bodySize ? bodySize + 1 : 0;
             entities[i] = entity;
         }

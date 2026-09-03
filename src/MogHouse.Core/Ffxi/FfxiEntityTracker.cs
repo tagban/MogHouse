@@ -37,6 +37,17 @@ public sealed record FfxiTrackedEntity(
     byte? HealthPercent,
     bool Triggerable,
     DateTimeOffset LastSeen,
+
+    /// <summary>
+    /// When this one first turned up, kept across every later update.
+    ///
+    /// Which is not the same as when it spawned - an entity walking into range
+    /// is new to us and old to the world - but it is the only "just appeared"
+    /// this side has, and it is what a spawn effect keys off. Something that
+    /// burrows out of the ground the moment you round a corner is a small lie;
+    /// something that never does at all is a bigger one.
+    /// </summary>
+    DateTimeOffset FirstSeen,
     /// <summary>The server's body size, 0 to 2, when an update carried it.</summary>
     byte? ModelSize = null);
 
@@ -210,6 +221,9 @@ public sealed class FfxiEntityTracker
             GmLevel: update.RawFlags1 is null ? known?.GmLevel ?? 0 : update.GmLevel,
             HealthPercent: update.HealthPercent ?? known?.HealthPercent,
             LastSeen: now,
+            // Kept from the first sighting, never refreshed - an entity that
+            // is still here has not spawned again.
+            FirstSeen: known?.FirstSeen ?? now,
             ModelSize: update.ModelSize ?? known?.ModelSize);
     }
 

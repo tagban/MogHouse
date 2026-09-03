@@ -192,6 +192,7 @@ void mh_viewer_set_entities(MhViewerHandle viewer, const MhRadarEntity* entities
             entity.triggerable = entities[i].triggerable != 0;
             entity.silhouette = entities[i].silhouette;
             entity.size = entities[i].size;
+            entity.spawnedSecondsAgo = entities[i].spawned_seconds_ago;
             copied.push_back(std::move(entity));
         }
     }
