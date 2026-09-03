@@ -9,6 +9,8 @@
 #include "ffxi/dat.h"
 #include "ffxi/filetable.h"
 #include "ffxi/generator.h"
+#include "ffxi/d3m.h"
+#include "ffxi/sprite.h"
 #include "ffxi/look.h"
 #include "ffxi/mmb.h"
 #include "ffxi/lighting.h"
@@ -703,8 +705,11 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
                                      std::unordered_map<std::string, ffxi::Texture>& textures, ffxi::Lighting& lighting,
                                      mh::Collision& collision, std::vector<mh::InteriorLighting>& interiors,
                                      mh::Scene& skyObjects,
-                                     std::unordered_map<std::string, ffxi::IntensityCurve>& curves)
+                                     std::unordered_map<std::string, ffxi::IntensityCurve>& curves,
+                                     std::unordered_map<std::string, ffxi::SpriteAnimation>& sprites,
+                                     std::vector<mh::SpriteInstance>& spriteInstances)
 {
+    spriteInstances.clear();
     auto keys = ffxi::KeyTable::load(keyPath);
     if (!keys)
     {
@@ -714,9 +719,55 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
 
     ffxi::DatFile dat{std::filesystem::path{datPath}};
 
-    for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkLighting))
+    // The lighting sets sit one per weather under weat/<weather>, and
+    // Lighting::add keeps the first chunk it sees for each hour. The first
+    // weather directory in every city file is "clod" - cloudy - which is why
+    // the night sky was a flat grey against retail's deep blue under a clear
+    // sky. Fine weather's sets are taken when the file has them; a file with
+    // no weather directories (Sel Phiner) keeps whatever it has. Which
+    // weather the server has set (packet 0x057) is not read yet.
     {
-        lighting.add(chunk);
+        std::vector<const ffxi::Chunk*> fine;
+        std::vector<const ffxi::Chunk*> any;
+        std::vector<std::string> path;
+        for (const ffxi::Chunk& chunk : dat.chunks())
+        {
+            if (chunk.type == ffxi::kChunkEnd)
+            {
+                if (!path.empty())
+                {
+                    path.pop_back();
+                }
+                continue;
+            }
+            if (chunk.type == ffxi::kChunkDirectory)
+            {
+                std::string dir(chunk.id, 4);
+                while (!dir.empty() && (dir.back() == ' ' || dir.back() == 0))
+                {
+                    dir.pop_back();
+                }
+                path.push_back(dir);
+                continue;
+            }
+            if (chunk.type != ffxi::kChunkLighting)
+            {
+                continue;
+            }
+            any.push_back(&chunk);
+            if (std::find(path.begin(), path.end(), "fine") != path.end())
+            {
+                fine.push_back(&chunk);
+            }
+        }
+        for (const ffxi::Chunk* chunk : fine.empty() ? any : fine)
+        {
+            lighting.add(*chunk);
+        }
+        if (!fine.empty())
+        {
+            std::printf("lighting: %zu sets from the fine weather\n", fine.size());
+        }
     }
 
     // A zone with no day of its own borrows one.
@@ -860,22 +911,112 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
             }
         }
     }
-    // The model a generator means: the chunk with its id in the generator's
-    // own directory, else the first with that id anywhere.
-    const auto resolveGenerated = [&modelsByChunkId](const ffxi::EffectPlacement& effect) -> const std::string* {
-        auto found = modelsByChunkId.find(effect.modelId);
-        if (found == modelsByChunkId.end() || found->second.empty())
+    // The shared effects file, ROM/0/0.DAT: the flames, sparks and glows
+    // that every zone's generators reach into, as type 0x1f meshes with
+    // their textures. A zone DAT carries only an empty MMB stub under the
+    // same id - "hi12", the torch flame - so an id that resolves to a model
+    // with no triangles is looked up here. Loaded with the zone; forty-five
+    // small meshes and sixty textures.
+    std::unordered_map<std::string, std::string> sharedByChunkId;
+    // The sprite animations by id, from this zone and the shared file - the
+    // zone's own first, so a zone's "lt" glow wins over any shared one.
+    sprites.clear();
+    for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkSprite))
+    {
+        if (std::optional<ffxi::SpriteAnimation> sprite = ffxi::parseSprite(chunk))
         {
-            return nullptr;
+            sprites.emplace(sprite->name, std::move(*sprite));
         }
-        for (const ChunkModel& candidate : found->second)
+    }
+    {
+        std::filesystem::path sharedPath;
+        try
         {
-            if (candidate.directory == effect.directory)
+            sharedPath = ffxi::defaultInstallRoot() / "ROM" / "0" / "0.DAT";
+        }
+        catch (const std::exception&)
+        {
+        }
+        if (!sharedPath.empty() && std::filesystem::exists(sharedPath))
+        {
+            try
             {
-                return &candidate.name;
+                ffxi::DatFile shared{sharedPath};
+                size_t sharedModels = 0;
+                for (const ffxi::Chunk& chunk : shared.chunksOfType(ffxi::kChunkD3m))
+                {
+                    if (std::optional<ffxi::Model> model = ffxi::parseD3m(chunk))
+                    {
+                        // Under a name no zone model uses, so a zone's own
+                        // "hi12" stub does not shadow it.
+                        const std::string key = "effect:" + model->name;
+                        sharedByChunkId.emplace(model->name, key);
+                        models.emplace(key, std::move(*model));
+                        ++sharedModels;
+                    }
+                }
+                for (const ffxi::Chunk& chunk : shared.chunksOfType(ffxi::kChunkTexture))
+                {
+                    try
+                    {
+                        ffxi::Texture texture = ffxi::parseTexture(chunk);
+                        textures.emplace(texture.name, std::move(texture));
+                    }
+                    catch (const std::exception&)
+                    {
+                    }
+                }
+                size_t sharedSprites = 0;
+                for (const ffxi::Chunk& chunk : shared.chunksOfType(ffxi::kChunkSprite))
+                {
+                    if (std::optional<ffxi::SpriteAnimation> sprite = ffxi::parseSprite(chunk))
+                    {
+                        if (sprites.emplace(sprite->name, std::move(*sprite)).second)
+                        {
+                            ++sharedSprites;
+                        }
+                    }
+                }
+                std::printf("shared effects: %zu meshes, %zu sprite animations from %s\n", sharedModels, sharedSprites,
+                            sharedPath.filename().string().c_str());
+            }
+            catch (const std::exception& e)
+            {
+                std::printf("shared effects file did not load: %s\n", e.what());
             }
         }
-        return &found->second.front().name;
+    }
+
+    // The model a generator means: the chunk with its id in the generator's
+    // own directory, else the first with that id anywhere that has geometry,
+    // else the shared effects file.
+    const auto resolveGenerated = [&modelsByChunkId, &models,
+                                   &sharedByChunkId](const ffxi::EffectPlacement& effect) -> const std::string* {
+        auto found = modelsByChunkId.find(effect.modelId);
+        if (found != modelsByChunkId.end())
+        {
+            for (const ChunkModel& candidate : found->second)
+            {
+                if (candidate.directory == effect.directory)
+                {
+                    auto model = models.find(candidate.name);
+                    if (model != models.end() && model->second.triangleCount() > 0)
+                    {
+                        return &candidate.name;
+                    }
+                }
+            }
+            for (const ChunkModel& candidate : found->second)
+            {
+                auto model = models.find(candidate.name);
+                if (model != models.end() && model->second.triangleCount() > 0)
+                {
+                    return &candidate.name;
+                }
+            }
+        }
+        auto shared = sharedByChunkId.find(effect.modelId);
+        return shared == sharedByChunkId.end() ? nullptr : &shared->second;
     };
 
     std::optional<mh::Scene> best;
@@ -908,6 +1049,29 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
     std::unordered_map<std::string, mh::EffectParams> skyParams;
     for (const ffxi::EffectPlacement& effect : generated)
     {
+        // A generator whose id has a sprite animation places one, whether or
+        // not it also has a mesh: hi12 has both, the flame and its haze; the
+        // lamp glow lt has the sprite alone. Sky and hidden ones excepted.
+        if (!effect.hidden && effect.directory.find("/weat") == std::string::npos)
+        {
+            auto animation = sprites.find(effect.modelId);
+            if (animation != sprites.end())
+            {
+                mh::SpriteInstance instance;
+                // The DAT's frame to the world's: (x, -y, -z), as everywhere.
+                instance.centre = {effect.translate[0], -effect.translate[1], -effect.translate[2]};
+                instance.scale = {effect.scale[0], effect.scale[1]};
+                instance.animation = effect.modelId;
+                instance.curve = effect.textureAnimation;
+                instance.nightOnly = effect.nightOnly;
+                for (int i = 0; i < 4; ++i)
+                {
+                    instance.fade[i] = effect.fade[i];
+                }
+                spriteInstances.push_back(std::move(instance));
+            }
+        }
+
         const std::string* resolved = resolveGenerated(effect);
         if (!resolved || effect.hidden)
         {
@@ -966,19 +1130,33 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
             continue;
         }
         const bool animated = !water && inEffects && !effect.textureAnimation.empty();
-        if (!water && !animated && !everyGenerator)
+        if (!water && !animated && !everyGenerator && modelName.rfind("effect:", 0) != 0)
         {
             continue;
         }
-        if (animated && effectParams.find(modelName) == effectParams.end())
+        // The shared file's 0x1f meshes are parsed but not drawn: placed and
+        // drawn, hi12's ribbon stood as a pale streak several units over every
+        // lamp, and retail shows nothing there but the flame sprite. Most
+        // likely it is the path the sparks travel rather than a surface.
+        // MOGHOUSE_EFFECT_MESHES=1 draws them, for looking.
+        static const bool drawEffectMeshes = std::getenv("MOGHOUSE_EFFECT_MESHES") != nullptr;
+        const bool sharedEffect = modelName.rfind("effect:", 0) == 0;
+        if (sharedEffect && !drawEffectMeshes)
+        {
+            continue;
+        }
+        if ((animated || sharedEffect) && effectParams.find(modelName) == effectParams.end())
         {
             // The rate is per frame in the file, at the game's thirty a
             // second. A generator with no rate still animates in the game,
             // by its keyframe chunk, which is not read yet; a slow slide is
             // the stand-in. The direction is a guess until checked.
             const float perSecond = effect.scroll != 0.0f ? effect.scroll * 30.0f : -0.25f;
-            effectParams.emplace(modelName,
-                                 mh::EffectParams{0.0f, perSecond, effect.nightOnly, effect.textureAnimation});
+            mh::EffectParams params{0.0f, perSecond, effect.nightOnly, effect.textureAnimation};
+            // A flame from the shared file adds to what is behind it; a
+            // zone's own jets and waterfalls blend.
+            params.additive = sharedEffect;
+            effectParams.emplace(modelName, params);
             ++generatedEffects;
         }
         ffxi::Placement placement;
@@ -994,6 +1172,7 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
     }
     if (!generated.empty())
     {
+        std::printf("sprites: %zu placed from %zu animations\n", spriteInstances.size(), sprites.size());
         std::printf("generators: %zu, %zu placing water models, %zu animated effect models, %zu sky objects%s\n",
                     generated.size(), generatedWater, generatedEffects, skyZone.placements.size(),
                     everyGenerator ? " (all placed)" : "");
@@ -2031,6 +2210,23 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // The zone's intensity curves, by id; a draw that names one is shown
     // only while the curve is above nothing at the current hour.
     std::unordered_map<std::string, ffxi::IntensityCurve> curves;
+    // The sprites: flames and glows. Rebuilt every frame as camera-facing
+    // quads into one vertex buffer, drawn additively per texture.
+    std::unordered_map<std::string, ffxi::SpriteAnimation> sprites;
+    std::vector<mh::SpriteInstance> spriteInstances;
+    wgpu::Buffer spriteVertexBuffer;
+    wgpu::Buffer spriteIndexBuffer;
+    wgpu::Buffer spriteInstanceBuffer;       ///< one identity matrix
+    std::vector<mh::Vertex> spriteVertices; ///< scratch, kept between frames
+    struct SpriteBatch
+    {
+        std::string texture;
+        wgpu::BindGroup bindGroup;
+        uint32_t first{};
+        uint32_t count{};
+    };
+    std::vector<SpriteBatch> spriteBatches;
+    size_t spriteCapacity = 0;
     wgpu::Buffer skyVertexBuffer;
     wgpu::Buffer skyIndexBuffer;
     wgpu::Buffer skyInstanceBuffer;
@@ -2109,6 +2305,10 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         effectBindGroups.clear();
         effectBuffers.clear();
         skyObjectBindGroups.clear();
+        spriteBatches.clear();
+        spriteVertexBuffer = nullptr;
+        spriteIndexBuffer = nullptr;
+        spriteCapacity = 0;
         skyVertexBuffer = nullptr;
         skyIndexBuffer = nullptr;
         skyInstanceBuffer = nullptr;
@@ -2132,7 +2332,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             }
             zone = loadZone(currentZonePath.c_str(), keyPath,
                             options.keyTable2Path.empty() ? nullptr : options.keyTable2Path.c_str(), zoneId, textures,
-                            lighting, collision, interiors, skyObjects, curves);
+                            lighting, collision, interiors, skyObjects, curves, sprites, spriteInstances);
             if (!zone)
             {
                 return 1;
@@ -2325,9 +2525,12 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                     effectDescriptor.depthStencil = &surfaceDepth;
                     effectPipeline = device.CreateRenderPipeline(&effectDescriptor);
 
+                    // Source alpha in: the glow sheets are a flat colour with
+                    // the disc in their alpha, and adding them whole drew
+                    // pale squares over the fountain.
                     wgpu::BlendState additiveBlend{
                         .color = {.operation = wgpu::BlendOperation::Add,
-                                  .srcFactor = wgpu::BlendFactor::One,
+                                  .srcFactor = wgpu::BlendFactor::SrcAlpha,
                                   .dstFactor = wgpu::BlendFactor::One},
                         .alpha = {.operation = wgpu::BlendOperation::Add,
                                   .srcFactor = wgpu::BlendFactor::One,
@@ -2713,6 +2916,80 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                     skyObjectBindGroups.push_back(device.CreateBindGroup(&skyGroupDescriptor));
                 }
                 std::printf("sky: %zu objects from the weather generators\n", skyObjects.draws.size());
+            }
+            if (!spriteInstances.empty() && effectBindGroupLayout)
+            {
+                // One batch per texture; the instances are sorted to match so
+                // each batch is one range of the vertex buffer.
+                std::sort(spriteInstances.begin(), spriteInstances.end(),
+                          [&sprites](const mh::SpriteInstance& a, const mh::SpriteInstance& b) {
+                              const auto ta = sprites.find(a.animation);
+                              const auto tb = sprites.find(b.animation);
+                              const std::string& na = ta == sprites.end() ? a.animation : ta->second.texture;
+                              const std::string& nb = tb == sprites.end() ? b.animation : tb->second.texture;
+                              return na < nb;
+                          });
+                spriteCapacity = spriteInstances.size() * 6;
+                spriteVertices.assign(spriteCapacity, mh::Vertex{});
+                spriteVertexBuffer = createBuffer(device, spriteVertices.data(), spriteVertices.size() * sizeof(mh::Vertex),
+                                                  wgpu::BufferUsage::Vertex);
+                std::vector<uint32_t> indices(spriteCapacity);
+                for (uint32_t i = 0; i < spriteCapacity; ++i)
+                {
+                    indices[i] = i;
+                }
+                spriteIndexBuffer = createBuffer(device, indices.data(), indices.size() * sizeof(uint32_t),
+                                                 wgpu::BufferUsage::Index);
+                if (!spriteInstanceBuffer)
+                {
+                    const mh::Mat4 identity = mh::Mat4::identity();
+                    spriteInstanceBuffer = createBuffer(device, identity.m, sizeof(identity.m), wgpu::BufferUsage::Vertex);
+                }
+                for (size_t i = 0; i < spriteInstances.size(); ++i)
+                {
+                    const auto animation = sprites.find(spriteInstances[i].animation);
+                    const std::string textureName = animation == sprites.end() ? "" : animation->second.texture;
+                    if (!spriteBatches.empty() && spriteBatches.back().texture == textureName)
+                    {
+                        spriteBatches.back().count += 6;
+                        continue;
+                    }
+                    SpriteBatch batch;
+                    batch.texture = textureName;
+                    batch.first = static_cast<uint32_t>(i * 6);
+                    batch.count = 6;
+                    auto found = textures.find(textureName);
+                    if (found != textures.end())
+                    {
+                        if (wgpu::Texture gpu = mh::uploadTexture(device, found->second))
+                        {
+                            batchTextures.push_back(gpu);
+                            // no scroll, self-lit, world space
+                            const float params[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                            effectBuffers.push_back(createBuffer(device, params, sizeof(params), wgpu::BufferUsage::Uniform));
+                            wgpu::BindGroupEntry spriteEntries[4] = {};
+                            spriteEntries[0].binding = 0;
+                            spriteEntries[0].buffer = uniformBuffer;
+                            spriteEntries[0].size = sizeof(Uniforms);
+                            spriteEntries[1].binding = 1;
+                            spriteEntries[1].textureView = batchTextures.back().CreateView();
+                            spriteEntries[2].binding = 2;
+                            spriteEntries[2].sampler = sampler;
+                            spriteEntries[3].binding = 3;
+                            spriteEntries[3].buffer = effectBuffers.back();
+                            spriteEntries[3].size = sizeof(params);
+                            wgpu::BindGroupDescriptor spriteGroupDescriptor{
+                                .layout = effectBindGroupLayout, .entryCount = 4, .entries = spriteEntries};
+                            batch.bindGroup = device.CreateBindGroup(&spriteGroupDescriptor);
+                        }
+                    }
+                    if (!batch.bindGroup)
+                    {
+                        std::printf("  sprite texture [%s] not found\n", textureName.c_str());
+                    }
+                    spriteBatches.push_back(std::move(batch));
+                }
+                std::printf("sprites: %zu batches\n", spriteBatches.size());
             }
             if (unnamed)
             {
@@ -6807,10 +7084,95 @@ constexpr float kGravity = 26.0f;
                     {
                         continue;
                     }
-                    pass.SetPipeline(effectPipeline);
+                    pass.SetPipeline(draw.additive && effectAdditivePipeline ? effectAdditivePipeline : effectPipeline);
                     pass.SetBindGroup(0, effectBindGroups[i]);
                     pass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
                 }
+            }
+
+            // The sprites: flames and glows as camera-facing quads, one frame
+            // of their sheet each, rebuilt every frame and added to the scene.
+            // Frames run at ten a second, a guess at the game's rate.
+            if (spriteVertexBuffer && effectAdditivePipeline && !spriteBatches.empty())
+            {
+                const bool night = clockMinutes < 6 * 60 || clockMinutes >= 18 * 60;
+                const float dayFraction = static_cast<float>(clockMinutes) / 1440.0f;
+                const mh::Vec3 f = camera.orbiting ? mh::normalise(camera.lookAtPoint() - camera.eye()) : camera.forward();
+                const mh::Vec3 right = mh::normalise(mh::cross(f, mh::Vec3{0.0f, 1.0f, 0.0f}));
+                const mh::Vec3 up = mh::cross(right, f);
+                const float seconds = static_cast<float>(SDL_GetTicksNS() / 1000000ull) * 0.001f;
+                for (size_t i = 0; i < spriteInstances.size(); ++i)
+                {
+                    const mh::SpriteInstance& instance = spriteInstances[i];
+                    auto animation = sprites.find(instance.animation);
+                    bool shown = animation != sprites.end();
+                    float strength = 1.0f;
+                    if (shown)
+                    {
+                        auto curve = instance.curve.empty() ? curves.end() : curves.find(instance.curve);
+                        shown = curve != curves.end() ? curve->second.at(dayFraction) > 0.05f
+                                                      : !(instance.nightOnly && !night);
+                    }
+                    if (shown && instance.fade[3] > 0.0f)
+                    {
+                        // Op 0x48: in between the first two distances, out
+                        // between the last two.
+                        const mh::Vec3 toEye = camera.eye() - instance.centre;
+                        const float distance = std::sqrt(toEye.x * toEye.x + toEye.y * toEye.y + toEye.z * toEye.z);
+                        const auto ramp = [](float d, float a, float b) {
+                            return b > a ? std::clamp((d - a) / (b - a), 0.0f, 1.0f) : (d >= b ? 1.0f : 0.0f);
+                        };
+                        strength = ramp(distance, instance.fade[0], instance.fade[1]) *
+                                   (1.0f - ramp(distance, instance.fade[2], instance.fade[3]));
+                        shown = strength > 0.01f;
+                    }
+                    for (size_t v = 0; v < 6; ++v)
+                    {
+                        mh::Vertex& out = spriteVertices[i * 6 + v];
+                        out = mh::Vertex{};
+                        if (!shown)
+                        {
+                            continue;   // a degenerate triangle at the origin
+                        }
+                        const ffxi::SpriteAnimation& sheet = animation->second;
+                        const size_t frame = static_cast<size_t>(seconds * 10.0f + i * 3) % sheet.frames.size();
+                        const ffxi::SpriteVertex& source = sheet.frames[frame].vertices[v];
+                        // The quad is drawn in the DAT's frame, y down, so up
+                        // is minus y. Scaled by the generator, set on the
+                        // camera's right and up so it always faces the eye.
+                        const float sx = source.position[0] * instance.scale.x;
+                        const float sy = -source.position[1] * instance.scale.y;
+                        const mh::Vec3 world = instance.centre + right * sx + up * sy;
+                        out.position[0] = world.x;
+                        out.position[1] = world.y;
+                        out.position[2] = world.z;
+                        out.normal[1] = 1.0f;
+                        out.uv[0] = source.uv[0];
+                        out.uv[1] = source.uv[1];
+                        // Vertex alpha is quarter scale in the shader, so
+                        // 0x40 is fully on; the distance fade scales it down.
+                        const uint32_t alpha = static_cast<uint32_t>(64.0f * strength) & 0xFF;
+                        out.colour = (source.colour & 0x00FFFFFFu) | (alpha << 24);
+                    }
+                }
+                queue.WriteBuffer(spriteVertexBuffer, 0, spriteVertices.data(), spriteVertices.size() * sizeof(mh::Vertex));
+                pass.SetVertexBuffer(0, spriteVertexBuffer);
+                pass.SetVertexBuffer(1, spriteInstanceBuffer);
+                pass.SetIndexBuffer(spriteIndexBuffer, wgpu::IndexFormat::Uint32);
+                pass.SetPipeline(effectAdditivePipeline);
+                for (const SpriteBatch& batch : spriteBatches)
+                {
+                    if (!batch.bindGroup)
+                    {
+                        continue;
+                    }
+                    pass.SetBindGroup(0, batch.bindGroup);
+                    pass.DrawIndexed(batch.count, 1, batch.first, 0, 0);
+                }
+                // The zone's own buffers go back for whatever draws next.
+                pass.SetVertexBuffer(0, vertexBuffer);
+                pass.SetVertexBuffer(1, instanceBuffer);
+                pass.SetIndexBuffer(indexBuffer, wgpu::IndexFormat::Uint32);
             }
 
             // The train's own lights: the cars drawn a second time, adding to

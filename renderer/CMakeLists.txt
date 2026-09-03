@@ -74,6 +74,7 @@ endif()
 add_library(ffxi-dat STATIC
     ffxi/bgw.cpp
     ffxi/dat.cpp
+    ffxi/d3m.cpp
     ffxi/filetable.cpp
     ffxi/generator.cpp
     ffxi/lighting.cpp
@@ -84,6 +85,7 @@ add_library(ffxi-dat STATIC
     ffxi/mzb.cpp
     ffxi/os2.cpp
     ffxi/skeleton.cpp
+    ffxi/sprite.cpp
     ffxi/texture.cpp
 )
 target_include_directories(ffxi-dat PUBLIC ffxi)

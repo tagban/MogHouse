@@ -20,10 +20,26 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <array>
 #include <vector>
 
 namespace mh
 {
+/// A placed sprite animation: a flame or a glow. Where it sits, how big the
+/// generator made it, which animation it cycles and which curve lights it.
+struct SpriteInstance
+{
+    Vec3 centre;
+    struct
+    {
+        float x, y;
+    } scale{1.0f, 1.0f};
+    std::string animation;
+    std::string curve;
+    bool nightOnly{};
+    float fade[4]{}; ///< op 0x48 distances; all zero means always shown
+};
+
 /// One tracked thing. The radar only needs x and z - it is a plan view, and a
 /// dot above you is still a dot - but the same list now also puts a body in
 /// the world, which needs somewhere to stand and a way to face.

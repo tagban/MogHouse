@@ -47,6 +47,12 @@ struct EffectPlacement
     /// house floor. Read as "not drawn directly" - a reflection or water-table
     /// plane - until the opcode is understood.
     bool hidden{};
+    /// Op 0x48: four distances. Fades in between the first two and out
+    /// between the last two, so a lamp's big soft halo (`lglt`: 10, 50, 100,
+    /// 150; the fountain's `llit`: 50, 70, 150, 180) shows only from afar
+    /// and is not a wall of light when standing under the lamp. Zero when
+    /// absent, meaning always shown.
+    float fade[4]{};
 };
 
 /// A value over the Vana'diel day, from a type 0x19 chunk: pairs of (time as

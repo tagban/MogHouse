@@ -62,6 +62,7 @@ constexpr uint8_t kOpTexture = 0x63;
 constexpr uint8_t kOpNightOnly = 0x0d;
 constexpr uint8_t kOpScroll = 0x28;
 constexpr uint8_t kOpHidden = 0x27;
+constexpr uint8_t kOpDistanceFade = 0x48;
 } // namespace
 
 std::vector<EffectPlacement> parseGenerators(const DatFile& dat)
@@ -163,6 +164,15 @@ std::vector<EffectPlacement> parseGenerators(const DatFile& dat)
                     break;
                 case kOpHidden:
                     placement.hidden = true;
+                    break;
+                case kOpDistanceFade:
+                    if (length >= 20)
+                    {
+                        for (int i = 0; i < 4; ++i)
+                        {
+                            readAt(data, payload + i * 4, placement.fade[i]);
+                        }
+                    }
                     break;
                 case kOpScroll:
                     if (length >= 8)

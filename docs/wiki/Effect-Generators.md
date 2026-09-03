@@ -189,6 +189,34 @@ own `0x20` texture, `0x21` animation and `0x07` scheduler, and as empty
 animated sprite, and the same `hi12` most likely lights every lamp and
 lantern in the game. Reading type `0x1f` is the next step.
 
+### Type 0x1f: the shared effect meshes
+
+Read 2026-09-03 from `ROM/0/0.DAT`, which holds 45 of them under `syst/effe`
+with 61 textures. From the chunk's start, header included:
+
+| offset | field |
+|---|---|
+| 0x10 | `u32` 6, constant |
+| 0x14 | `u16` 1 |
+| 0x16 | `u16` **triangle count** |
+| 0x18 | `u16` the same count |
+| 0x1e | `char[16]` texture, group then name (`hit15   hit151`) |
+| 0x2e | 3 × triangles vertices of 36 bytes: position, normal, colour rgba, uv |
+
+That is the MMB vertex as a plain triangle list with no index buffer.
+`hi12`, the torch flame, is 24 triangles forming a tapered ribbon; `hit6`,
+`hi10` and most others are one quad. Checked by `(length - 0x2e) / 36` being
+`3 × count` on all 45. MogHouse parses them (`renderer/ffxi/d3m.cpp`) into
+ordinary models under the name `effect:<id>`, adds the file's textures to the
+zone's, and a generator whose id resolves to no zone model with geometry
+falls through to them. They draw additively through the effect pass, gated
+by the generator's curve, so the fountain's flames and the lamp posts light
+after 17:49.
+
+Not yet read: the `0x21` chunk of the same name, which names a second
+texture (`hit3    hit32` for `hi12`) and a list of frames - the sprite-sheet
+animation that gives the flame its flicker and, most likely, its colour.
+
 Retail confirmed at 20:35 in Bastok Markets: the flames and lamp fires are
 lit, and the fountain's jets are **off**. No opcode found yet marks the jets
 day-only; `0x0d` marks the flames night-only.

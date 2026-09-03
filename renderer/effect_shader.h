@@ -72,7 +72,10 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
     let alpha = clamp(4.0 * in.colour.a * sampled.a, 0.0, 1.0);
 
     let light = uniforms.ambient.rgb + uniforms.sunlight.rgb * lambert;
-    var colour = mix(sampled.rgb, sampled.rgb * light, effect.scroll.z);
+    // Vertex colour at half scale, 0x80 meaning full - a sprite frame's
+    // 0x808080 leaves the sheet's colour alone, a darker one dims it.
+    let tinted = sampled.rgb * min(in.colour.rgb * 2.0, vec3<f32>(1.0, 1.0, 1.0));
+    var colour = mix(tinted, tinted * light, effect.scroll.z);
 
     let distance = length(in.worldPosition - uniforms.eye.xyz);
     let fogStart = uniforms.fogRange.x;
