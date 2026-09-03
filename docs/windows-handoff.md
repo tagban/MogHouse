@@ -291,6 +291,49 @@ is. One update behind the server, invisibly. **Not yet judged by eye** - it
 was built at the end of the session and needs someone to stand near a walking
 NPC and say whether it is better.
 
+## Handoff, end of 2026-09-03 (read this first)
+
+The next session is a different model; the long section after this is the
+day's narrative and the wiki pages carry the formats.
+
+**State.** Everything is committed on `master` (last commit: harbour water
+back, nested curves, this handoff). Nothing pushed today. Tests 146 pass, 12
+skipped. LandSandBoat was running at session end (four exes from
+`C:\Users\Gaming\Desktop\LandSandBoat`). Jerk (GM) is in Bastok Markets.
+
+**Verified against retail today:** water from the zone's own meshes placed by
+effect generators; fountain jets (on by day) and lamp flames (on by night)
+from the 0x19 curves; deep blue night sky from the fine-weather lighting set;
+cloud dome and stars around the camera; the auction house as the stone
+building (tent halves struck in `assets/hidden-models.txt`); stairs walk as a
+ramp; harbour water rippling beside the bridge.
+
+**Open, in the user's order:**
+
+1. Lamp glows (`lt` sprites) staying lit by day - the nested op 0x12 curve
+   fix went in at the very end and is **not yet judged by eye**. If they
+   still show, dump `ll01`/`gl01` (a gendump-style hex view of the
+   generator) and check which curve the nested stream names.
+2. Smoke (`bsmk`) is a still one-frame sprite; retail rises it as particles.
+   The particle opcodes (0x15 box, 0x07 on the foam, 0x2d life curve, 0x13)
+   are the next format.
+3. Sprite frame rate is a guess at 10/s; sprite size uses op 0x0f and looked
+   right on flames and lamps.
+4. Weather: read packet 0x057, pick `weat/<x>` objects and lighting to match.
+5. Sun and moon spheres not drawn (untextured, `k000` curve).
+6. From earlier: fish/birds, nation flag at creation, child race models,
+   clickable chat links, standalone renderer crash, meaning of op 0x27.
+
+**Traps that cost time today:** LandSandBoat holds a killed session ~60 s
+(relaunch inside it -> `checksum FAILED`, wait it out); a Bash heredoc
+collapses doubled backslashes in patch scripts and a very long heredoc gets
+cut (write scripts with the Write tool); PowerShell here-strings are CRLF
+and will not match LF source; a Python string with `C:\U...` needs a raw
+string; generator model ids collide (`auc_`) - resolve by directory; 0x1f
+meshes are not for drawing; the sky generators share opcodes with the
+effects and are filtered by `weat`; hiding things by an unknown opcode
+(0x27) took the harbour away.
+
 ## 2026-09-03: water from the DATs, and the first effects
 
 The overnight water work was thrown away in the morning, for the right reason:

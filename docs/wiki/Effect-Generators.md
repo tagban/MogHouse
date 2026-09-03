@@ -68,15 +68,13 @@ showed them to be mirror images with steps at 0.26/0.28 and 0.72/0.74 of
 something - hours 06:15/06:45 and 17:15/17:45 of a day. `ksta` (stars) and
 `k000` (moon) then fitted the same reading.
 
-## Op 0x27: the water table
+## Op 0x27
 
 Bastok Markets' `allsea` and `lowsea` generators, and only those, carry op
-`0x27`. `allsea` is a 1,155-triangle sheet scaled a hundredfold to span the
-whole zone at heights from -10 to +10, one level under every floor - a water
-table, visible only where the ground is cut. Drawn directly it covered the
-auction house floor with rippling water. MogHouse does not place a generator
-that carries `0x27`; what the retail client does with these sheets (a
-reflection pass, most likely) is not known.
+`0x27`. `allsea` is a 1,155-triangle sheet scaled a hundredfold spanning the
+whole zone at heights from -10 to +10 - the harbour and canal water, sitting
+under every floor and showing where the ground is cut. It is drawn; see the
+correction under the opcodes below.
 
 The MZB's placement table places only the terrain and the buildings.
 Everything in `weat` and `effe` is placed by a generator.
@@ -121,6 +119,8 @@ the third holds fades and flags; the fourth is usually empty.
 | `0x1d` | 1 | none | the same set plus a few lights |
 | `0x30` | 2 | one float | jets, lights, clouds |
 | `0x11` | ? | | sun and moon only - celestial motion? |
+| `0x48` | 5 | four floats: fade-in near/far, fade-out near/far, by distance to the eye | big glows |
+| `0x12` | many | three floats then a nested opcode stream, see below | glows, some flames |
 | `0x4e 0x4f 0x45 0x50` | | | moon and sky only; `0x50` on every sky object |
 
 **The model id is the four-character id of the MMB chunk, not its
@@ -213,9 +213,63 @@ falls through to them. They draw additively through the effect pass, gated
 by the generator's curve, so the fountain's flames and the lamp posts light
 after 17:49.
 
-Not yet read: the `0x21` chunk of the same name, which names a second
-texture (`hit3    hit32` for `hi12`) and a list of frames - the sprite-sheet
-animation that gives the flame its flicker and, most likely, its colour.
+The 0x1f meshes are **parsed but not drawn** (`MOGHOUSE_EFFECT_MESHES=1`
+draws them): placed, `hi12`'s ribbon stood as a pale streak several units over
+every lamp, and retail shows only the flame sprite. Most likely it is the path
+the sparks travel.
+
+### Type 0x21: sprite animations - the flame itself
+
+A flame in FFXI is a camera-facing quad cycling through a sprite sheet. From
+the chunk's start, header included:
+
+| offset | field |
+|---|---|
+| 0x10 | `u8` 1, `u8` 0, **`u8` frame count**, `u8` 0, then 0, the count twice, 1 |
+| 0x18 | `char[16]` texture, group then name (`hit3    hit32`) |
+| 0x28 | frames of 148 bytes: `u32` 1, then 6 vertices of 24 bytes: position xyz, colour rgba, uv |
+
+The six vertices are two triangles making one quad in the plane z = 0, y
+down as everywhere in the DATs. `hi12` is 16 frames over `hit32`, a 4x4
+sheet of orange flame (`python tools/dumptex.py ROM/0/0.DAT hit32`), the
+quad two units tall from y = -2 to 0, standing on its base point. `hit6` (the
+gate light) and a zone's own `lt` (lamp glow, texture `effect  light`) are
+one frame over a 2x2 quad centred on the point. Checked by
+`(length - 0x28) / 148` equalling the count on every chunk seen.
+
+MogHouse (`renderer/ffxi/sprite.cpp`; `spriteInstances` in `viewer.cpp`)
+places one sprite for every generator whose model id has a 0x21 chunk - the
+zone's own DAT first, then `ROM/0/0.DAT` - at the generator's position,
+scaled by op 0x0f, rebuilt every frame on the camera's right and up vectors,
+one sheet frame each at ten a second (a guess), added with source alpha
+through the effect pipeline, gated by the generator's curve. Bastok Markets
+places 150 from 24 animations. Confirmed lit at night against retail.
+
+### Op 0x48: distance fade
+
+Four floats: fade in between the first two distances, out between the last
+two. The gate's big glow `lglt` (`hit6` scaled 15 x 20) has 10, 50, 100, 150;
+the fountain's `llit` (`lt` scaled 15) has 50, 70, 150, 180. Without it those
+drew as a forty-unit wall of light at the zone line. With it they are the
+soft halo a distant lamp has, gone when you stand under it.
+
+### Op 0x12: a nested stream
+
+Three floats, then opcodes again, but the length byte carries flags in its
+high bits: `0xa4` is four words, `0xa1` one. The lamp glows (`ll01`, `bll1`,
+`gl01` families) and some fountain flames keep their curve (0x63 `fflt`) and
+night flag in here and nothing at the top level, so read only at the top
+level they stayed lit all day. Also inside: 0x2d naming a second curve
+(`fiam`, a value over the particle's life), 0x13, 0x16 colour, 0x2e, 0x1b.
+
+### Op 0x27, corrected
+
+Read for a day as "not drawn" because `allsea`, the whole-zone sheet that
+carries it, showed through the auction house floor. The floor was missing
+because the tent version of the building was drawn (see
+[[Object-Mapping]]); hiding `allsea` took the harbour with it, and retail
+draws that sheet, rippling, beside the bridge. Nothing is hidden by 0x27 now.
+Its meaning is still unknown.
 
 Retail confirmed at 20:35 in Bastok Markets: the flames and lamp fires are
 lit, and the fountain's jets are **off**. No opcode found yet marks the jets

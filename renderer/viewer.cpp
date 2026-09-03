@@ -1052,7 +1052,7 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
         // A generator whose id has a sprite animation places one, whether or
         // not it also has a mesh: hi12 has both, the flame and its haze; the
         // lamp glow lt has the sprite alone. Sky and hidden ones excepted.
-        if (!effect.hidden && effect.directory.find("/weat") == std::string::npos)
+        if (effect.directory.find("/weat") == std::string::npos)
         {
             auto animation = sprites.find(effect.modelId);
             if (animation != sprites.end())
@@ -1072,8 +1072,13 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
             }
         }
 
+        // Op 0x27 was read as "not drawn" for a day: allsea, the whole-zone
+        // water table, had shown through the auction house floor. The floor
+        // was missing because the tent version of the building was drawn
+        // (see assets/hidden-models.txt), and hiding allsea took the harbour
+        // with it - retail draws that sheet, rippling, beside the bridge.
         const std::string* resolved = resolveGenerated(effect);
-        if (!resolved || effect.hidden)
+        if (!resolved)
         {
             continue;
         }

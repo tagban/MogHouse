@@ -63,6 +63,7 @@ constexpr uint8_t kOpNightOnly = 0x0d;
 constexpr uint8_t kOpScroll = 0x28;
 constexpr uint8_t kOpHidden = 0x27;
 constexpr uint8_t kOpDistanceFade = 0x48;
+constexpr uint8_t kOpChild = 0x12;
 } // namespace
 
 std::vector<EffectPlacement> parseGenerators(const DatFile& dat)
@@ -174,6 +175,41 @@ std::vector<EffectPlacement> parseGenerators(const DatFile& dat)
                         }
                     }
                     break;
+                case kOpChild:
+                {
+                    // A nested stream: three floats, then opcodes whose
+                    // length byte carries flags in its high bits (0xa4 is
+                    // four words). The lamp glows and the fountain's big
+                    // flames keep their curve (0x63 "fflt") and night flag in
+                    // here rather than at the top level, and read only there
+                    // they stayed lit all day.
+                    size_t inner = payload + 12;
+                    const size_t end = pos + length;
+                    for (int innerGuard = 0; innerGuard < 40 && inner + 4 <= end; ++innerGuard)
+                    {
+                        const uint8_t innerOp = data[inner];
+                        const size_t innerWords = data[inner + 1] & 0x1f;
+                        if (innerOp == 0 || innerWords == 0)
+                        {
+                            break;
+                        }
+                        const size_t innerLength = innerWords * 4;
+                        if (inner + innerLength > end)
+                        {
+                            break;
+                        }
+                        if (innerOp == kOpTexture && innerLength >= 12 && placement.textureAnimation.empty())
+                        {
+                            placement.textureAnimation = fourChars(data, inner + 8);
+                        }
+                        if (innerOp == kOpNightOnly)
+                        {
+                            placement.nightOnly = true;
+                        }
+                        inner += innerLength;
+                    }
+                    break;
+                }
                 case kOpScroll:
                     if (length >= 8)
                     {
