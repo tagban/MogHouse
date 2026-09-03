@@ -5,18 +5,54 @@
 # standing on the surface the instant the server mentions it loses that
 # entirely.
 #
-# One model id per line, decimal, with anything after a '#' ignored. The
-# numbers come from the server's own mob_pools: the modelid column is a
-# twenty-byte look blob and the model is bytes two and three, little-endian.
+# One model id per line, decimal, with anything after a '#' ignored.
 #
-# This list is short because most of the common worms in that database carry
-# model 0 and take their real one from elsewhere, so they could not be read
-# out of it. Rather than guess, MOGHOUSE_SPAWN_WATCH=1 prints the model of
-# everything that appears - stand near a worm, watch it spawn, and add the
-# number it prints. That is a ten second job and beats a list assembled by
-# somebody who could not see the thing.
+#
+# Where these came from
+# ---------------------
+#
+# A LandSandBoat database, joined from a spawned mob back to its model:
+#
+#     SELECT HEX(p.modelid), s.polutils_name, COUNT(*)
+#     FROM mob_spawn_points s
+#     JOIN mob_groups g ON s.groupid = g.groupid
+#                      AND g.zoneid = ((s.mobid >> 12) & 0xFFF)
+#     JOIN mob_pools  p ON g.poolid  = p.poolid
+#     WHERE s.polutils_name REGEXP 'Worm|Eater'
+#     GROUP BY HEX(p.modelid), s.polutils_name;
+#
+# The model is bytes two and three of mob_pools.modelid, little-endian - that
+# column is a twenty-byte look blob, not a number.
+#
+# Two things about that query are worth keeping, because getting either wrong
+# gives an answer rather than an error:
+#
+#   * groupid is unique per zone, not globally - every zone has a group 1. So
+#     the join needs the zone as well, and the zone is encoded in the mobid
+#     rather than stored on the spawn point: (mobid >> 12) & 0xFFF. Joining on
+#     groupid alone cross-joins every zone and returns fifteen different models
+#     all confidently named "Leujaoam Worm".
+#
+#   * polutils_name is the name a player sees. mobname is the placeholder and
+#     repeats across unrelated mobs.
+#
+# A crawler is not on this list on purpose. Model 396 is the commonest thing
+# the query returns and a crawler stays on the surface - it is a caterpillar,
+# not a worm.
+#
+#
+# What is missing
+# ---------------
+#
+# The database this was read from carries 6,642 spawn points and none at all
+# in zones 100, 101 or 230, so the ordinary worms of the starting areas - the
+# Stone Eaters and their kin - are simply not in it and could not be looked up.
+#
+# MOGHOUSE_SPAWN_WATCH=1 prints the model of everything that appears as it
+# appears. Stand near one, watch it spawn, add the number it prints. That is a
+# ten second job and beats a list assembled by somebody who cannot see it.
 
-426    # Leujaoam Worm, Mineral Eater
-2027   # Lambton Worm, Veiled Sandworm
-2029   # Veiled Gigaworm
-3021   # Iron Eater
+426    # Leujaoam Worm, Mineral Eater      - spawned, confirmed
+2027   # Lambton Worm, Veiled Sandworm     - spawned, confirmed
+2029   # Veiled Gigaworm                   - spawned, confirmed
+3021   # Iron Eater                        - in mob_pools, never spawned in this database
