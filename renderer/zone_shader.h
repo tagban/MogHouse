@@ -20,6 +20,12 @@ struct Uniforms {
     // alongside so the fragment stage can measure distance.
     fogRange : vec4<f32>,
     eye : vec4<f32>,
+    // x is how many of the lamps below are live this frame.
+    lampCount : vec4<f32>,
+    // xyz where a flame stands, w how far its light reaches. Filled with the
+    // nearest to the camera each frame, because a zone has more torches than
+    // will fit here and only the near ones can be seen to light anything.
+    lamps : array<vec4<f32>, 24>,
 };
 
 @group(0) @binding(0) var<uniform> uniforms : Uniforms;
@@ -92,10 +98,36 @@ fn shade(in : VertexOut, cutout : bool) -> vec4<f32> {
         discard;
     }
 
+    // Torchlight.
+    //
+    // The zone's own lighting is one directional sun and a flat ambient, which
+    // at night leaves a torch as a bright sprite standing in the dark lighting
+    // nothing at all. Each lamp is a point with a reach: inside it the ground,
+    // the fixtures and whoever is standing there warm up, falling off to
+    // nothing at the edge.
+    //
+    // Squared falloff rather than linear - linear leaves a visible disc where
+    // the reach ends, which is the very thing the markers used to draw. The
+    // facing term keeps a surface turned away from the flame darker than one
+    // turned towards it, so a lamp reads as coming from somewhere.
+    let warm = vec3<f32>(1.0, 0.68, 0.36);
+    var lamplight = vec3<f32>(0.0, 0.0, 0.0);
+    let lampCount = i32(uniforms.lampCount.x);
+    for (var i = 0; i < lampCount; i = i + 1) {
+        let lamp = uniforms.lamps[i];
+        let toLamp = lamp.xyz - in.worldPosition;
+        let away = length(toLamp);
+        if (away < lamp.w) {
+            let fade = 1.0 - away / lamp.w;
+            let facing = max(dot(n, toLamp / max(away, 0.001)), 0.0);
+            lamplight = lamplight + warm * fade * fade * (0.35 + 0.65 * facing);
+        }
+    }
+
     // Ambient plus a diffuse term, both the zone's own colours for this time of
     // day. Components run 0..128 in the file, so values above 1 are normal and
     // act as overbrightness.
-    let light = uniforms.ambient.rgb + uniforms.sunlight.rgb * lambert;
+    let light = uniforms.ambient.rgb + uniforms.sunlight.rgb * lambert + lamplight;
     var colour = sampled.rgb * light;
 
     // Fog fades toward the zone's fog colour between the two distances it

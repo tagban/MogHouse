@@ -109,6 +109,20 @@ inline constexpr float kRideDrop = 1.9f;
 /// front.
 inline constexpr wgpu::Color kFadedBody{0.42, 0.42, 0.42, 1.0};
 
+/// How many torches can light a frame at once. A zone has more - West
+/// Ronfaure has forty-two - so the nearest are chosen each frame; the rest are
+/// too far to be seen lighting anything.
+constexpr int kMaxLamps = 24;
+
+/// Where a flame stands and how far its light reaches.
+struct Lamp
+{
+    float x{};
+    float y{};
+    float z{};
+    float reach{};
+};
+
 struct Uniforms
 {
     float viewProjection[16];
@@ -118,6 +132,8 @@ struct Uniforms
     float fogColour[4];
     float fogRange[4];
     float eye[4];
+    float lampCount[4];
+    float lamps[kMaxLamps][4];
 };
 
 /// Matches RadarUniforms in radar_shader.h.
@@ -821,8 +837,19 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
                                      std::unordered_map<std::string, ffxi::IntensityCurve>& curves,
                                      std::unordered_map<std::string, ffxi::SpriteAnimation>& sprites,
                                      std::vector<mh::SpriteInstance>& spriteInstances,
-                                     int weather)
+                                     int weather, std::vector<Lamp>& lamps)
 {
+    lamps.clear();
+
+    // How far a torch throws light, as a multiple of the marker's own size.
+    // The marker is a disc the artists sized to the lit patch, so its scale is
+    // the right thing to key off; the multiple is a guess and is the one number
+    // here worth checking against a retail client.
+    static const float lampReach = [] {
+        const char* set = std::getenv("MOGHOUSE_LAMP_REACH");
+        return set != nullptr ? static_cast<float>(std::atof(set)) : 8.0f;
+    }();
+
     // Which of this zone's four skies to build. Chosen once, here, because the
     // sky is baked into the scene with everything else - changing weather
     // without reloading the zone needs a rebuild path that does not exist yet.
@@ -1195,6 +1222,13 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
             if (animation != sprites.end() &&
                 (isLightSource(animation->second.texture) || isLightDirectory(effect.directory)))
             {
+                // Not drawn, but not thrown away either: this is the one thing
+                // in the zone that says where a flame stands and how far its
+                // light was meant to carry. Until now that was discarded, which
+                // is why a torch at night was a bright sprite lighting nothing.
+                const float size = std::max(effect.scale[0], effect.scale[1]);
+                lamps.push_back(Lamp{effect.translate[0], -effect.translate[1], -effect.translate[2],
+                                     std::max(size, 0.5f) * lampReach});
                 animation = sprites.end();
             }
             if (animation != sprites.end())
@@ -2380,6 +2414,13 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // quads into one vertex buffer, drawn additively per texture.
     std::unordered_map<std::string, ffxi::SpriteAnimation> sprites;
     std::vector<mh::SpriteInstance> spriteInstances;
+
+    // Where the zone's torches stand. Rebuilt with the zone, read every frame.
+    std::vector<Lamp> lamps;
+
+    // Scratch for choosing the nearest few, kept out of the frame loop so it is
+    // not reallocated sixty times a second.
+    std::vector<std::pair<float, size_t>> lampOrder;
     wgpu::Buffer spriteVertexBuffer;
     wgpu::Buffer spriteIndexBuffer;
     wgpu::Buffer spriteInstanceBuffer;       ///< one identity matrix
@@ -2504,7 +2545,8 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             zone = loadZone(currentZonePath.c_str(), keyPath,
                             options.keyTable2Path.empty() ? nullptr : options.keyTable2Path.c_str(), zoneId, textures,
                             lighting, collision, interiors, skyObjects, curves, sprites, spriteInstances,
-                            weatherNow);
+                            weatherNow, lamps);
+            std::printf("lamps: %zu torches to light by\n", lamps.size());
             if (!zone)
             {
                 return 1;
@@ -7180,6 +7222,37 @@ constexpr float kGravity = 26.0f;
             uniforms.eye[2] = eyePoint.z;
             // Seconds since start, for the water surface.
             uniforms.eye[3] = animationSeconds;
+
+            // The torches near enough to matter. There are more in a zone than
+            // will fit in the block - West Ronfaure has forty-two - and a lamp
+            // beyond its own reach of every visible surface changes nothing, so
+            // the nearest to the eye are the ones worth sending.
+            {
+                lampOrder.clear();
+                lampOrder.reserve(lamps.size());
+                for (size_t i = 0; i < lamps.size(); ++i)
+                {
+                    const float dx = lamps[i].x - eyePoint.x;
+                    const float dy = lamps[i].y - eyePoint.y;
+                    const float dz = lamps[i].z - eyePoint.z;
+                    lampOrder.push_back({dx * dx + dy * dy + dz * dz, i});
+                }
+
+                const size_t take = std::min<size_t>(lampOrder.size(), kMaxLamps);
+                std::partial_sort(lampOrder.begin(), lampOrder.begin() + static_cast<long>(take),
+                                  lampOrder.end(),
+                                  [](const auto& a, const auto& b) { return a.first < b.first; });
+
+                for (size_t i = 0; i < take; ++i)
+                {
+                    const Lamp& lamp = lamps[lampOrder[i].second];
+                    uniforms.lamps[i][0] = lamp.x;
+                    uniforms.lamps[i][1] = lamp.y;
+                    uniforms.lamps[i][2] = lamp.z;
+                    uniforms.lamps[i][3] = lamp.reach;
+                }
+                uniforms.lampCount[0] = static_cast<float>(take);
+            }
 
             // With no lighting data, fall back to a plain lit look rather than
             // a black zone.
