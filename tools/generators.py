@@ -33,16 +33,20 @@ for offset, name, ctype, length, parent, child in chunks(data):
     ops = {}
     order = []
     for start in sections:
+        # each stream runs to the next stream's start; the length byte's top
+        # three bits are flags (0xa4 = 4 words); op 0 is a one-word nop
+        end = min([s for s in sections if s > start] + [len(body)])
         pos = start
         guard = 0
-        while 0 < pos and pos + 4 <= len(body) and guard < 100:
+        while 0 < pos and pos + 4 <= end and guard < 200:
             guard += 1
-            op, ln = body[pos], body[pos + 1]
-            if op == 0 or ln == 0:
+            op, ln = body[pos], body[pos + 1] & 0x1f
+            if ln == 0 or pos + ln * 4 > end:
                 break
             payload = body[pos + 4: pos + ln * 4]
-            order.append((op, ln, payload))
-            ops.setdefault(op, payload)
+            if op:
+                order.append((op, ln, payload))
+                ops.setdefault(op, payload)
             pos += ln * 4
     model = None
     where = None

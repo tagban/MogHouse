@@ -63,7 +63,6 @@ constexpr uint8_t kOpNightOnly = 0x0d;
 constexpr uint8_t kOpScroll = 0x28;
 constexpr uint8_t kOpHidden = 0x27;
 constexpr uint8_t kOpDistanceFade = 0x48;
-constexpr uint8_t kOpChild = 0x12;
 } // namespace
 
 std::vector<EffectPlacement> parseGenerators(const DatFile& dat)
@@ -105,24 +104,42 @@ std::vector<EffectPlacement> parseGenerators(const DatFile& dat)
         }
         bool hasModel = false;
 
+        // Four streams, each running to the next stream's start (or the chunk's
+        // end). The length byte carries flags in its top three bits - 0xa4 is
+        // four words, 0xa1 one - and op 0x00 is a one-word nop, not an end:
+        // read as an end, and with the flags taken as length, everything after
+        // a lamp glow's op 0x12 was lost, including its curve and night flag.
+        uint32_t starts[4] = {};
         for (int section = 0; section < 4; ++section)
         {
-            uint32_t start = 0;
-            if (!readAt(data, kSectionTable - kHeader + section * 4, start) || start < kHeader)
+            readAt(data, kSectionTable - kHeader + section * 4, starts[section]);
+        }
+        for (int section = 0; section < 4; ++section)
+        {
+            const uint32_t start = starts[section];
+            if (start < kHeader || start - kHeader >= data.size())
             {
                 continue;
             }
+            size_t end = data.size();
+            for (int other = 0; other < 4; ++other)
+            {
+                if (starts[other] > start && starts[other] - kHeader < end)
+                {
+                    end = starts[other] - kHeader;
+                }
+            }
             size_t pos = start - kHeader;
-            for (int guard = 0; guard < 100 && pos + 4 <= data.size(); ++guard)
+            for (int guard = 0; guard < 200 && pos + 4 <= end; ++guard)
             {
                 const uint8_t op = data[pos];
-                const uint8_t words = data[pos + 1];
-                if (op == 0 || words == 0)
+                const size_t words = data[pos + 1] & 0x1f;
+                if (words == 0)
                 {
                     break;
                 }
-                const size_t length = static_cast<size_t>(words) * 4;
-                if (pos + length > data.size())
+                const size_t length = words * 4;
+                if (pos + length > end)
                 {
                     break;
                 }
@@ -155,7 +172,7 @@ std::vector<EffectPlacement> parseGenerators(const DatFile& dat)
                     }
                     break;
                 case kOpTexture:
-                    if (length >= 12)
+                    if (length >= 12 && placement.textureAnimation.empty())
                     {
                         placement.textureAnimation = fourChars(data, payload + 4);
                     }
@@ -166,6 +183,12 @@ std::vector<EffectPlacement> parseGenerators(const DatFile& dat)
                 case kOpHidden:
                     placement.hidden = true;
                     break;
+                case kOpScroll:
+                    if (length >= 8)
+                    {
+                        readAt(data, payload, placement.scroll);
+                    }
+                    break;
                 case kOpDistanceFade:
                     if (length >= 20)
                     {
@@ -173,47 +196,6 @@ std::vector<EffectPlacement> parseGenerators(const DatFile& dat)
                         {
                             readAt(data, payload + i * 4, placement.fade[i]);
                         }
-                    }
-                    break;
-                case kOpChild:
-                {
-                    // A nested stream: three floats, then opcodes whose
-                    // length byte carries flags in its high bits (0xa4 is
-                    // four words). The lamp glows and the fountain's big
-                    // flames keep their curve (0x63 "fflt") and night flag in
-                    // here rather than at the top level, and read only there
-                    // they stayed lit all day.
-                    size_t inner = payload + 12;
-                    const size_t end = pos + length;
-                    for (int innerGuard = 0; innerGuard < 40 && inner + 4 <= end; ++innerGuard)
-                    {
-                        const uint8_t innerOp = data[inner];
-                        const size_t innerWords = data[inner + 1] & 0x1f;
-                        if (innerOp == 0 || innerWords == 0)
-                        {
-                            break;
-                        }
-                        const size_t innerLength = innerWords * 4;
-                        if (inner + innerLength > end)
-                        {
-                            break;
-                        }
-                        if (innerOp == kOpTexture && innerLength >= 12 && placement.textureAnimation.empty())
-                        {
-                            placement.textureAnimation = fourChars(data, inner + 8);
-                        }
-                        if (innerOp == kOpNightOnly)
-                        {
-                            placement.nightOnly = true;
-                        }
-                        inner += innerLength;
-                    }
-                    break;
-                }
-                case kOpScroll:
-                    if (length >= 8)
-                    {
-                        readAt(data, payload, placement.scroll);
                     }
                     break;
                 default:

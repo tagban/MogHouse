@@ -310,10 +310,12 @@ ramp; harbour water rippling beside the bridge.
 
 **Open, in the user's order:**
 
-1. Lamp glows (`lt` sprites) staying lit by day - the nested op 0x12 curve
-   fix went in at the very end and is **not yet judged by eye**. If they
-   still show, dump `ll01`/`gl01` (a gendump-style hex view of the
-   generator) and check which curve the nested stream names.
+1. Lamp glows and the fountain's big flames staying lit by day - fixed at
+   the very end: the generator length byte's top three bits are flags, and
+   read whole it made op 0x12 look 164 words long and dropped the curve
+   after it. `MOGHOUSE_LIST_GENERATORS=1 ffxi-datdump` now shows `bll1 ->
+   fflt`, `bfl1 -> frtm`, `gl01 -> lttm`. **Not yet judged by eye** in the
+   client; if anything is still lit at noon, check its curve name there.
 2. Smoke (`bsmk`) is a still one-frame sprite; retail rises it as particles.
    The particle opcodes (0x15 box, 0x07 on the foam, 0x2d life curve, 0x13)
    are the next format.

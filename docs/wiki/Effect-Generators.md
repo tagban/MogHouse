@@ -90,14 +90,21 @@ The chunk's own four-character id is the generator's name (`ka01`, `fnmz`).
 | 0x50 | 4 floats, 1.0 |
 | 0x80 | 4 × `u32`: offsets of four opcode streams |
 
-Each stream is opcodes until an op `0x00`:
+Each stream runs from its start to the next stream's start (or the chunk's
+end) as opcodes:
 
 ```
 u8  op
-u8  length in 4-byte words, header included
+u8  length in 4-byte words, header included, in the LOW FIVE BITS -
+    the top three bits are flags (0xa4 is four words, 0xa1 one)
 u16 zero
 ... payload
 ```
+
+Op `0x00` with length 1 is a nop, not an end; a length of zero ends the
+stream. Read with the whole byte as the length, a lamp glow's `0x12 0xa4`
+looked like 164 words and everything after it was lost - which is how the
+glows stayed lit all day.
 
 The first stream holds ranges (`0x0a`, `0x15`); the second places the model;
 the third holds fades and flags; the fourth is usually empty.
@@ -120,7 +127,7 @@ the third holds fades and flags; the fourth is usually empty.
 | `0x30` | 2 | one float | jets, lights, clouds |
 | `0x11` | ? | | sun and moon only - celestial motion? |
 | `0x48` | 5 | four floats: fade-in near/far, fade-out near/far, by distance to the eye | big glows |
-| `0x12` | many | three floats then a nested opcode stream, see below | glows, some flames |
+| `0x12` | 4 | three floats (0.005 on a glow); its length byte is `0xa4` - see the flagged lengths below | glows, flames |
 | `0x4e 0x4f 0x45 0x50` | | | moon and sky only; `0x50` on every sky object |
 
 **The model id is the four-character id of the MMB chunk, not its
@@ -253,14 +260,16 @@ the fountain's `llit` (`lt` scaled 15) has 50, 70, 150, 180. Without it those
 drew as a forty-unit wall of light at the zone line. With it they are the
 soft halo a distant lamp has, gone when you stand under it.
 
-### Op 0x12: a nested stream
+### Op 0x12 and the flagged lengths
 
-Three floats, then opcodes again, but the length byte carries flags in its
-high bits: `0xa4` is four words, `0xa1` one. The lamp glows (`ll01`, `bll1`,
-`gl01` families) and some fountain flames keep their curve (0x63 `fflt`) and
-night flag in here and nothing at the top level, so read only at the top
-level they stayed lit all day. Also inside: 0x2d naming a second curve
-(`fiam`, a value over the particle's life), 0x13, 0x16 colour, 0x2e, 0x1b.
+`0x12` is an ordinary four-word op (three floats, 0.005 each on a glow). It
+looked like a nested stream only because its length byte, `0xa4`, was being
+read as 164 words; with the top three bits taken as flags it is four, and the
+ops that follow it - `0x13`, `0x16` colour, `0x2d` naming a life curve
+(`fiam`), `0x1d`, `0x63` naming the day curve (`fflt`), a `0x00` nop, `0x2e`,
+`0x0e`, `0x08`, `0x0d`, `0x1b`, `0x3f` - are plain top-level ops. The lamp
+glows (`ll01`, `bll1`, `gl01`) and the fountain's big flames (`bfl1..3`) all
+carry their curve this way.
 
 ### Op 0x27, corrected
 
