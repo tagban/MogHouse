@@ -51,6 +51,27 @@ Two accounts, both `mhtestpw123`: `mhtest` (character Testy) and `mhtest2`
 (Duo). A character that was logged in less than a minute ago cannot log in
 again - the server holds the session for sixty seconds.
 
+## Reporting what is wrong
+
+`/bug the torch is not lit` from inside the world writes the words, the zone,
+the spot, the facing, the hour, the weather and a screenshot to
+`bug-reports.md` beside the log - each entry with a line that stands the
+standalone renderer in the same place - and posts the same thing to a Discord
+webhook when one is configured.
+
+Both secrets live beside the settings and never in this repository, because a
+client that ships can be taken apart:
+
+| | |
+|---|---|
+| `bug-webhook.txt` | where `/bug` posts. Or `MOGHOUSE_BUG_WEBHOOK`. |
+| `bug-bot-token.txt` | what `tools/bugs.py` reads the channel back with. Or `MOGHOUSE_BUG_BOT_TOKEN`. |
+
+`tools/bugs.py fetch` collects what is new and downloads the screenshots;
+`fetch --accepted` narrows that to reports somebody has reacted to, which is
+the queue worth working from. `done <id> <commit>` marks one and says so in
+the channel.
+
 ## Useful switches
 
 | | |
@@ -113,6 +134,7 @@ rather than a decoder.
 | `docs/macos-handoff.md` | how the Mac build happened, and two wrong theories worth not repeating |
 | `docs/windows-handoff.md` | what is parked for the Windows session, and what blocks deleting Avalonia |
 | `docs/npc-dialogue.md` | talking to NPCs: what works, and why menus need an event-script reader |
+| `tools/bugs.py` | reading the bug channel `/bug` posts to, and marking reports done |
 | `docs/local-test-server.md` | building and running LandSandBoat here |
 | `docs/networking-handoff.md` | a false lead, kept so nobody pays for it twice |
 | the wiki | data formats: object mapping, and audio |
