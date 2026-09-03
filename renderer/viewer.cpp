@@ -509,7 +509,11 @@ std::optional<LoadedCharacter> loadCharacter(const std::vector<std::string>& dat
 ///
 /// Keyed by the zone's own path relative to the install root, which is what
 /// this has to hand; nothing here needs to know a zone id.
-std::vector<std::filesystem::path> subroomsFor(const std::filesystem::path& zonePath)
+/// The words after "<zone dat>:" in an asset file of that shape - subrooms.txt,
+/// hidden-models.txt - for the zone at zonePath. Empty when the file or the
+/// zone's line is absent.
+std::vector<std::string> assetWordsFor(const char* fileName, const char* envOverride,
+                                       const std::filesystem::path& zonePath)
 {
     const std::filesystem::path root = ffxi::defaultInstallRoot();
     std::error_code ignored;
@@ -524,19 +528,19 @@ std::vector<std::filesystem::path> subroomsFor(const std::filesystem::path& zone
     // from the source tree under tools/play.sh, and only the first of those has
     // a working directory with an assets/ beside it.
     std::vector<std::filesystem::path> candidates;
-    if (const char* fromEnv = std::getenv("MOGHOUSE_SUBROOMS"))
+    if (const char* fromEnv = envOverride ? std::getenv(envOverride) : nullptr)
     {
         candidates.emplace_back(fromEnv);
     }
     if (const char* nativeDir = std::getenv("MOGHOUSE_NATIVE_DIR"))
     {
-        candidates.push_back(std::filesystem::path{nativeDir} / "assets" / "subrooms.txt");
+        candidates.push_back(std::filesystem::path{nativeDir} / "assets" / fileName);
     }
     if (const char* fontDir = std::getenv("MOGHOUSE_FONT"))
     {
-        candidates.push_back(std::filesystem::path{fontDir} / "subrooms.txt");
+        candidates.push_back(std::filesystem::path{fontDir} / fileName);
     }
-    candidates.push_back(std::filesystem::path{"assets"} / "subrooms.txt");
+    candidates.push_back(std::filesystem::path{"assets"} / fileName);
 
     std::ifstream file;
     for (const std::filesystem::path& candidate : candidates)
@@ -553,7 +557,7 @@ std::vector<std::filesystem::path> subroomsFor(const std::filesystem::path& zone
         return {};
     }
 
-    std::vector<std::filesystem::path> found;
+    std::vector<std::string> found;
     std::string line;
     while (std::getline(file, line))
     {
@@ -570,11 +574,30 @@ std::vector<std::filesystem::path> subroomsFor(const std::filesystem::path& zone
         std::string one;
         while (rest >> one)
         {
-            found.push_back(root / one);
+            found.push_back(one);
         }
         break;
     }
     return found;
+}
+
+std::vector<std::filesystem::path> subroomsFor(const std::filesystem::path& zonePath)
+{
+    const std::filesystem::path root = ffxi::defaultInstallRoot();
+    std::vector<std::filesystem::path> found;
+    for (const std::string& one : assetWordsFor("subrooms.txt", "MOGHOUSE_SUBROOMS", zonePath))
+    {
+        found.push_back(root / one);
+    }
+    return found;
+}
+
+/// Placed models the retail client does not show, from assets/hidden-models.txt:
+/// the older of two versions of a building the placement table lists at the
+/// same spot. See the file for the case and what is not known.
+std::vector<std::string> hiddenModelsFor(const std::filesystem::path& zonePath)
+{
+    return assetWordsFor("hidden-models.txt", "MOGHOUSE_HIDDEN_MODELS", zonePath);
 }
 
 /// The zone's water surfaces, precomputed by tools/ximesh.py.
@@ -679,7 +702,8 @@ inline constexpr size_t kBorrowedLightingFileId = 200;
 std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, const char* key2Path, std::string& zoneId,
                                      std::unordered_map<std::string, ffxi::Texture>& textures, ffxi::Lighting& lighting,
                                      mh::Collision& collision, std::vector<mh::InteriorLighting>& interiors,
-                                     mh::Scene& skyObjects)
+                                     mh::Scene& skyObjects,
+                                     std::unordered_map<std::string, ffxi::IntensityCurve>& curves)
 {
     auto keys = ffxi::KeyTable::load(keyPath);
     if (!keys)
@@ -768,14 +792,50 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
     std::unordered_map<std::string, ffxi::Model> models;
     // And by the four-character id of the chunk holding it, which is how an
     // effect generator refers to one: "funm" for funmiz, "alls" for allsea.
-    std::unordered_map<std::string, std::string> modelByChunkId;
+    //
+    // Ids are not unique in a file. Bastok Markets has two chunks called
+    // "auc_": auc_lt, the lamp glow in effe/ligh, and auc_stdl, the auction
+    // house stand with its stairs under mode. The glow's generator says
+    // "auc_", the first match was the stand, and the stairs were placed a
+    // second time as a scrolling effect - "flowing like water". So each id
+    // keeps every chunk that carries it with the directory it sits in, and a
+    // generator takes the one from its own directory.
+    struct ChunkModel
+    {
+        std::string directory;
+        std::string name;
+    };
+    std::unordered_map<std::string, std::vector<ChunkModel>> modelsByChunkId;
     size_t modelsFailed = 0;
     if (key2Path)
     {
         if (auto keys2 = ffxi::KeyTable::load(key2Path))
         {
-            for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkMmb))
+            std::vector<std::string> path;
+            for (const ffxi::Chunk& chunk : dat.chunks())
             {
+                if (chunk.type == ffxi::kChunkEnd)
+                {
+                    if (!path.empty())
+                    {
+                        path.pop_back();
+                    }
+                    continue;
+                }
+                if (chunk.type == ffxi::kChunkDirectory)
+                {
+                    std::string dir(chunk.id, 4);
+                    while (!dir.empty() && (dir.back() == ' ' || dir.back() == 0))
+                    {
+                        dir.pop_back();
+                    }
+                    path.push_back(dir);
+                    continue;
+                }
+                if (chunk.type != ffxi::kChunkMmb)
+                {
+                    continue;
+                }
                 try
                 {
                     ffxi::Model model = ffxi::parseMmb(chunk, *keys, *keys2);
@@ -785,7 +845,12 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
                     {
                         chunkId.pop_back();
                     }
-                    modelByChunkId.emplace(std::move(chunkId), key);
+                    std::string directory;
+                    for (size_t i = 0; i < path.size(); ++i)
+                    {
+                        directory += (i ? "/" : "") + path[i];
+                    }
+                    modelsByChunkId[chunkId].push_back(ChunkModel{std::move(directory), key});
                     models.emplace(std::move(key), std::move(model));
                 }
                 catch (const std::exception&)
@@ -795,6 +860,23 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
             }
         }
     }
+    // The model a generator means: the chunk with its id in the generator's
+    // own directory, else the first with that id anywhere.
+    const auto resolveGenerated = [&modelsByChunkId](const ffxi::EffectPlacement& effect) -> const std::string* {
+        auto found = modelsByChunkId.find(effect.modelId);
+        if (found == modelsByChunkId.end() || found->second.empty())
+        {
+            return nullptr;
+        }
+        for (const ChunkModel& candidate : found->second)
+        {
+            if (candidate.directory == effect.directory)
+            {
+                return &candidate.name;
+            }
+        }
+        return &found->second.front().name;
+    };
 
     std::optional<mh::Scene> best;
 
@@ -810,6 +892,7 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
     // yet, and a still school of fish in mid-air is worse than none.
     // MOGHOUSE_ALL_GENERATORS places every one, for finding out what they are.
     const std::vector<ffxi::EffectPlacement> generated = ffxi::parseGenerators(dat);
+    curves = ffxi::parseIntensityCurves(dat);
     static const bool everyGenerator = std::getenv("MOGHOUSE_ALL_GENERATORS") != nullptr;
     std::vector<ffxi::Placement> effectPlacements;
     std::unordered_map<std::string, mh::EffectParams> effectParams;
@@ -825,12 +908,13 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
     std::unordered_map<std::string, mh::EffectParams> skyParams;
     for (const ffxi::EffectPlacement& effect : generated)
     {
-        auto named = modelByChunkId.find(effect.modelId);
-        if (named == modelByChunkId.end())
+        const std::string* resolved = resolveGenerated(effect);
+        if (!resolved || effect.hidden)
         {
             continue;
         }
-        auto model = models.find(named->second);
+        const std::string& modelName = *resolved;
+        auto model = models.find(modelName);
         if (model == models.end())
         {
             continue;
@@ -864,7 +948,7 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
             if (textured)
             {
                 ffxi::Placement placement;
-                placement.model = named->second;
+                placement.model = modelName;
                 for (int axis = 0; axis < 3; ++axis)
                 {
                     placement.translate[axis] = effect.translate[axis];
@@ -875,8 +959,9 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
                 // Clouds drift; stars keep still and come out at night. Which
                 // is which is read off the name until the generators' own
                 // timing opcodes are understood.
-                const bool stars = named->second.rfind("sta", 0) == 0;
-                skyParams.emplace(named->second, mh::EffectParams{stars ? 0.0f : 0.004f, 0.0f, stars});
+                const bool stars = modelName.rfind("sta", 0) == 0;
+                skyParams.emplace(modelName,
+                                  mh::EffectParams{stars ? 0.0f : 0.004f, 0.0f, stars, effect.textureAnimation});
             }
             continue;
         }
@@ -885,18 +970,19 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
         {
             continue;
         }
-        if (animated && effectParams.find(named->second) == effectParams.end())
+        if (animated && effectParams.find(modelName) == effectParams.end())
         {
             // The rate is per frame in the file, at the game's thirty a
             // second. A generator with no rate still animates in the game,
             // by its keyframe chunk, which is not read yet; a slow slide is
             // the stand-in. The direction is a guess until checked.
             const float perSecond = effect.scroll != 0.0f ? effect.scroll * 30.0f : -0.25f;
-            effectParams.emplace(named->second, mh::EffectParams{0.0f, perSecond, effect.nightOnly});
+            effectParams.emplace(modelName,
+                                 mh::EffectParams{0.0f, perSecond, effect.nightOnly, effect.textureAnimation});
             ++generatedEffects;
         }
         ffxi::Placement placement;
-        placement.model = named->second;
+        placement.model = modelName;
         for (int axis = 0; axis < 3; ++axis)
         {
             placement.translate[axis] = effect.translate[axis];
@@ -997,10 +1083,15 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
                     }
                     lentSky.placements.push_back(std::move(placement));
                     const bool stars = id->second.rfind("sta", 0) == 0;
-                    skyParams.emplace(id->second, mh::EffectParams{stars ? 0.0f : 0.004f, 0.0f, stars});
+                    skyParams.emplace(id->second,
+                                      mh::EffectParams{stars ? 0.0f : 0.004f, 0.0f, stars, effect.textureAnimation});
                 }
                 if (!lentSky.placements.empty())
                 {
+                    for (auto& [name, curve] : ffxi::parseIntensityCurves(lender))
+                    {
+                        curves.emplace(name, std::move(curve));
+                    }
                     for (const ffxi::Chunk& chunk : lender.chunksOfType(ffxi::kChunkTexture))
                     {
                         try
@@ -1038,6 +1129,20 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
         {
             zone.placements.insert(zone.placements.end(), effectPlacements.begin(), effectPlacements.end());
             effectsPlaced = true;
+
+            const std::vector<std::string> hidden = hiddenModelsFor(datPath);
+            if (!hidden.empty())
+            {
+                const size_t before = zone.placements.size();
+                zone.placements.erase(std::remove_if(zone.placements.begin(), zone.placements.end(),
+                                                     [&hidden](const ffxi::Placement& placement) {
+                                                         return std::find(hidden.begin(), hidden.end(),
+                                                                          placement.model) != hidden.end();
+                                                     }),
+                                      zone.placements.end());
+                std::printf("hidden models: %zu placements struck (assets/hidden-models.txt)\n",
+                            before - zone.placements.size());
+            }
         }
 
         // Placed models are the visible world; collision geometry is the
@@ -1923,6 +2028,9 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // with their own buffers, drawn camera-relative by the effect pipeline
     // between the sky gradient and the zone.
     mh::Scene skyObjects;
+    // The zone's intensity curves, by id; a draw that names one is shown
+    // only while the curve is above nothing at the current hour.
+    std::unordered_map<std::string, ffxi::IntensityCurve> curves;
     wgpu::Buffer skyVertexBuffer;
     wgpu::Buffer skyIndexBuffer;
     wgpu::Buffer skyInstanceBuffer;
@@ -2024,7 +2132,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             }
             zone = loadZone(currentZonePath.c_str(), keyPath,
                             options.keyTable2Path.empty() ? nullptr : options.keyTable2Path.c_str(), zoneId, textures,
-                            lighting, collision, interiors, skyObjects);
+                            lighting, collision, interiors, skyObjects, curves);
             if (!zone)
             {
                 return 1;
@@ -6542,13 +6650,20 @@ constexpr float kGravity = 26.0f;
             // are written further down for the zone; a queue write lands
             // before the pass that follows it, so they see this frame's.
             const bool night = clockMinutes < 6 * 60 || clockMinutes >= 18 * 60;
+            const float dayFraction = static_cast<float>(clockMinutes) / 1440.0f;
             pass.SetVertexBuffer(0, skyVertexBuffer);
             pass.SetVertexBuffer(1, skyInstanceBuffer);
             pass.SetIndexBuffer(skyIndexBuffer, wgpu::IndexFormat::Uint32);
             for (size_t i = 0; i < skyObjects.draws.size() && i < skyObjectBindGroups.size(); ++i)
             {
                 const mh::InstancedDraw& draw = skyObjects.draws[i];
-                if (!skyObjectBindGroups[i] || (draw.nightOnly && !night))
+                if (!skyObjectBindGroups[i])
+                {
+                    continue;
+                }
+                auto curve = draw.curve.empty() ? curves.end() : curves.find(draw.curve);
+                const bool shown = curve != curves.end() ? curve->second.at(dayFraction) > 0.05f : !(draw.nightOnly && !night);
+                if (!shown)
                 {
                     continue;
                 }
@@ -6675,10 +6790,20 @@ constexpr float kGravity = 26.0f;
             if (effectPipeline)
             {
                 const bool night = clockMinutes < 6 * 60 || clockMinutes >= 18 * 60;
+                const float dayFraction = static_cast<float>(clockMinutes) / 1440.0f;
                 for (size_t i = 0; i < zone->draws.size() && i < effectBindGroups.size(); ++i)
                 {
                     const mh::InstancedDraw& draw = zone->draws[i];
-                    if (!draw.effect || !effectBindGroups[i] || (draw.nightOnly && !night))
+                    if (!draw.effect || !effectBindGroups[i])
+                    {
+                        continue;
+                    }
+                    // The generator's own curve says whether this is lit at
+                    // this hour - the jets by day, the flames by night.
+                    auto curve = draw.curve.empty() ? curves.end() : curves.find(draw.curve);
+                    const bool shown =
+                        curve != curves.end() ? curve->second.at(dayFraction) > 0.05f : !(draw.nightOnly && !night);
+                    if (!shown)
                     {
                         continue;
                     }

@@ -360,6 +360,7 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
                     placed.scroll[0] = effect->second.scrollU;
                     placed.scroll[1] = effect->second.scrollV;
                     placed.nightOnly = effect->second.nightOnly;
+                    placed.curve = effect->second.curve;
                 }
             }
 

@@ -203,3 +203,23 @@ their knowledge written down, not ours.
 and made the other twelve findable.
 
 Thank you Teo!!!
+
+
+## Two versions of one building: hidden-models.txt
+
+Added 2026-09-03. Bastok Markets' placement table lists four `divmdl_00N`
+models at one spot, -332.17 -12.01 -68.03, rotated 4.71 about y, byte for
+byte alike apart from the name. `divmdl_000` and `_002` are the two halves
+of a canvas tent (texture `s_ten`); `_001` and `_003` are the halves of the
+stone auction house with roof and doors. Retail shows the building - the
+auction houses were tents at launch and were rebuilt in a 2003 update - and
+drawing all four at once gave stairs that shimmered from one angle and a pit
+from another, with the character falling through the plaza beside them.
+
+What tells the client which version to show is **not** in the placement
+record (the four are identical, including the unidentified fields at 52 and
+68), not in the MMB header, and not in the sub-map packets (0x00A's
+`SubMapNumber` is the region within a zone; 0x010E/0x00EB/0x00F2 carry an
+event's sub-map number). Until it is found, `renderer/assets/hidden-models.txt`
+strikes named models per zone by hand, in the same `<zone dat>: words` shape
+as `subrooms.txt`, and the loader reports how many placements it struck.

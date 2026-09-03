@@ -33,8 +33,50 @@ t_ba                      the zone
 
 Models (MMB, type `0x2E`) and textures (type `0x20`) sit in the same
 directory as the generators that use them. Type `0x19` chunks beside them
-are keyframe tracks named by the generators (`watm`, `frtm`, `tkwa`), and
-type `0x21` chunks are texture animations.
+are **intensity curves** named by the generators (`watm`, `frtm`, `tkwa`),
+and type `0x21` chunks are texture animations.
+
+## The day/night switch: type 0x19 intensity curves
+
+A `0x19` chunk is sixteen bytes of header and then pairs of floats,
+`(time, value)`, time being a fraction of the Vana'diel day from midnight.
+Trailing `(0, 0)` pairs are padding: stop when time goes backwards. A
+generator names its curve with op `0x63` (op `0x60` on an untextured model).
+Read from Bastok Markets and East Ronfaure:
+
+| curve | used by | keys | meaning |
+|---|---|---|---|
+| `frtm` | fountain flames | (0, .78) (.26, .78) (.28, 0) (.72, 0) (.74, .78) (1, .78) | lit 17:49 to 06:12 |
+| `mrtm`, `fflt` | lamp glows | same shape | lit at night |
+| `watm` | fountain jets | (0, 0) (.26, 0) (.28, 1) (.74, 1) (.76, 0) (1, 0) | **on by day only** |
+| `ksta` | stars | (0, 1.34) (.13, 1.04) (.23, 0) (.73, 0) (.88, 1.14) (1, 1.34) | out 21:03 to 05:36, brightest at midnight |
+| `k000` | moon | (0, 1) (.16, 1) (.30, 0) (.71, 0) (.83, 1) (1, 1) | out at night |
+| `tkwa` | the stream | (0, .39) (.37, .58) (.62, .58) (1, .39) | always on, brighter by day |
+| `tkta` | waterfalls | (0, .75) (.50, 1.4) (1, .75) | always on |
+| `koa1` | wall-hole lights, East Ronfaure | (0, 1) (.20, 1) (.22, 0) (.75, 0) (.75, 1) (1, 1) | lit at night |
+
+So the flame/jet switch the user saw in retail at 20:35 - lamps lit, jets
+off - is these two curves. MogHouse evaluates the named curve at the current
+clock and draws the thing while the value is above 0.05; the value itself
+(a brightness) is not yet applied. Before the curves were read, op `0x0d`
+was used as a night-only flag; it agrees with the curves on everything seen
+but is not the mechanism.
+
+How found: the curves were first taken for UV animations because the jets'
+`watm` named one and its values were 0..1. Dumping `frtm` beside `watm`
+showed them to be mirror images with steps at 0.26/0.28 and 0.72/0.74 of
+something - hours 06:15/06:45 and 17:15/17:45 of a day. `ksta` (stars) and
+`k000` (moon) then fitted the same reading.
+
+## Op 0x27: the water table
+
+Bastok Markets' `allsea` and `lowsea` generators, and only those, carry op
+`0x27`. `allsea` is a 1,155-triangle sheet scaled a hundredfold to span the
+whole zone at heights from -10 to +10, one level under every floor - a water
+table, visible only where the ground is cut. Drawn directly it covered the
+auction house floor with rippling water. MogHouse does not place a generator
+that carries `0x27`; what the retail client does with these sheets (a
+reflection pass, most likely) is not known.
 
 The MZB's placement table places only the terrain and the buildings.
 Everything in `weat` and `effe` is placed by a generator.
@@ -69,13 +111,13 @@ the third holds fades and flags; the fourth is usually empty.
 | `0x01` | 12 | +4 flags, **+8 model id** (4 chars), **+16 position x y z** | everything that places a model |
 | `0x09` | 4 | rotation x y z, radians | |
 | `0x0f` | 4 | scale x y z | |
-| `0x63` | 4 | +4 texture animation id (4 chars) | textured water, jets, flames, stars |
+| `0x63` | 4 | +4 **intensity curve** id (4 chars), a 0x19 chunk - see below | textured water, jets, flames, stars |
 | `0x60` | 4 | as `0x63`, on untextured models | canal, basin, sky spheres |
 | `0x28` | 2 | one float: texture scroll per frame | stream 0.003, fountain jets -0.007 |
 | `0x0a` | 4 | one float, 25..170 | a draw range, probably |
 | `0x2e` | 4 | two floats: near, far | a fade range, probably |
 | `0x15` | 7 | three floats | a size or box |
-| `0x0d` | 1 | none | flames, night glow, pole star - **night only** |
+| `0x0d` | 1 | none | flames, night glow, pole star - coincides with night-only curves |
 | `0x1d` | 1 | none | the same set plus a few lights |
 | `0x30` | 2 | one float | jets, lights, clouds |
 | `0x11` | ? | | sun and moon only - celestial motion? |
@@ -83,8 +125,12 @@ the third holds fades and flags; the fourth is usually empty.
 
 **The model id is the four-character id of the MMB chunk, not its
 sixteen-byte name.** `funm` is the chunk holding `funmiz`, `alls` holds
-`allsea`, `lowc` holds `lowcol`. Ids are not unique within a DAT (`kabe`
-names three chunks); the first match has been right so far.
+`allsea`, `lowc` holds `lowcol`. **Ids are not unique within a DAT**, and the
+right one is the chunk in the generator's own directory. Bastok Markets has
+two chunks called `auc_`: `auc_lt`, the lamp glow in `effe/ligh`, and
+`auc_stdl`, the auction house stand with its stairs under `mode`. Taking the
+first match placed the stairs a second time with a scrolling texture, and
+they "flowed like water". `kabe` likewise names three chunks.
 
 Position, rotation and scale are in the DAT's frame and go through the same
 transform as an MZB placement. Verified by eye on zero and ±π/2 rotations.

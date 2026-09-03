@@ -14,6 +14,8 @@
 #include "dat.h"
 
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace ffxi
@@ -39,7 +41,35 @@ struct EffectPlacement
     /// Op 0x28: how far the texture slides per frame, in uv. -0.007 on the
     /// fountain jets, 0.003 on the stream; zero when absent.
     float scroll{};
+    /// Op 0x27 was present. Only Bastok Markets' `allsea` and `lowsea` carry
+    /// it: a sheet scaled a hundredfold to span the whole zone at every
+    /// level, sitting just under each floor. Drawn, it covered the auction
+    /// house floor. Read as "not drawn directly" - a reflection or water-table
+    /// plane - until the opcode is understood.
+    bool hidden{};
 };
+
+/// A value over the Vana'diel day, from a type 0x19 chunk: pairs of (time as
+/// a fraction of the day, value), the last pairs sometimes (0, 0) padding.
+///
+/// This is the day/night switch. `frtm`, the fountain flames' curve, is 0.78
+/// from midnight to 06:12, zero from 06:48 to 17:12, then 0.78 again; `watm`,
+/// the jets', is its inverse; `ksta`, the stars', is 1.34 at midnight and
+/// zero from 05:36 to 17:36. A generator names its curve with op 0x63 (or
+/// 0x60 on an untextured model), the same field this project first read as
+/// a "texture animation" - the stream's `tkwa` never reaches zero, it only
+/// dims the water through the day.
+struct IntensityCurve
+{
+    std::vector<std::pair<float, float>> keys;
+    /// Linear between keys; the first or last value beyond them.
+    float at(float dayFraction) const;
+};
+
+/// Every 0x19 chunk in the file, by its four-character id. Ids repeat across
+/// a DAT's directories (`k000` appears in each weather); the last one read
+/// wins, and the copies seen so far agree.
+std::unordered_map<std::string, IntensityCurve> parseIntensityCurves(const DatFile& dat);
 
 /// Every generator in the file that places a model.
 ///

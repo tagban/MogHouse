@@ -54,6 +54,7 @@ struct InstancedDraw
     bool effect{};
     float scroll[2]{};
     bool nightOnly{};
+    std::string curve;
 };
 
 struct Scene
@@ -115,6 +116,9 @@ struct EffectParams
     float scrollU{};
     float scrollV{};
     bool nightOnly{};
+    /// The intensity curve the generator names (ffxi::IntensityCurve), or
+    /// empty. When present it decides whether the thing is drawn at this hour.
+    std::string curve;
 };
 
 Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, ffxi::Model>& models,

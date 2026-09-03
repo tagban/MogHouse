@@ -61,6 +61,7 @@ constexpr uint8_t kOpScale = 0x0f;
 constexpr uint8_t kOpTexture = 0x63;
 constexpr uint8_t kOpNightOnly = 0x0d;
 constexpr uint8_t kOpScroll = 0x28;
+constexpr uint8_t kOpHidden = 0x27;
 } // namespace
 
 std::vector<EffectPlacement> parseGenerators(const DatFile& dat)
@@ -160,6 +161,9 @@ std::vector<EffectPlacement> parseGenerators(const DatFile& dat)
                 case kOpNightOnly:
                     placement.nightOnly = true;
                     break;
+                case kOpHidden:
+                    placement.hidden = true;
+                    break;
                 case kOpScroll:
                     if (length >= 8)
                     {
@@ -176,6 +180,58 @@ std::vector<EffectPlacement> parseGenerators(const DatFile& dat)
         if (hasModel)
         {
             out.push_back(std::move(placement));
+        }
+    }
+    return out;
+}
+
+float IntensityCurve::at(float dayFraction) const
+{
+    if (keys.empty())
+    {
+        return 1.0f;
+    }
+    if (dayFraction <= keys.front().first)
+    {
+        return keys.front().second;
+    }
+    for (size_t i = 1; i < keys.size(); ++i)
+    {
+        if (dayFraction <= keys[i].first)
+        {
+            const float span = keys[i].first - keys[i - 1].first;
+            const float t = span > 1e-6f ? (dayFraction - keys[i - 1].first) / span : 1.0f;
+            return keys[i - 1].second + (keys[i].second - keys[i - 1].second) * t;
+        }
+    }
+    return keys.back().second;
+}
+
+std::unordered_map<std::string, IntensityCurve> parseIntensityCurves(const DatFile& dat)
+{
+    std::unordered_map<std::string, IntensityCurve> out;
+    for (const Chunk& chunk : dat.chunksOfType(0x19))
+    {
+        IntensityCurve curve;
+        const std::span<const uint8_t> data = chunk.data;
+        float lastTime = -1.0f;
+        for (size_t pos = 0; pos + 8 <= data.size(); pos += 8)
+        {
+            float time = 0.0f, value = 0.0f;
+            readAt(data, pos, time);
+            readAt(data, pos + 4, value);
+            // Time runs forward; a pair that goes back to zero is padding.
+            if (time < lastTime || time < 0.0f || time > 1.0f)
+            {
+                break;
+            }
+            curve.keys.emplace_back(time, value);
+            lastTime = time;
+        }
+        if (!curve.keys.empty())
+        {
+            out[fourChars(std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(chunk.id), 4), 0)] =
+                std::move(curve);
         }
     }
     return out;

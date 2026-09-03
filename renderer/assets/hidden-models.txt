@@ -1,0 +1,18 @@
+# Placed models a zone's MZB names that the retail client does not show.
+#
+# Some zones carry more than one version of a building at the same spot and
+# the placement table lists them all, byte for byte alike apart from the
+# name. Bastok Markets' auction house is the case that found this: divmdl_000
+# and divmdl_002 are the two halves of a canvas tent (texture s_ten),
+# divmdl_001 and divmdl_003 the two halves of the stone building with its
+# roof and doors, all four placed at -332.17 -12.01 -68.03 with the same
+# rotation and draw distance. Retail shows the building - the auction houses
+# were tents at the game's launch and were rebuilt in a 2003 update - and
+# drawing both at once gave stairs that shimmered and a pit where the steps
+# should be. What tells the client which to show has not been found: it is
+# not in the placement record, not in the sub-map packets, and not in the
+# model header. Until it is, the older version is struck here by hand.
+#
+# <zone dat>: <model name> ...
+
+ROM/1/35.DAT: divmdl_000 divmdl_002
