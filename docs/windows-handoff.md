@@ -308,6 +308,12 @@ cloud dome and stars around the camera; the auction house as the stone
 building (tent halves struck in `assets/hidden-models.txt`); stairs walk as a
 ramp; harbour water rippling beside the bridge.
 
+**Everything today is generic**, read from whatever DAT a zone loads: the
+generators, curves, sprites, sky and water all come from the file. The only
+hand-written per-zone data is `renderer/assets/hidden-models.txt` (one line,
+Bastok Markets' auction house tent) and `assets/subrooms.txt`, which predates
+today. Other zones get the same behaviour with no work.
+
 **Open, in the user's order:**
 
 1. Lamp glows and the fountain's big flames staying lit by day - fixed at

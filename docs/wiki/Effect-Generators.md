@@ -252,6 +252,20 @@ one sheet frame each at ten a second (a guess), added with source alpha
 through the effect pipeline, gated by the generator's curve. Bastok Markets
 places 150 from 24 animations. Confirmed lit at night against retail.
 
+### Light sources are not drawn
+
+A zone's `lt` and `ligh` animations are one frame over `effect  light` and
+`effect  light2`, and their generators (`ll01`, `bll1`, `gl01`, `opl1`,
+`llit`, `lglt`) sit beside every lamp and torch in `effe/ligh`. **These are
+light sources, not sprites**: they tell the client where a flame throws light
+on the ground, and retail draws nothing for them. Drawn, they are white
+flares hanging beside each lantern - which is what MogHouse showed until
+2026-09-03. They are skipped now; the lighting they should cast is a
+separate piece of work, since the renderer has no point lights yet.
+
+The flame beside each of them is the thing you see: `hi12` at a small scale
+(0.10 x 0.15 on a wall torch, 0.40 x 0.85 on the fountain's braziers).
+
 ### Op 0x48: distance fade
 
 Four floats: fade in between the first two distances, out between the last

@@ -263,6 +263,34 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
             if (isWaterMesh(name, mesh))
             {
                 waterSheets[mesh.texture] += (mesh.indices.size() / 3) * transforms.size();
+
+                // Whether the mesh's own mapping is dense enough to show a
+                // ripple. Bastok Markets' harbour, allsea, is one sheet scaled
+                // a hundredfold to span the zone with its UVs running 0..1
+                // across it, so the sheet stretched over five hundred units
+                // and the water read as flat. Under a tile every twenty
+                // units the world-space mapping is used instead, as the
+                // derived sheets always did.
+                bool denseEnough = mesh.texture.empty() ? false : true;
+                if (!mesh.texture.empty() && !transforms.empty())
+                {
+                    float uMin = 1e9f, uMax = -1e9f, vMin = 1e9f, vMax = -1e9f;
+                    Vec3 wLo{1e9f, 1e9f, 1e9f}, wHi{-1e9f, -1e9f, -1e9f};
+                    for (const ffxi::ModelVertex& source : mesh.vertices)
+                    {
+                        uMin = std::min(uMin, source.uv[0]);
+                        uMax = std::max(uMax, source.uv[0]);
+                        vMin = std::min(vMin, source.uv[1]);
+                        vMax = std::max(vMax, source.uv[1]);
+                        const Vec3 w = transformPoint(transforms.front().m,
+                                                      {source.position[0], source.position[1], source.position[2]});
+                        wLo = {std::min(wLo.x, w.x), std::min(wLo.y, w.y), std::min(wLo.z, w.z)};
+                        wHi = {std::max(wHi.x, w.x), std::max(wHi.y, w.y), std::max(wHi.z, w.z)};
+                    }
+                    const float tiles = std::max(uMax - uMin, vMax - vMin);
+                    const float across = std::max(wHi.x - wLo.x, wHi.z - wLo.z);
+                    denseEnough = across <= 0.0f || tiles / std::max(across, 1.0f) >= 1.0f / 20.0f;
+                }
                 for (const Mat4& transform : transforms)
                 {
                     const uint32_t base = static_cast<uint32_t>(scene.waterVertices.size());
@@ -280,7 +308,7 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
                         // ripples run the way its stream does; world-space
                         // when it names none, which is what the fallback
                         // sheets use and keeps a canal continuous.
-                        if (mesh.texture.empty())
+                        if (mesh.texture.empty() || !denseEnough)
                         {
                             vertex.uv[0] = world.x * 0.06f;
                             vertex.uv[1] = world.z * 0.06f;

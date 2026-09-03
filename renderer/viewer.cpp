@@ -594,6 +594,22 @@ std::vector<std::filesystem::path> subroomsFor(const std::filesystem::path& zone
     return found;
 }
 
+/// Whether a sprite animation's texture marks a light source rather than
+/// something visible. Bastok Markets' `lt` and `ligh` animations carry
+/// "effect  light" and "effect  light2", one frame each, and sit beside every
+/// lamp and torch in the effe/ligh directory. The user, who knows the game,
+/// says these are invisible in retail: they mark where a flame lights the
+/// ground, and are not the flare itself.
+bool isLightSource(const std::string& texture)
+{
+    std::string own = texture.size() > 8 ? texture.substr(8) : texture;
+    while (!own.empty() && (own.back() == ' ' || own.back() == 0))
+    {
+        own.pop_back();
+    }
+    return own == "light" || own == "light2";
+}
+
 /// Placed models the retail client does not show, from assets/hidden-models.txt:
 /// the older of two versions of a building the placement table lists at the
 /// same spot. See the file for the case and what is not known.
@@ -1055,6 +1071,16 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
         if (effect.directory.find("/weat") == std::string::npos)
         {
             auto animation = sprites.find(effect.modelId);
+            // A sprite on one of the light sheets is a light source, not
+            // something to look at: it tells the client where a lamp throws
+            // light on the ground, and the retail client draws nothing for
+            // it. Drawn, they were the white flares hanging beside every
+            // lantern and over the player's head. The lighting they should
+            // cast is not built yet, so for now they are simply left out.
+            if (animation != sprites.end() && isLightSource(animation->second.texture))
+            {
+                animation = sprites.end();
+            }
             if (animation != sprites.end())
             {
                 mh::SpriteInstance instance;
