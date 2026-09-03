@@ -22,6 +22,6 @@ public static class FfxiAppearance
     /// <summary>
     /// "race,face,head,body,hands,legs,feet" with every unknown slot filled in.
     /// </summary>
-    public static string LookString(ushort race, ushort face) =>
-        $"{race},{face},{UnknownGear},{UnknownGear},{UnknownGear},{UnknownGear},{UnknownGear}";
+    public static string LookString(ushort race, ushort face, int size = 1) =>
+        $"{race},{face},{UnknownGear},{UnknownGear},{UnknownGear},{UnknownGear},{UnknownGear},{Math.Clamp(size, 0, 2)}";
 }

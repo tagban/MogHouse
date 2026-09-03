@@ -191,6 +191,7 @@ void mh_viewer_set_entities(MhViewerHandle viewer, const MhRadarEntity* entities
             entity.healthPercent = entities[i].healthPercent;
             entity.triggerable = entities[i].triggerable != 0;
             entity.silhouette = entities[i].silhouette;
+            entity.size = entities[i].size;
             copied.push_back(std::move(entity));
         }
     }
@@ -431,6 +432,7 @@ void mh_viewer_set_form(MhViewerHandle viewer, const char* title, const char* me
     mh::Form form;
     form.title = title ? title : "";
     form.message = message ? message : "";
+    form.aside = viewer->link.formAside();
 
     if (rows != nullptr && count > 0)
     {
@@ -454,6 +456,14 @@ void mh_viewer_set_form(MhViewerHandle viewer, const char* title, const char* me
     }
 
     viewer->link.setForm(std::move(form));
+}
+
+void mh_viewer_set_form_aside(MhViewerHandle viewer, int32_t aside)
+{
+    if (viewer != nullptr)
+    {
+        viewer->link.setFormAside(aside != 0);
+    }
 }
 
 int32_t mh_viewer_take_form_result(MhViewerHandle viewer, int32_t* button, char* values,

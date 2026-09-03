@@ -64,6 +64,16 @@ public sealed record FfxiZoneReply(
 public sealed class FfxiZoneClient : IDisposable
 {
     private readonly UdpClient _udp = new();
+
+    // When the server last answered, and whether the silence since then has
+    // been written down. The zone is polled several times a second, and a
+    // server with nothing to say - the normal state of a quiet zone - answers
+    // only some of them, so a single missed poll means nothing and a line per
+    // miss buries everything else in the log. A silence this long is worth
+    // one line, because at that point the question is the network.
+    private static readonly TimeSpan QuietWorthNoting = TimeSpan.FromSeconds(5);
+    private DateTime _lastHeard = DateTime.UtcNow;
+    private bool _quietReported;
     private readonly FfxiHuffman? _codec;
 
     /// <summary>Current session key and the cipher derived from it. Both advance together - see <see cref="TryAdvanceKey"/>.</summary>
@@ -282,10 +292,21 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            Console.WriteLine($"zone: nothing arrived within {timeout.TotalSeconds:0.#}s");
+            TimeSpan quiet = DateTime.UtcNow - _lastHeard;
+            if (!_quietReported && quiet >= QuietWorthNoting)
+            {
+                _quietReported = true;
+                Console.WriteLine($"zone: nothing has arrived for {quiet.TotalSeconds:0}s");
+            }
             return null;
         }
 
+        if (_quietReported)
+        {
+            Console.WriteLine($"zone: heard from the server again after {(DateTime.UtcNow - _lastHeard).TotalSeconds:0}s");
+        }
+        _lastHeard = DateTime.UtcNow;
+        _quietReported = false;
         FfxiZoneReply reply = Decode(result.Buffer, _blowfish, _codec);
 
         // A failed checksum here is the only signal that the server rotated

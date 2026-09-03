@@ -19,6 +19,16 @@ public sealed record FfxiServerPosition(float X, float Vertical, float Depth, sb
 {
     public const ushort PacketId = 0x065;
 
+    /// <summary>
+    /// The other placement packet, GP_SERV_COMMAND_WPOS, laid out exactly as
+    /// 0x065 is. LandSandBoat's setPos - which is what !pos, !goto, !bring
+    /// and !up all come down to - sends this one, and reading only 0x065
+    /// meant every GM teleport moved the character on the server and nowhere
+    /// else: the client kept reporting its old position and the server took
+    /// it back. Confirmed against src/map/packets/s2c/0x05b_wpos.h.
+    /// </summary>
+    public const ushort WposPacketId = 0x05B;
+
     private const int OffsetX = 4;
     private const int OffsetVertical = 8;
     private const int OffsetDepth = 12;
@@ -35,7 +45,7 @@ public sealed record FfxiServerPosition(float X, float Vertical, float Depth, sb
         }
 
         (ushort id, _) = FfxiZonePacket.UnpackIdAndSize(BinaryPrimitives.ReadUInt16LittleEndian(subPacket));
-        if (id != PacketId)
+        if (id != PacketId && id != WposPacketId)
         {
             return null;
         }

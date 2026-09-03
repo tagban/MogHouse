@@ -8,6 +8,7 @@
 
 #include "ffxi/dat.h"
 #include "ffxi/filetable.h"
+#include "ffxi/generator.h"
 #include "ffxi/look.h"
 #include "ffxi/mmb.h"
 #include "ffxi/lighting.h"
@@ -39,6 +40,7 @@
 #include "monorail.h"
 #include "music.h"
 #include "water_shader.h"
+#include "effect_shader.h"
 #include "zone_shader.h"
 #include "zonemesh.h"
 
@@ -46,6 +48,7 @@
 #include <webgpu/webgpu_cpp.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -168,6 +171,8 @@ struct HudUniforms
     float boxes[mh::kHudStrings][4];
     float colours[mh::kHudStrings][4];
     float glyphs[mh::kHudStrings * mh::kHudChars][4];
+    float bars[mh::kHudBars][4];
+    float barColours[mh::kHudBars][4];
 };
 
 /// Matches NameplateUniforms in nameplate_shader.h.
@@ -254,6 +259,97 @@ struct DialogButton
         return width > 0.0f && x >= left && x < left + width && y >= bottom && y < bottom + height;
     }
 };
+
+// A Choice row's value is "<selected>;first|second|third". Kept as a string
+// because that is what crosses the boundary and what the client gets back;
+// these take it apart and put it together.
+std::vector<std::string> choiceOptions(const std::string& value)
+{
+    std::vector<std::string> options;
+    const size_t split = value.find(';');
+    if (split == std::string::npos)
+    {
+        return options;
+    }
+    std::string rest = value.substr(split + 1);
+    size_t start = 0;
+    while (start <= rest.size())
+    {
+        const size_t bar = rest.find('|', start);
+        options.push_back(rest.substr(start, bar == std::string::npos ? std::string::npos : bar - start));
+        if (bar == std::string::npos)
+        {
+            break;
+        }
+        start = bar + 1;
+    }
+    return options;
+}
+
+int choiceSelected(const std::string& value)
+{
+    const size_t split = value.find(';');
+    if (split == std::string::npos || split == 0)
+    {
+        return 0;
+    }
+    return std::atoi(value.substr(0, split).c_str());
+}
+
+/// One lighting set part way between two others, for the frames after a
+/// doorway is crossed: going from the street's light to a shop's in one frame
+/// reads as a flash, and coming back out reads as another.
+ffxi::LightingSet blendLighting(const ffxi::LightingSet& from, const ffxi::LightingSet& to, float t)
+{
+    if (t >= 1.0f)
+    {
+        return to;
+    }
+    const auto colour = [t](const ffxi::Colour& a, const ffxi::Colour& b) {
+        return ffxi::Colour{a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t,
+                            a.a + (b.a - a.a) * t};
+    };
+    const auto number = [t](float a, float b) { return a + (b - a) * t; };
+
+    ffxi::LightingSet set = to;
+    set.sunlight = colour(from.sunlight, to.sunlight);
+    set.moonlight = colour(from.moonlight, to.moonlight);
+    set.ambient = colour(from.ambient, to.ambient);
+    set.fog = colour(from.fog, to.fog);
+    set.minFog = number(from.minFog, to.minFog);
+    set.maxFog = number(from.maxFog, to.maxFog);
+    set.brightness = number(from.brightness, to.brightness);
+    set.landscapeSunlight = colour(from.landscapeSunlight, to.landscapeSunlight);
+    set.landscapeMoonlight = colour(from.landscapeMoonlight, to.landscapeMoonlight);
+    set.landscapeAmbient = colour(from.landscapeAmbient, to.landscapeAmbient);
+    set.landscapeFog = colour(from.landscapeFog, to.landscapeFog);
+    set.landscapeMinFog = number(from.landscapeMinFog, to.landscapeMinFog);
+    set.landscapeMaxFog = number(from.landscapeMaxFog, to.landscapeMaxFog);
+    set.landscapeBrightness = number(from.landscapeBrightness, to.landscapeBrightness);
+    set.fogColour = colour(from.fogColour, to.fogColour);
+    set.fogOffset = number(from.fogOffset, to.fogOffset);
+    set.maxFarClip = number(from.maxFarClip, to.maxFarClip);
+    for (size_t i = 0; i < set.skyColours.size(); ++i)
+    {
+        set.skyColours[i] = colour(from.skyColours[i], to.skyColours[i]);
+        set.skyAltitudes[i] = number(from.skyAltitudes[i], to.skyAltitudes[i]);
+    }
+    return set;
+}
+
+std::string choiceValue(int selected, const std::vector<std::string>& options)
+{
+    std::string value = std::to_string(selected) + ';';
+    for (size_t i = 0; i < options.size(); ++i)
+    {
+        if (i > 0)
+        {
+            value += '|';
+        }
+        value += options[i];
+    }
+    return value;
+}
 
 struct RadarUniforms
 {
@@ -582,7 +678,8 @@ inline constexpr size_t kBorrowedLightingFileId = 200;
 
 std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, const char* key2Path, std::string& zoneId,
                                      std::unordered_map<std::string, ffxi::Texture>& textures, ffxi::Lighting& lighting,
-                                     mh::Collision& collision, std::vector<mh::InteriorLighting>& interiors)
+                                     mh::Collision& collision, std::vector<mh::InteriorLighting>& interiors,
+                                     mh::Scene& skyObjects)
 {
     auto keys = ffxi::KeyTable::load(keyPath);
     if (!keys)
@@ -669,6 +766,9 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
 
     // Every model in the DAT, keyed by the name a placement refers to it by.
     std::unordered_map<std::string, ffxi::Model> models;
+    // And by the four-character id of the chunk holding it, which is how an
+    // effect generator refers to one: "funm" for funmiz, "alls" for allsea.
+    std::unordered_map<std::string, std::string> modelByChunkId;
     size_t modelsFailed = 0;
     if (key2Path)
     {
@@ -680,6 +780,12 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
                 {
                     ffxi::Model model = ffxi::parseMmb(chunk, *keys, *keys2);
                     std::string key = model.name;
+                    std::string chunkId(chunk.id, 4);
+                    while (!chunkId.empty() && (chunkId.back() == ' ' || chunkId.back() == 0))
+                    {
+                        chunkId.pop_back();
+                    }
+                    modelByChunkId.emplace(std::move(chunkId), key);
                     models.emplace(std::move(key), std::move(model));
                 }
                 catch (const std::exception&)
@@ -697,9 +803,242 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
     ffxi::Zone outside;
     std::vector<ffxi::Zone> insides;
 
+    // What the effect system places. The MZB's table places the terrain and
+    // the buildings; the water is placed by generators, one per surface, and
+    // so are the fish, the birds and the torch flames. Only the water is
+    // taken - the rest are animated things this renderer has no animation for
+    // yet, and a still school of fish in mid-air is worse than none.
+    // MOGHOUSE_ALL_GENERATORS places every one, for finding out what they are.
+    const std::vector<ffxi::EffectPlacement> generated = ffxi::parseGenerators(dat);
+    static const bool everyGenerator = std::getenv("MOGHOUSE_ALL_GENERATORS") != nullptr;
+    std::vector<ffxi::Placement> effectPlacements;
+    std::unordered_map<std::string, mh::EffectParams> effectParams;
+    size_t generatedWater = 0;
+    size_t generatedEffects = 0;
+
+    // The sky. The weather directories place it - "weat/fine" holds the
+    // clear-weather cloud dome, sun, moon and star field - at the origin with
+    // large scales, meaning "around the camera". Fine weather only, until
+    // the weather packet is read; the untextured sun and moon spheres wait
+    // for their texture animation to be understood.
+    ffxi::Zone skyZone;
+    std::unordered_map<std::string, mh::EffectParams> skyParams;
+    for (const ffxi::EffectPlacement& effect : generated)
+    {
+        auto named = modelByChunkId.find(effect.modelId);
+        if (named == modelByChunkId.end())
+        {
+            continue;
+        }
+        auto model = models.find(named->second);
+        if (model == models.end())
+        {
+            continue;
+        }
+        bool water = false;
+        for (const ffxi::ModelMesh& mesh : model->second.meshes)
+        {
+            if (mh::isWaterMesh(model->second.name, mesh))
+            {
+                water = true;
+                break;
+            }
+        }
+        // A model with a texture animation is a visible effect - the
+        // fountain's jets and flames, a waterfall's sheet - and is placed
+        // and scrolled. Anything else a generator places is a particle
+        // emitter, a light or an animated creature, none of which this
+        // renderer can do yet.
+        // Only from the effects directory. The weather directories place the
+        // sky with the same opcodes - Bastok Markets' stars drew as a flock
+        // of grey triangles over the city.
+        const bool inEffects = effect.directory.find("/effe") != std::string::npos ||
+                               effect.directory.rfind("effe", 0) == 0;
+        if (!water && effect.directory.find("/weat/fine") != std::string::npos)
+        {
+            bool textured = false;
+            for (const ffxi::ModelMesh& mesh : model->second.meshes)
+            {
+                textured = textured || !mesh.texture.empty();
+            }
+            if (textured)
+            {
+                ffxi::Placement placement;
+                placement.model = named->second;
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    placement.translate[axis] = effect.translate[axis];
+                    placement.rotate[axis] = effect.rotate[axis];
+                    placement.scale[axis] = effect.scale[axis];
+                }
+                skyZone.placements.push_back(std::move(placement));
+                // Clouds drift; stars keep still and come out at night. Which
+                // is which is read off the name until the generators' own
+                // timing opcodes are understood.
+                const bool stars = named->second.rfind("sta", 0) == 0;
+                skyParams.emplace(named->second, mh::EffectParams{stars ? 0.0f : 0.004f, 0.0f, stars});
+            }
+            continue;
+        }
+        const bool animated = !water && inEffects && !effect.textureAnimation.empty();
+        if (!water && !animated && !everyGenerator)
+        {
+            continue;
+        }
+        if (animated && effectParams.find(named->second) == effectParams.end())
+        {
+            // The rate is per frame in the file, at the game's thirty a
+            // second. A generator with no rate still animates in the game,
+            // by its keyframe chunk, which is not read yet; a slow slide is
+            // the stand-in. The direction is a guess until checked.
+            const float perSecond = effect.scroll != 0.0f ? effect.scroll * 30.0f : -0.25f;
+            effectParams.emplace(named->second, mh::EffectParams{0.0f, perSecond, effect.nightOnly});
+            ++generatedEffects;
+        }
+        ffxi::Placement placement;
+        placement.model = named->second;
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            placement.translate[axis] = effect.translate[axis];
+            placement.rotate[axis] = effect.rotate[axis];
+            placement.scale[axis] = effect.scale[axis];
+        }
+        effectPlacements.push_back(std::move(placement));
+        generatedWater += water ? 1 : 0;
+    }
+    if (!generated.empty())
+    {
+        std::printf("generators: %zu, %zu placing water models, %zu animated effect models, %zu sky objects%s\n",
+                    generated.size(), generatedWater, generatedEffects, skyZone.placements.size(),
+                    everyGenerator ? " (all placed)" : "");
+    }
+    skyObjects = mh::Scene{};
+    if (!skyZone.placements.empty())
+    {
+        size_t skyResolved = 0, skyMissing = 0;
+        skyObjects = mh::buildScene(skyZone, models, textures, skyResolved, skyMissing, &skyParams);
+    }
+    else if (key2Path)
+    {
+        // A zone with no sky of its own borrows one, from the same zone that
+        // lends its lighting: Sel Phiner, the sign-in backdrop, has neither.
+        // The lender's cloud and star models and their textures come along;
+        // the textures are added to this zone's map so the sky bind groups
+        // find them.
+        std::string borrowed;
+        try
+        {
+            const ffxi::FileTable table{ffxi::defaultInstallRoot()};
+            if (auto path = table.path(kBorrowedLightingFileId))
+            {
+                borrowed = path->string();
+            }
+        }
+        catch (const std::exception&)
+        {
+        }
+        if (!borrowed.empty() && borrowed != datPath)
+        {
+            try
+            {
+                ffxi::DatFile lender{std::filesystem::path{borrowed}};
+                auto keys2 = ffxi::KeyTable::load(key2Path);
+                std::unordered_map<std::string, ffxi::Model> lentModels;
+                std::unordered_map<std::string, std::string> lentByChunk;
+                if (keys2)
+                {
+                    for (const ffxi::Chunk& chunk : lender.chunksOfType(ffxi::kChunkMmb))
+                    {
+                        try
+                        {
+                            ffxi::Model model = ffxi::parseMmb(chunk, *keys, *keys2);
+                            std::string chunkId(chunk.id, 4);
+                            while (!chunkId.empty() && (chunkId.back() == ' ' || chunkId.back() == 0))
+                            {
+                                chunkId.pop_back();
+                            }
+                            lentByChunk.emplace(std::move(chunkId), model.name);
+                            lentModels.emplace(model.name, std::move(model));
+                        }
+                        catch (const std::exception&)
+                        {
+                        }
+                    }
+                }
+                ffxi::Zone lentSky;
+                for (const ffxi::EffectPlacement& effect : ffxi::parseGenerators(lender))
+                {
+                    if (effect.directory.find("/weat/fine") == std::string::npos)
+                    {
+                        continue;
+                    }
+                    auto id = lentByChunk.find(effect.modelId);
+                    if (id == lentByChunk.end())
+                    {
+                        continue;
+                    }
+                    auto model = lentModels.find(id->second);
+                    bool textured = false;
+                    for (const ffxi::ModelMesh& mesh : model->second.meshes)
+                    {
+                        textured = textured || !mesh.texture.empty();
+                    }
+                    if (!textured)
+                    {
+                        continue;
+                    }
+                    ffxi::Placement placement;
+                    placement.model = id->second;
+                    for (int axis = 0; axis < 3; ++axis)
+                    {
+                        placement.translate[axis] = effect.translate[axis];
+                        placement.rotate[axis] = effect.rotate[axis];
+                        placement.scale[axis] = effect.scale[axis];
+                    }
+                    lentSky.placements.push_back(std::move(placement));
+                    const bool stars = id->second.rfind("sta", 0) == 0;
+                    skyParams.emplace(id->second, mh::EffectParams{stars ? 0.0f : 0.004f, 0.0f, stars});
+                }
+                if (!lentSky.placements.empty())
+                {
+                    for (const ffxi::Chunk& chunk : lender.chunksOfType(ffxi::kChunkTexture))
+                    {
+                        try
+                        {
+                            ffxi::Texture texture = ffxi::parseTexture(chunk);
+                            if (textures.find(texture.name) == textures.end())
+                            {
+                                textures.emplace(texture.name, std::move(texture));
+                            }
+                        }
+                        catch (const std::exception&)
+                        {
+                        }
+                    }
+                    size_t skyResolved = 0, skyMissing = 0;
+                    skyObjects = mh::buildScene(lentSky, lentModels, textures, skyResolved, skyMissing, &skyParams);
+                    std::printf("sky: this zone has none of its own, borrowed %zu objects\n", lentSky.placements.size());
+                }
+            }
+            catch (const std::exception& e)
+            {
+                std::printf("could not borrow a sky: %s\n", e.what());
+            }
+        }
+    }
+
+    bool effectsPlaced = false;
     for (const ffxi::Chunk& chunk : dat.chunksOfType(ffxi::kChunkMzb))
     {
         ffxi::Zone zone = ffxi::parseMzb(chunk, *keys);
+
+        // The generators' placements go with the first MZB - the zone's
+        // shell. The same DAT can hold a second one (24.DAT has two zones).
+        if (!effectsPlaced)
+        {
+            zone.placements.insert(zone.placements.end(), effectPlacements.begin(), effectPlacements.end());
+            effectsPlaced = true;
+        }
 
         // Placed models are the visible world; collision geometry is the
         // fallback when the model key table is not available.
@@ -708,7 +1047,7 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
         {
             size_t resolved = 0;
             size_t missing = 0;
-            mesh = mh::buildScene(zone, models, textures, resolved, missing);
+            mesh = mh::buildScene(zone, models, textures, resolved, missing, &effectParams);
             if (!mesh.vertices.empty())
             {
                 std::printf("  %zu models (%zu unreadable), %zu placements drawn, %zu with no model\n", models.size(),
@@ -801,16 +1140,41 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
                         // is stopped by walls that on screen are a doorway.
                         insides.push_back(inside);
 
-                        if (!inner.empty())
+                        // Every room, whether or not it brought lighting: the
+                        // draw range is what lets a room be left out of a
+                        // frame the player is not inside it for. The game
+                        // keeps its interiors in the sky above the city and
+                        // never draws one from the street; drawing them all
+                        // put two shops in the air over Southern San d'Oria.
+                        //
+                        // Grown a little, so standing in a doorway does not
+                        // flicker between the two lighting sets frame to frame.
+                        constexpr float kMargin = 2.0f;
+                        mh::InteriorLighting room{
+                            inner,
+                            {scene.boundsMin.x - kMargin, scene.boundsMin.y - kMargin, scene.boundsMin.z - kMargin},
+                            {scene.boundsMax.x + kMargin, scene.boundsMax.y + kMargin, scene.boundsMax.z + kMargin}};
+                        room.firstDraw = static_cast<uint32_t>(best->draws.size());
+                        room.drawCount = static_cast<uint32_t>(scene.draws.size());
+                        interiors.push_back(std::move(room));
+
+                        // Which rooms bring geometry whose textures are not
+                        // in this zone's files. A room mapped to the wrong
+                        // zone looks exactly like this: its meshes name the
+                        // textures of the city it belongs to.
+                        size_t textureless = 0;
+                        for (const mh::InstancedDraw& draw : scene.draws)
                         {
-                            // Grown a little, so standing in a doorway does not
-                            // flicker between the two sets frame to frame.
-                            constexpr float kMargin = 2.0f;
-                            interiors.push_back(mh::InteriorLighting{
-                                inner,
-                                {scene.boundsMin.x - kMargin, scene.boundsMin.y - kMargin, scene.boundsMin.z - kMargin},
-                                {scene.boundsMax.x + kMargin, scene.boundsMax.y + kMargin, scene.boundsMax.z + kMargin}});
+                            if (!draw.water && (draw.texture.empty() || textures.find(draw.texture) == textures.end()))
+                            {
+                                ++textureless;
+                            }
                         }
+                        std::printf("  room %s: %zu draws, %zu without texture, %.0f across at y %.0f..%.0f\n",
+                                    roomPath.filename().string().c_str(), scene.draws.size(), textureless,
+                                    std::max(scene.boundsMax.x - scene.boundsMin.x, scene.boundsMax.z - scene.boundsMin.z),
+                                    scene.boundsMin.y, scene.boundsMax.y);
+
                         mh::append(*best, scene);
                         added += resolved;
                         ++rooms;
@@ -831,8 +1195,21 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
 
         if (rooms)
         {
-            std::printf("  %zu building interiors, %zu placements, %zu with their own lighting\n", rooms, added,
-                        interiors.size());
+            const size_t lit = static_cast<size_t>(std::count_if(
+                interiors.begin(), interiors.end(), [](const mh::InteriorLighting& r) { return !r.lighting.empty(); }));
+            std::printf("  %zu building interiors, %zu placements, %zu with their own lighting\n", rooms, added, lit);
+            for (size_t i = 0; i < interiors.size(); ++i)
+            {
+                const mh::InteriorLighting& room = interiors[i];
+                const float wide = std::max(room.boundsMax.x - room.boundsMin.x, room.boundsMax.z - room.boundsMin.z);
+                if (wide > 120.0f)
+                {
+                    // A room this size is a district. The frame loop leaves
+                    // any wider than kRoomAtMost out of the indoor test.
+                    std::printf("  room %zu is %.0f across: %.0f..%.0f %.0f..%.0f %.0f..%.0f\n", i, wide,
+                                room.boundsMin.x, room.boundsMax.x, room.boundsMin.y, room.boundsMax.y, room.boundsMin.z, room.boundsMax.z);
+                }
+            }
         }
     }
     return best;
@@ -1273,6 +1650,10 @@ bool mh::ViewerLink::hud() const { return hud_; }
 
 void mh::ViewerLink::setLineup(bool on) { lineup_ = on; }
 
+void mh::ViewerLink::setFormAside(bool on) { formAside_ = on; }
+
+bool mh::ViewerLink::formAside() const { return formAside_; }
+
 bool mh::ViewerLink::lineup() const { return lineup_; }
 
 void mh::ViewerLink::setServerClock(uint32_t clock)
@@ -1322,6 +1703,21 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 
     // Each building interior lights its own inside; see InteriorLighting.
     std::vector<mh::InteriorLighting> interiors;
+    int lastActiveRoom = -2;   // which room's lighting was used last frame; -1 outdoors, -2 never decided
+    // The set being faded from after a doorway, and when the fade began.
+    const ffxi::Lighting* lightingFrom = nullptr;
+    const ffxi::Lighting* lightingLast = nullptr;
+    uint64_t lightingFadeStartNs = 0;
+    constexpr float kLightingFadeSeconds = 0.6f;
+    // Rooms the player is not in this frame, as draw ranges to skip.
+    std::vector<std::pair<uint32_t, uint32_t>> hiddenDraws;
+    // How far outside a room's box the player can be and still see into it -
+    // a doorway is approached from the street.
+    constexpr float kRoomReach = 6.0f;
+    // Wider than this and a sub-file is a district rather than a room, whose
+    // lighting is not the inside of anything. The largest real building in the
+    // three cities is well under a hundred units.
+    constexpr float kRoomAtMost = 150.0f;
 
     if (!SDL_Init(SDL_INIT_VIDEO))
     {
@@ -1489,6 +1885,9 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     wgpu::Buffer waterVertexBuffer;
     wgpu::Buffer waterIndexBuffer;
     wgpu::RenderPipeline waterPipeline;
+    // Whether this zone's water is the sea, decided by the ripple sheet it
+    // ships - see the chooser. The water shader draws the two differently.
+    bool waterIsSea = false;
     wgpu::BindGroup waterBindGroup;
     uint32_t waterIndexCount = 0;
     wgpu::Buffer uniformBuffer;
@@ -1509,6 +1908,25 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     wgpu::Texture ghostTexture;
     wgpu::BindGroup ghostBindGroup;
     wgpu::BindGroupLayout zoneBindGroupLayout;
+    // The effect pass: generator-placed meshes with a scrolling texture. One
+    // bind group per effect draw, indexed like batchBindGroups, with a small
+    // uniform holding its scroll rate; an empty handle for every other draw.
+    wgpu::RenderPipeline effectPipeline;
+    // The same, adding to what is behind rather than blending over it: the
+    // star sheet is white points on black, and alpha-blended it drew the
+    // black too, a flock of dark triangles across the night.
+    wgpu::RenderPipeline effectAdditivePipeline;
+    wgpu::BindGroupLayout effectBindGroupLayout;
+    std::vector<wgpu::BindGroup> effectBindGroups;
+    std::vector<wgpu::Buffer> effectBuffers;
+    // The sky objects - cloud dome, star field - as their own little scene
+    // with their own buffers, drawn camera-relative by the effect pipeline
+    // between the sky gradient and the zone.
+    mh::Scene skyObjects;
+    wgpu::Buffer skyVertexBuffer;
+    wgpu::Buffer skyIndexBuffer;
+    wgpu::Buffer skyInstanceBuffer;
+    std::vector<wgpu::BindGroup> skyObjectBindGroups;
     wgpu::Sampler sampler;
     wgpu::Texture whiteTexture;
     // Bound to water meshes, which name no texture at all in their mesh
@@ -1550,7 +1968,17 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 
     // The baked overhead map. Declared out here rather than beside the bake
     // because the radar reads it every frame and a new zone replaces it.
+    //
+    // Replaces its *contents*, that is. The texture itself is made once and
+    // baked into again on every zone: the radar's bind group points at it,
+    // and a fresh texture per zone left the radar pointing at the first one -
+    // so every zone entered from the sign-in screen showed Sel Phiner's grass,
+    // which is the green disc the minimap had become.
     wgpu::Texture mapTexture;
+    wgpu::Texture maskTexture;
+    float mapCentreX = 0.0f;
+    float mapCentreZ = 0.0f;
+    float mapHalf = 1.0f;
 
     const auto readZone = [&]() -> int {
         // Everything a zone contributes is added to, not replaced, so a second
@@ -1570,10 +1998,20 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         // the characters, which do not use them, carry on drawing.
         batchTextures.clear();
         batchBindGroups.clear();
+        effectBindGroups.clear();
+        effectBuffers.clear();
+        skyObjectBindGroups.clear();
+        skyVertexBuffer = nullptr;
+        skyIndexBuffer = nullptr;
+        skyInstanceBuffer = nullptr;
         indexCount = 0;
         waterIndexCount = 0;
         lighting = ffxi::Lighting{};
         interiors.clear();
+        lastActiveRoom = -2;
+        lightingFrom = nullptr;
+        lightingLast = nullptr;
+        hiddenDraws.clear();
         collision = mh::Collision{};
 
         if (!currentZonePath.empty())
@@ -1586,7 +2024,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             }
             zone = loadZone(currentZonePath.c_str(), keyPath,
                             options.keyTable2Path.empty() ? nullptr : options.keyTable2Path.c_str(), zoneId, textures,
-                            lighting, collision, interiors);
+                            lighting, collision, interiors, skyObjects);
             if (!zone)
             {
                 return 1;
@@ -1594,12 +2032,25 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             // The character is loaded after the zone so it can share the texture
             // map: a PC in a town wears textures the zone never mentions, and a
             // zone texture the character happens to name should not be read twice.
-            if (currentZoneName)
+            // The zone's own water meshes first - see mh::isWaterMesh - and
+            // the sheets derived from the server's collision only for a zone
+            // that has none. The derived sheets are flat at a guessed
+            // waterline and stop wherever the walkable mesh does, which is
+            // how a canal came out with a hole under every bridge and a
+            // stream with its surface up the banks; the meshes are what the
+            // retail client draws.
+            if (zone->waterTriangles() > 0)
+            {
+                std::printf("water: %zu triangles from the zone's own meshes%s%s\n", zone->waterTriangles(),
+                            zone->waterTexture.empty() ? "" : ", sheet ",
+                            zone->waterTexture.empty() ? "" : zone->waterTexture.c_str());
+            }
+            else if (currentZoneName)
             {
                 const size_t water = loadWater(*currentZoneName, *zone);
                 // Reported either way. A silent zero is how a zone name
                 // that did not match a filename went unnoticed.
-                std::printf("water: %zu triangles for %s\n", water,
+                std::printf("water: %zu derived triangles for %s\n", water,
                             currentZoneName->c_str());
             }
             std::printf("collision: %zu triangles, %zu walls\n", collision.triangleCount(), collision.wallCount());
@@ -1735,6 +2186,52 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                 surfaceDescriptor.depthStencil = &surfaceDepth;
                 translucentPipeline = device.CreateRenderPipeline(&surfaceDescriptor);
 
+                // The effect pipeline: the zone's vertex layout, a shader that
+                // scrolls the texture, a fourth binding for the rate. Blended
+                // the way the water is and not writing depth.
+                {
+                    wgpu::ShaderSourceWGSL effectWgsl;
+                    effectWgsl.code = mh::kEffectShader;
+                    wgpu::ShaderModuleDescriptor effectModuleDescriptor{.nextInChain = &effectWgsl};
+                    wgpu::ShaderModule effectModule = device.CreateShaderModule(&effectModuleDescriptor);
+
+                    wgpu::BindGroupLayoutEntry effectEntries[4] = {};
+                    effectEntries[0] = layoutEntries[0];
+                    effectEntries[1] = layoutEntries[1];
+                    effectEntries[2] = layoutEntries[2];
+                    effectEntries[3].binding = 3;
+                    effectEntries[3].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+                    effectEntries[3].buffer.type = wgpu::BufferBindingType::Uniform;
+                    wgpu::BindGroupLayoutDescriptor effectLayoutDescriptor{.entryCount = 4, .entries = effectEntries};
+                    effectBindGroupLayout = device.CreateBindGroupLayout(&effectLayoutDescriptor);
+                    wgpu::PipelineLayoutDescriptor effectPipelineLayoutDescriptor{
+                        .bindGroupLayoutCount = 1, .bindGroupLayouts = &effectBindGroupLayout};
+                    wgpu::PipelineLayout effectLayout = device.CreatePipelineLayout(&effectPipelineLayoutDescriptor);
+
+                    wgpu::FragmentState effectFragment{
+                        .module = effectModule, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &surfaceTarget};
+                    wgpu::RenderPipelineDescriptor effectDescriptor = pipelineDescriptor;
+                    effectDescriptor.layout = effectLayout;
+                    effectDescriptor.vertex.module = effectModule;
+                    effectDescriptor.fragment = &effectFragment;
+                    effectDescriptor.depthStencil = &surfaceDepth;
+                    effectPipeline = device.CreateRenderPipeline(&effectDescriptor);
+
+                    wgpu::BlendState additiveBlend{
+                        .color = {.operation = wgpu::BlendOperation::Add,
+                                  .srcFactor = wgpu::BlendFactor::One,
+                                  .dstFactor = wgpu::BlendFactor::One},
+                        .alpha = {.operation = wgpu::BlendOperation::Add,
+                                  .srcFactor = wgpu::BlendFactor::One,
+                                  .dstFactor = wgpu::BlendFactor::One}};
+                    wgpu::ColorTargetState additiveTarget{.format = surfaceFormat, .blend = &additiveBlend};
+                    wgpu::FragmentState additiveFragment{
+                        .module = effectModule, .entryPoint = "fragmentMain", .targetCount = 1, .targets = &additiveTarget};
+                    wgpu::RenderPipelineDescriptor additiveDescriptor = effectDescriptor;
+                    additiveDescriptor.fragment = &additiveFragment;
+                    effectAdditivePipeline = device.CreateRenderPipeline(&additiveDescriptor);
+                }
+
                 // And once more again, blended against a constant rather than
                 // against the texture's own alpha. That is the whole trick
                 // behind the faded characters at character select: skin and
@@ -1831,19 +2328,114 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                 // so every pooled quad painted an opaque white patch over the
                 // floor it was sitting on. Read as missing floor, which is fair.
                 wgpu::TextureView waterView = waterFallbackTexture.CreateView();
-                for (const char* candidate : {"effect  kaw1", "effect  ike1", "effect  ike2", "effect  umna", "effect  nami"})
+
+                // Matched on the texture's own name, the second half of the
+                // sixteen-byte field, whatever group the first half puts it
+                // in. The rivers and ponds keep theirs under "effect"; Port
+                // Bastok's harbour sheets sit under "sea" or under no group
+                // at all - umi2, sea01, miz1, miz2 - and matching the whole
+                // field found none of them, so the harbour drew as a flat
+                // tinted sheet with no ripple on it. Earlier names are
+                // preferred: the sea sheets read best on open water, the
+                // river ones on a channel.
+                static const char* const kWaterSheets[] = {"umi2", "umi1", "sea01", "kaw1", "ike1",
+                                                          "ike2",  "umna", "nami",  "miz1", "miz2"};
+                // The same sheets with the rivers first. A zone whose water
+                // is mostly untextured meshes - Bastok Markets' canal and
+                // fountain - is a river zone whatever sheet its harbour
+                // names, and wants a river's ripple and tint.
+                static const char* const kRiverFirst[] = {"kaw1", "ike1", "ike2", "nami", "miz1",
+                                                         "miz2", "umna", "umi2", "umi1", "sea01"};
+                const bool riverZone = zone->waterTexture.empty() && zone->waterUntextured > 0;
+                const ffxi::Texture* sheet = nullptr;
+                const char* sheetName = nullptr;
+                size_t sheetRank = sizeof(kWaterSheets) / sizeof(kWaterSheets[0]);
+                if (riverZone)
                 {
-                    auto found = textures.find(candidate);
-                    if (found != textures.end())
+                    for (const char* wanted : kRiverFirst)
                     {
-                        wgpu::Texture gpu = mh::uploadTexture(device, found->second);
-                        if (gpu)
+                        for (const auto& [key, texture] : textures)
                         {
-                            batchTextures.push_back(gpu);
-                            waterView = batchTextures.back().CreateView();
-                            std::printf("water texture: %s\n", candidate);
+                            std::string own = key.size() > 8 ? key.substr(8) : key;
+                            while (!own.empty() && (own.back() == ' ' || own.back() == 0))
+                            {
+                                own.pop_back();
+                            }
+                            if (own == wanted)
+                            {
+                                sheet = &texture;
+                                sheetName = wanted;
+                                sheetRank = 3;      // a river, whatever the sheet
+                                break;
+                            }
+                        }
+                        if (sheet)
+                        {
                             break;
                         }
+                    }
+                }
+                // The sheet the zone's own water meshes are textured with,
+                // when they name one, ahead of the list: it is the one the
+                // artists put on that water.
+                if (!zone->waterTexture.empty())
+                {
+                    auto named = textures.find(zone->waterTexture);
+                    if (named != textures.end())
+                    {
+                        sheet = &named->second;
+                        sheetName = zone->waterTexture.c_str();
+                        std::string own = zone->waterTexture.size() > 8 ? zone->waterTexture.substr(8) : zone->waterTexture;
+                        while (!own.empty() && (own.back() == ' ' || own.back() == 0))
+                        {
+                            own.pop_back();
+                        }
+                        for (size_t rank = 0; rank < sheetRank; ++rank)
+                        {
+                            if (own == kWaterSheets[rank])
+                            {
+                                sheetRank = rank;
+                                break;
+                            }
+                        }
+                        if (sheetRank == sizeof(kWaterSheets) / sizeof(kWaterSheets[0]))
+                        {
+                            sheetRank = 3;      // unknown sheet: treated as a river
+                        }
+                    }
+                }
+                for (const auto& [key, texture] : textures)
+                {
+                    if (sheet && (riverZone || sheetName == zone->waterTexture.c_str()))
+                    {
+                        break;
+                    }
+                    std::string own = key.size() > 8 ? key.substr(8) : key;
+                    while (!own.empty() && (own.back() == ' ' || own.back() == 0))
+                    {
+                        own.pop_back();
+                    }
+                    for (size_t rank = 0; rank < sheetRank; ++rank)
+                    {
+                        if (own == kWaterSheets[rank])
+                        {
+                            sheet = &texture;
+                            sheetName = kWaterSheets[rank];
+                            sheetRank = rank;
+                            break;
+                        }
+                    }
+                }
+                waterIsSea = false;
+                if (sheet)
+                {
+                    if (wgpu::Texture gpu = mh::uploadTexture(device, *sheet))
+                    {
+                        batchTextures.push_back(gpu);
+                        waterView = batchTextures.back().CreateView();
+                        // The first three names are the open-water sheets.
+                        waterIsSea = sheetRank <= 2;
+                        std::printf("water texture: %s%s\n", sheetName, waterIsSea ? " (sea)" : "");
                     }
                 }
 
@@ -1945,6 +2537,74 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                 wgpu::BindGroupDescriptor bindGroupDescriptor{
                     .layout = zoneBindGroupLayout, .entryCount = 3, .entries = entries};
                 batchBindGroups.push_back(device.CreateBindGroup(&bindGroupDescriptor));
+
+                if (batch.effect && effectBindGroupLayout)
+                {
+                    // scroll u, scroll v, how much lighting applies, unused.
+                    // Flames and glows are self-lit; a waterfall's sheet is
+                    // lit like the rock behind it. Told apart by the clock
+                    // gate for now, which is what the flames carry.
+                    const float params[4] = {batch.scroll[0], batch.scroll[1], batch.nightOnly ? 0.0f : 0.7f, 0.0f};
+                    effectBuffers.push_back(createBuffer(device, params, sizeof(params), wgpu::BufferUsage::Uniform));
+                    wgpu::BindGroupEntry effectEntries[4] = {entries[0], entries[1], entries[2], {}};
+                    effectEntries[3].binding = 3;
+                    effectEntries[3].buffer = effectBuffers.back();
+                    effectEntries[3].size = sizeof(params);
+                    wgpu::BindGroupDescriptor effectGroupDescriptor{
+                        .layout = effectBindGroupLayout, .entryCount = 4, .entries = effectEntries};
+                    effectBindGroups.push_back(device.CreateBindGroup(&effectGroupDescriptor));
+                }
+                else
+                {
+                    effectBindGroups.push_back(nullptr);
+                }
+            }
+            if (!skyObjects.indices.empty() && effectBindGroupLayout)
+            {
+                skyVertexBuffer = createBuffer(device, skyObjects.vertices.data(),
+                                               skyObjects.vertices.size() * sizeof(mh::Vertex), wgpu::BufferUsage::Vertex);
+                skyIndexBuffer = createBuffer(device, skyObjects.indices.data(),
+                                              skyObjects.indices.size() * sizeof(uint32_t), wgpu::BufferUsage::Index);
+                skyInstanceBuffer = createBuffer(device, skyObjects.instances.data(),
+                                                 skyObjects.instances.size() * sizeof(float), wgpu::BufferUsage::Vertex);
+                for (const mh::InstancedDraw& draw : skyObjects.draws)
+                {
+                    wgpu::TextureView view;
+                    auto found = textures.find(draw.texture);
+                    if (found != textures.end())
+                    {
+                        if (wgpu::Texture gpu = mh::uploadTexture(device, found->second))
+                        {
+                            batchTextures.push_back(gpu);
+                            view = batchTextures.back().CreateView();
+                        }
+                    }
+                    if (!view)
+                    {
+                        skyObjectBindGroups.push_back(nullptr);
+                        continue;
+                    }
+                    // scroll u, v; lighting; camera-relative and unfogged.
+                    // The clouds take the zone's light so they darken with
+                    // the night; the stars are their own light.
+                    const float params[4] = {draw.scroll[0], draw.scroll[1], draw.nightOnly ? 0.0f : 1.0f, 1.0f};
+                    effectBuffers.push_back(createBuffer(device, params, sizeof(params), wgpu::BufferUsage::Uniform));
+                    wgpu::BindGroupEntry skyEntries[4] = {};
+                    skyEntries[0].binding = 0;
+                    skyEntries[0].buffer = uniformBuffer;
+                    skyEntries[0].size = sizeof(Uniforms);
+                    skyEntries[1].binding = 1;
+                    skyEntries[1].textureView = view;
+                    skyEntries[2].binding = 2;
+                    skyEntries[2].sampler = sampler;
+                    skyEntries[3].binding = 3;
+                    skyEntries[3].buffer = effectBuffers.back();
+                    skyEntries[3].size = sizeof(params);
+                    wgpu::BindGroupDescriptor skyGroupDescriptor{
+                        .layout = effectBindGroupLayout, .entryCount = 4, .entries = skyEntries};
+                    skyObjectBindGroups.push_back(device.CreateBindGroup(&skyGroupDescriptor));
+                }
+                std::printf("sky: %zu objects from the weather generators\n", skyObjects.draws.size());
             }
             if (unnamed)
             {
@@ -1970,7 +2630,10 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                 .format = surfaceFormat,
                 .mipLevelCount = 1,
                 .sampleCount = 1};
-            mapTexture = device.CreateTexture(&mapDescriptor);
+            if (!mapTexture)
+            {
+                mapTexture = device.CreateTexture(&mapDescriptor);
+            }
 
             wgpu::TextureDescriptor mapDepthDescriptor{.usage = wgpu::TextureUsage::RenderAttachment,
                                                        .dimension = wgpu::TextureDimension::e2D,
@@ -2042,25 +2705,62 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             mapPass.SetIndexBuffer(indexBuffer, wgpu::IndexFormat::Uint32);
             for (size_t i = 0; i < zone->draws.size() && i < batchBindGroups.size(); ++i)
             {
+                // Rooms are left off the map. They hang in the sky above the
+                // streets they belong to, and baked from above they painted
+                // their roofs over Southern San d'Oria's whole plan.
+                bool insideRoom = false;
+                for (const mh::InteriorLighting& room : interiors)
+                {
+                    const float across =
+                        std::max(room.boundsMax.x - room.boundsMin.x, room.boundsMax.z - room.boundsMin.z);
+                    if (across <= kRoomAtMost && room.holdsDraw(i))
+                    {
+                        insideRoom = true;
+                        break;
+                    }
+                }
+                if (insideRoom)
+                {
+                    continue;
+                }
+
                 const mh::InstancedDraw& draw = zone->draws[i];
+                if ((draw.texture.empty() && !draw.water) || draw.effect)
+                {
+                    continue;   // an occlusion volume, not scenery - see the frame loop
+                }
                 mapPass.SetPipeline(draw.cutout ? cutoutPipeline : pipeline);
                 mapPass.SetBindGroup(0, batchBindGroups[i]);
                 mapPass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
             }
-            if (waterIndexCount && waterPipeline)
-            {
-                mapPass.SetPipeline(waterPipeline);
-                mapPass.SetBindGroup(0, waterBindGroup);
-                mapPass.SetVertexBuffer(0, waterVertexBuffer);
-                mapPass.SetIndexBuffer(waterIndexBuffer, wgpu::IndexFormat::Uint32);
-                mapPass.DrawIndexed(waterIndexCount);
-            }
+            // No water on the map. Baked from above it paints its whole
+            // extent one flat colour, and a harbour's plane is the size of
+            // the district around it - Port Bastok's minimap came out as one
+            // green disc. The bed beneath shows the shape of the water well
+            // enough.
             mapPass.End();
             wgpu::CommandBuffer mapCommands = mapEncoder.Finish();
             queue.Submit(1, &mapCommands);
 
             std::printf("map: baked %ux%u covering %.0f units, centred on %.0f %.0f\n", kMapSize, kMapSize, half * 2.0f,
                         middle.x, middle.z);
+
+            // The walkable mask and the map's extent go with the bake. At
+            // startup the radar is not built yet and does this itself; on a
+            // zone change it already holds the mask texture, which is written
+            // into again here rather than replaced - see mapTexture.
+            if (maskTexture && !collision.empty())
+            {
+                constexpr uint32_t kMaskSize = 1024;
+                mapCentreX = middle.x;
+                mapCentreZ = middle.z;
+                mapHalf = half;
+                const std::vector<uint8_t> mask = collision.rasteriseWalkable(kMaskSize, middle, half);
+                wgpu::TexelCopyTextureInfo maskDestination{.texture = maskTexture};
+                wgpu::TexelCopyBufferLayout maskLayout{.bytesPerRow = kMaskSize, .rowsPerImage = kMaskSize};
+                const wgpu::Extent3D maskExtent{kMaskSize, kMaskSize, 1};
+                queue.WriteTexture(&maskDestination, mask.data(), mask.size(), &maskLayout, &maskExtent);
+            }
 
             // mapPath writes the bake out so it can be looked at directly.
             if (options.mapPath)
@@ -2122,7 +2822,6 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 
 
     // --- the radar -----------------------------------------------------------
-    wgpu::Texture maskTexture;
     wgpu::Buffer radarUniformBuffer;
     wgpu::RenderPipeline radarPipeline;
     wgpu::BindGroup radarBindGroup;
@@ -2533,10 +3232,6 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         dialogBindGroup = device.CreateBindGroup(&dialogBindGroupDescriptor);
     }
 
-    float mapCentreX = 0.0f;
-    float mapCentreZ = 0.0f;
-    float mapHalf = 1.0f;
-
     // Also a lambda, and for the same reason: the radar is built from the map
     // baked out of the zone and from its collision, neither of which exists
     // when the window opens onto a sign-in screen. Run once here for the
@@ -2738,9 +3433,24 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         }
     };
 
+    // What the character was built from, kept so it can be built again: a
+    // zone change empties the texture cache, and a body that is not rebuilt
+    // afterwards stands in the new zone white.
+    std::string currentLook;
+
+    // How much the body is scaled, from the look's size. The mesh is the same
+    // file whatever the size; only the instance transform differs.
+    float characterScale = 1.0f;
+    const auto scaleOfLook = [](const std::string& text) {
+        ffxi::Look parsed;
+        return ffxi::parseLook(text, parsed) ? mh::bodyScale(parsed.size + 1) : 1.0f;
+    };
+
     if (const char* lookEnv = options.look ? options.look->c_str() : nullptr)
     {
         character = buildFromLook(lookEnv);
+        currentLook = lookEnv;
+        characterScale = scaleOfLook(currentLook);
     }
     else if (const char* charEnv = options.characterPath ? options.characterPath->c_str() : nullptr)
     {
@@ -3109,7 +3819,15 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     /// jump on the fifth. At sixty frames a second that reads as a tape being
     /// shuttled rather than as somebody walking. Easing towards the reported
     /// position spreads each step over the frames between.
-    std::map<uint32_t, mh::Vec3> drawnAt;
+    struct DrawnEntity
+    {
+        mh::Vec3 at{};        // where it is drawn this frame
+        mh::Vec3 from{};      // where it was drawn when the latest target arrived
+        mh::Vec3 target{};    // the latest position the server gave
+        float targetTime{};   // when that arrived, on the frame clock
+        float interval{0.5f}; // how long the previous target took to be replaced
+    };
+    std::map<uint32_t, DrawnEntity> drawnAt;
     float lastFrameSeconds = 0.0f;
 
     /// The Vana'diel clock in seconds, when the server has supplied one. Also
@@ -3158,13 +3876,14 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         std::vector<wgpu::BindGroup> bindGroups;
     };
 
-    std::map<uint64_t, std::optional<DrawableCharacter>> npcModels;
+    std::map<std::array<uint16_t, 7>, std::optional<DrawableCharacter>> npcModels;
 
     /// Creatures, in a map of their own.
     ///
-    /// Not folded into npcModels under a tagged key: lookKey multiplies the
-    /// race by 4096 five times, so a Galka reaches 8 * 2^60 - exactly the top
-    /// bit, so any tag up there collides with a real look. Two maps cannot.
+    /// Not folded into npcModels under a tagged key: a creature is one model
+    /// id and a look is seven fields, and a tag telling the two apart inside
+    /// one key was the kind of cleverness that collided once already. Two
+    /// maps cannot.
     std::map<uint16_t, std::optional<DrawableCharacter>> creatureModels;
 
     /// One entity's animation, and the vertices it is skinned into.
@@ -3195,18 +3914,25 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         float speed = 0.0f;
         bool placed = false;
         bool drawn = false;
+        bool clipsReported = false;
     };
 
     std::map<uint32_t, AnimatedEntity> entityPoses;
 
     const auto lookKey = [](const uint16_t look[7]) {
-        // Race and five equipment slots, packed. Face is left out: it changes
-        // the head texture rather than the geometry, and including it would
-        // build a separate model for every face in a crowd.
-        uint64_t key = look[0];
+        // Race, face and the five equipment slots. The face used to be left
+        // out on the theory that it only changed the head's texture; it does
+        // not - it picks the head DAT, hair and all, so two faces are two
+        // meshes. Leaving it out meant every face in a crowd wore the first
+        // one built, and the character being made kept the same head however
+        // the face was chosen. An array rather than a packed integer because
+        // seven fields no longer fit in sixty-four bits.
+        std::array<uint16_t, 7> key{};
+        key[0] = look[0];
+        key[1] = look[1];
         for (int slot = 2; slot < 7; ++slot)
         {
-            key = key * 4096u + (look[slot] & 0x0FFFu);
+            key[static_cast<size_t>(slot)] = look[slot] & 0x0FFFu;
         }
         return key;
     };
@@ -3267,7 +3993,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // Returns null while it has none - a look that resolves to nothing is
     // remembered as nothing rather than retried every frame.
     const auto modelFor = [&](const uint16_t look[7]) -> const DrawableCharacter* {
-        const uint64_t key = lookKey(look);
+        const std::array<uint16_t, 7> key = lookKey(look);
         auto found = npcModels.find(key);
         if (found != npcModels.end())
         {
@@ -3275,13 +4001,28 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         }
 
         ffxi::Look wanted;
-        wanted.race = static_cast<ffxi::Race>(look[0]);
-        wanted.model[static_cast<size_t>(ffxi::LookSlot::Face)] = look[1];
-        wanted.model[static_cast<size_t>(ffxi::LookSlot::Head)] = look[2] & 0x0FFF;
-        wanted.model[static_cast<size_t>(ffxi::LookSlot::Body)] = look[3] & 0x0FFF;
-        wanted.model[static_cast<size_t>(ffxi::LookSlot::Hands)] = look[4] & 0x0FFF;
-        wanted.model[static_cast<size_t>(ffxi::LookSlot::Legs)] = look[5] & 0x0FFF;
-        wanted.model[static_cast<size_t>(ffxi::LookSlot::Feet)] = look[6] & 0x0FFF;
+        if (mh::isChildRace(look[0]))
+        {
+            // A child's face and gear ids index tables this cannot reach, so
+            // they are not used: the grown race, its first face, and the same
+            // stand-in clothes the roster puts on the player's own characters.
+            wanted.race = static_cast<ffxi::Race>(mh::adultRaceFor(look[0]));
+            wanted.model[static_cast<size_t>(ffxi::LookSlot::Face)] = look[1] & 0x0F;
+            for (size_t slot = 1; slot < static_cast<size_t>(ffxi::LookSlot::Count); ++slot)
+            {
+                wanted.model[slot] = 1;
+            }
+        }
+        else
+        {
+            wanted.race = static_cast<ffxi::Race>(look[0]);
+            wanted.model[static_cast<size_t>(ffxi::LookSlot::Face)] = look[1];
+            wanted.model[static_cast<size_t>(ffxi::LookSlot::Head)] = look[2] & 0x0FFF;
+            wanted.model[static_cast<size_t>(ffxi::LookSlot::Body)] = look[3] & 0x0FFF;
+            wanted.model[static_cast<size_t>(ffxi::LookSlot::Hands)] = look[4] & 0x0FFF;
+            wanted.model[static_cast<size_t>(ffxi::LookSlot::Legs)] = look[5] & 0x0FFF;
+            wanted.model[static_cast<size_t>(ffxi::LookSlot::Feet)] = look[6] & 0x0FFF;
+        }
 
         std::optional<DrawableCharacter> built;
         try
@@ -3310,8 +4051,8 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             std::printf("could not build NPC model: %s\n", e.what());
         }
 
-        std::printf("NPC model %s: race %u %u/%u/%u/%u/%u\n", built ? "built" : "failed", look[0], look[2],
-                    look[3], look[4], look[5], look[6]);
+        std::printf("NPC model %s: race %u face %u %u/%u/%u/%u/%u\n", built ? "built" : "failed", look[0],
+                    look[1], look[2], look[3], look[4], look[5], look[6]);
         auto inserted = npcModels.emplace(key, std::move(built)).first;
         return inserted->second ? &*inserted->second : nullptr;
     };
@@ -3379,9 +4120,10 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         // east or west, backwards when facing north, and reading as a
         // character that turns the wrong way as it walks.
         const float turn = characterFacing - 1.57079633f;
-        const float c = std::cos(turn);
-        const float sn = std::sin(turn);
-        const float instance[16] = {c,  0, -sn, 0, 0, 1, 0, 0, sn, 0, c, 0,
+        const float s = characterScale;
+        const float c = std::cos(turn) * s;
+        const float sn = std::sin(turn) * s;
+        const float instance[16] = {c,  0, -sn, 0, 0, s, 0, 0, sn, 0, c, 0,
                                     characterAt.x, characterAt.y, characterAt.z, 1};
         queue.WriteBuffer(characterInstanceBuffer, 0, instance, sizeof(instance));
 
@@ -3398,9 +4140,10 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                 break;
             }
             const float bodyTurn = entity.heading - 1.57079633f;
-            const float bc = std::cos(bodyTurn);
-            const float bs = std::sin(bodyTurn);
-            const float body[16] = {bc, 0, -bs, 0, 0, 1, 0, 0, bs, 0, bc, 0,
+            const float grow = mh::bodyScale(entity.size) * (mh::isChildRace(entity.look[0]) ? mh::kChildScale : 1.0f);
+            const float bc = std::cos(bodyTurn) * grow;
+            const float bs = std::sin(bodyTurn) * grow;
+            const float body[16] = {bc, 0, -bs, 0, 0, grow, 0, 0, bs, 0, bc, 0,
                                     entity.x, entity.y, entity.z, 1};
             queue.WriteBuffer(characterInstanceBuffer, sizeof(body) * (drawnBodies + 1), body, sizeof(body));
             ++drawnBodies;
@@ -3607,9 +4350,17 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     float animationOffset = 0.0f;
     bool driving = character.has_value();
 
-    if (character && !character->animations.empty())
-    {
+    // The named clips of whoever the character is right now. These point
+    // into the character's own animation table, so they are looked up when a
+    // character is given at startup and again when one arrives later - the
+    // sign-in happens inside this window now, and a body built after it
+    // otherwise has five null clips: it walks, and its legs never move.
+    const auto bindClips = [&]() {
         auto find = [&](const char* name) -> const ffxi::Animation* {
+            if (!character)
+            {
+                return static_cast<const ffxi::Animation*>(nullptr);
+            }
             auto found = character->animations.find(name);
             return found == character->animations.end() ? nullptr : &found->second;
         };
@@ -3618,38 +4369,48 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         runClip = find("run0");
         jumpClip = find("jmp0");
         deadClip = find("ded0");
+    };
 
-        // The clips ending 0 drive the root, hips and legs - sixteen bones of
-        // ninety-four. Everything above the waist, the spine and torso and
-        // arms and a Mithra or Galka tail, lives in the clips ending 1, and
-        // movement has no 1 of its own. std1 is the standing upper body, and
-        // layering it under a stride is what gets the arms swinging.
-        // A clip's upper body is its own name with the trailing 0 turned into
-        // a 1: wlk0 walks the legs and wlk1 swings the arms above them. They
-        // are stored apart because the upper half depends on what the
-        // character is holding, so the two are chosen separately and played
-        // together.
-        //
-        // MOGHOUSE_UPPER pins one for every clip, or "none" to go back to the
-        // legs alone.
-        const char* upperPin = std::getenv("MOGHOUSE_UPPER");
-        upperFor = [&character, upperPin](const ffxi::Animation* lower) -> const ffxi::Animation* {
-            if (upperPin && std::strcmp(upperPin, "none") == 0)
+    // The clips ending 0 drive the root, hips and legs - sixteen bones of
+    // ninety-four. Everything above the waist, the spine and torso and
+    // arms and a Mithra or Galka tail, lives in the clips ending 1, and
+    // movement has no 1 of its own. std1 is the standing upper body, and
+    // layering it under a stride is what gets the arms swinging.
+    // A clip's upper body is its own name with the trailing 0 turned into
+    // a 1: wlk0 walks the legs and wlk1 swings the arms above them. They
+    // are stored apart because the upper half depends on what the
+    // character is holding, so the two are chosen separately and played
+    // together.
+    //
+    // MOGHOUSE_UPPER pins one for every clip, or "none" to go back to the
+    // legs alone.
+    //
+    // Bound here rather than inside the block below on purpose: it reads
+    // through `character` by reference, so it serves a character that arrives
+    // after sign-in just as well - and inside the block it served only one
+    // given at startup, which is how a late-built body walked with its arms
+    // held still.
+    const char* upperPin = std::getenv("MOGHOUSE_UPPER");
+    upperFor = [&character, upperPin](const ffxi::Animation* lower) -> const ffxi::Animation* {
+        if (!character || (upperPin && std::strcmp(upperPin, "none") == 0))
+        {
+            return nullptr;
+        }
+        std::string name = upperPin ? upperPin : (lower ? lower->name : std::string{});
+        if (!upperPin)
+        {
+            if (name.empty() || name.back() != '0')
             {
-                return nullptr;
+                return nullptr;   // already an upper body, or unpaired
             }
-            std::string name = upperPin ? upperPin : (lower ? lower->name : std::string{});
-            if (!upperPin)
-            {
-                if (name.empty() || name.back() != '0')
-                {
-                    return nullptr;   // already an upper body, or unpaired
-                }
-                name.back() = '1';
-            }
-            auto found = character->animations.find(name);
-            return found == character->animations.end() ? nullptr : &found->second;
-        };
+            name.back() = '1';
+        }
+        auto found = character->animations.find(name);
+        return found == character->animations.end() ? nullptr : &found->second;
+    };
+    if (character && !character->animations.empty())
+    {
+        bindClips();
 
         // How much of the skeleton each clip actually drives. A clip that only
         // carries tracks for the legs leaves the arms in the bind pose, which
@@ -3810,6 +4571,12 @@ constexpr float kGravity = 26.0f;
     int formFocus = -1;                  // the row being typed into, or -1
     int formPressed = -1;                // the button under a held mouse, by index
     std::string formSignature;           // what the last laid-out form was, to notice a new one
+    std::string formChoiceSignature;     // the choice rows' values, to notice the client moving one
+    int formOpenChoice = -1;             // the Choice row whose options are unfolded, or -1
+    std::vector<DialogButton> formChoiceBoxes;   // the folded box of each Choice row
+    std::vector<int> formChoiceBoxRow;
+    std::vector<DialogButton> formChoiceHits;    // the unfolded options, while one is open
+    std::vector<int> formChoiceHitOption;
 
     /// The two chips in the top left corner, as the last frame drew them.
     ///
@@ -3891,7 +4658,8 @@ constexpr float kGravity = 26.0f;
             }
 
             const DrawableCharacter* model = modelForEntity(entity);
-            const float height = model ? model->loaded.geometry.height() : 1.8f;
+            const float height = (model ? model->loaded.geometry.height() : 1.8f) * mh::bodyScale(entity.size) *
+                                 (mh::isChildRace(entity.look[0]) ? mh::kChildScale : 1.0f);
 
             const float world[4] = {entity.x, entity.y + height * 0.5f, entity.z, 1.0f};
             const float* m = pickProjection.m;
@@ -3984,6 +4752,49 @@ constexpr float kGravity = 26.0f;
                                     : options.testForm ? demoForm()
                                                        : mh::Form{};
 
+        // Whether a row takes typing. Fields do; a choice does not, and a
+        // keypress let into a choice's value would corrupt the option list
+        // that value carries.
+        const auto formTypable = [&](int row) {
+            if (row < 0 || static_cast<size_t>(row) >= activeForm.rows.size())
+            {
+                return false;
+            }
+            const mh::FormRowKind kind = activeForm.rows[static_cast<size_t>(row)].kind;
+            return kind == mh::FormRowKind::Field || kind == mh::FormRowKind::Secret;
+        };
+        const auto formChoiceAt = [&](int row) {
+            return row >= 0 && static_cast<size_t>(row) < activeForm.rows.size() &&
+                   activeForm.rows[static_cast<size_t>(row)].kind == mh::FormRowKind::Choice &&
+                   activeForm.rows[static_cast<size_t>(row)].enabled;
+        };
+        // Sets a Choice row and hands the form straight back, so the client
+        // can react to it at once. `option` is absolute; `step` is relative
+        // and wraps, for the arrow keys.
+        const auto pickChoice = [&](int row, int option) {
+            if (!formChoiceAt(row) || static_cast<size_t>(row) >= formValues.size() || !link)
+            {
+                return;
+            }
+            std::string& value = formValues[static_cast<size_t>(row)];
+            const std::vector<std::string> options = choiceOptions(value);
+            if (options.empty())
+            {
+                return;
+            }
+            const int count = static_cast<int>(options.size());
+            const int chosen = ((option % count) + count) % count;
+            value = choiceValue(chosen, options);
+            link->submitForm(row, formValues);
+        };
+        const auto stepChoice = [&](int row, int step) {
+            if (!formChoiceAt(row) || static_cast<size_t>(row) >= formValues.size())
+            {
+                return;
+            }
+            pickChoice(row, choiceSelected(formValues[static_cast<size_t>(row)]) + step);
+        };
+
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
@@ -3995,7 +4806,7 @@ constexpr float kGravity = 26.0f;
             // These come first in the chain on purpose: while a login screen is
             // up, typing a W belongs in the username, not to the character.
             else if (event.type == SDL_EVENT_TEXT_INPUT && formShown && formFocus >= 0 &&
-                     static_cast<size_t>(formFocus) < formValues.size())
+                     static_cast<size_t>(formFocus) < formValues.size() && formTypable(formFocus))
             {
                 formValues[static_cast<size_t>(formFocus)] += event.text.text;
             }
@@ -4004,7 +4815,7 @@ constexpr float kGravity = 26.0f;
                 const SDL_Keycode key = event.key.key;
                 const bool hasFocus = formFocus >= 0 && static_cast<size_t>(formFocus) < formValues.size();
 
-                if (key == SDLK_BACKSPACE && hasFocus)
+                if (key == SDLK_BACKSPACE && hasFocus && formTypable(formFocus))
                 {
                     std::string& value = formValues[static_cast<size_t>(formFocus)];
 
@@ -4047,10 +4858,21 @@ constexpr float kGravity = 26.0f;
                         value.resize(back);
                     }
                 }
+                else if (formChoiceAt(formFocus) && (key == SDLK_LEFT || key == SDLK_UP))
+                {
+                    stepChoice(formFocus, -1);
+                    formOpenChoice = -1;
+                }
+                else if (formChoiceAt(formFocus) && (key == SDLK_RIGHT || key == SDLK_DOWN))
+                {
+                    stepChoice(formFocus, 1);
+                    formOpenChoice = -1;
+                }
                 else if (key == SDLK_TAB)
                 {
                     // Round the form, so all of it can be worked from the
                     // keyboard. Shift goes back the way people expect.
+                    formOpenChoice = -1;
                     //
                     // Buttons are in the round, not just the fields. A screen
                     // with more than one - sign in, make an account, quit -
@@ -4072,6 +4894,14 @@ constexpr float kGravity = 26.0f;
                 }
                 else if (key == SDLK_RETURN || key == SDLK_KP_ENTER || key == SDLK_SPACE)
                 {
+                    // On a choice, return unfolds it or folds it back up
+                    // rather than pressing anything.
+                    if (formChoiceAt(formFocus))
+                    {
+                        formOpenChoice = formOpenChoice == formFocus ? -1 : formFocus;
+                        continue;
+                    }
+
                     // The button being looked at, if one is. Otherwise the
                     // first that can be pressed, which is what a sign-in form
                     // is for - typing a password and pressing return should
@@ -4112,6 +4942,42 @@ constexpr float kGravity = 26.0f;
                 formPressed = -1;
                 if (pointerNdc(event.button.x, event.button.y, ndcX, ndcY))
                 {
+                    // An unfolded choice takes the click first: on one of its
+                    // options, that option is picked; anywhere else it folds
+                    // up, and a click on its own box while open is a fold
+                    // rather than a second unfold.
+                    bool taken = false;
+                    const int wasOpen = formOpenChoice;
+                    if (formOpenChoice >= 0)
+                    {
+                        for (size_t i = 0; i < formChoiceHits.size(); ++i)
+                        {
+                            if (formChoiceHits[i].holds(ndcX, ndcY))
+                            {
+                                pickChoice(formOpenChoice, formChoiceHitOption[i]);
+                                taken = true;
+                                break;
+                            }
+                        }
+                        formOpenChoice = -1;
+                    }
+                    for (size_t i = 0; !taken && i < formChoiceBoxes.size(); ++i)
+                    {
+                        if (formChoiceBoxes[i].enabled && formChoiceBoxes[i].holds(ndcX, ndcY))
+                        {
+                            formFocus = formChoiceBoxRow[i];
+                            if (formChoiceBoxRow[i] != wasOpen)
+                            {
+                                formOpenChoice = formChoiceBoxRow[i];
+                            }
+                            taken = true;
+                        }
+                    }
+                    if (taken)
+                    {
+                        dragging = false;
+                        continue;
+                    }
                     // A click in a field puts the caret there.
                     for (size_t i = 0; i * 4 + 3 < formFieldRects.size(); ++i)
                     {
@@ -4618,7 +5484,13 @@ constexpr float kGravity = 26.0f;
         uint64_t clockSetAtNs = 0;
         const bool haveLiveClock = link && link->serverClock(liveClock, clockSetAtNs);
 
-        if (timeFixed)
+        // A pinned hour holds only until the server says what time it is -
+        // the sign-in backdrop is held at late afternoon on purpose, and that
+        // used to follow the player into the world, where the clock read
+        // 17:00 for as long as they played. MOGHOUSE_TIME in the environment
+        // is a deliberate pin and keeps holding.
+        static const bool pinnedByEnvironment = std::getenv("MOGHOUSE_TIME") != nullptr;
+        if (timeFixed && (pinnedByEnvironment || !haveLiveClock))
         {
             clockMinutes = fixedMinutes;
         }
@@ -4649,15 +5521,86 @@ constexpr float kGravity = 26.0f;
 
         // Which lighting the frame is under. Indoors the room's own set wins;
         // outdoors, and in any room that did not ship one, this is the zone's.
+        //
+        // Judged from where the character stands, not from the camera. The
+        // camera hangs back behind the character and in a narrow street ends
+        // up inside the building behind them, and then the whole of Southern
+        // San d'Oria was lit as the inside of one shop - every wall, the sky
+        // included, one shade of teal. Only the standalone viewer with no
+        // character flies the camera on its own, and there the eye is all
+        // there is.
+        const mh::Vec3 lightingAt = character ? characterAt : camera.eye();
         const ffxi::Lighting* active = &lighting;
-        for (const mh::InteriorLighting& room : interiors)
+        int activeRoom = -1;
+        for (size_t i = 0; i < interiors.size(); ++i)
         {
-            if (room.contains(camera.eye()))
+            // Only something the size of a room counts as one. Southern San
+            // d'Oria's sub-files include four that span the whole zone - a
+            // district each, not a building - and using the lighting of one
+            // of those as "indoors" lit every street, and the sky, one shade
+            // of teal.
+            const mh::InteriorLighting& candidate = interiors[i];
+            const float across = std::max(candidate.boundsMax.x - candidate.boundsMin.x,
+                                          candidate.boundsMax.z - candidate.boundsMin.z);
+            if (across > kRoomAtMost || candidate.lighting.empty())
             {
-                active = &room.lighting;
+                continue;
+            }
+            if (candidate.contains(lightingAt))
+            {
+                active = &interiors[i].lighting;
+                activeRoom = static_cast<int>(i);
                 break;
             }
         }
+        // Which rooms are drawn: the ones the player is in or at the door of.
+        // A district-sized "room" is the outdoors and is always drawn.
+        hiddenDraws.clear();
+        for (const mh::InteriorLighting& room : interiors)
+        {
+            if (room.drawCount == 0)
+            {
+                continue;
+            }
+            const float across = std::max(room.boundsMax.x - room.boundsMin.x, room.boundsMax.z - room.boundsMin.z);
+            if (across > kRoomAtMost || room.contains(lightingAt, kRoomReach))
+            {
+                continue;
+            }
+            hiddenDraws.emplace_back(room.firstDraw, room.firstDraw + room.drawCount);
+        }
+
+        if (activeRoom != lastActiveRoom)
+        {
+            // Fade from whatever was lighting the last frame, over a moment.
+            // From the set itself rather than the room index: leaving one
+            // shop straight into another is two changes in one stride.
+            lightingFrom = lightingLast ? lightingLast : active;
+            lightingFadeStartNs = SDL_GetTicksNS();
+            lastActiveRoom = activeRoom;
+            if (activeRoom >= 0)
+            {
+                const mh::InteriorLighting& room = interiors[static_cast<size_t>(activeRoom)];
+                std::printf("lighting: inside room %d, %.0f..%.0f %.0f..%.0f %.0f..%.0f\n", activeRoom,
+                            room.boundsMin.x, room.boundsMax.x, room.boundsMin.y, room.boundsMax.y, room.boundsMin.z, room.boundsMax.z);
+            }
+            else
+            {
+                std::printf("lighting: outdoors\n");
+            }
+        }
+        lightingLast = active;
+
+        // This frame's light: the set in force, or part way there from the
+        // last one while the fade runs.
+        const float lightingFade =
+            lightingFrom && lightingFrom != active
+                ? std::clamp(static_cast<float>(SDL_GetTicksNS() - lightingFadeStartNs) / 1e9f / kLightingFadeSeconds,
+                             0.0f, 1.0f)
+                : 1.0f;
+        const ffxi::LightingSet frameLighting =
+            lightingFade < 1.0f ? blendLighting(lightingFrom->at(clockMinutes), active->at(clockMinutes), lightingFade)
+                                : active->at(clockMinutes);
 
         const uint64_t nowTicks = SDL_GetTicksNS();
         const float delta = static_cast<float>(nowTicks - previousTicks) / 1e9f;
@@ -5175,47 +6118,73 @@ constexpr float kGravity = 26.0f;
             }
             bodiesInRange = std::min(bodiesInRange, mh::kMaxDrawnBodies);
 
-            // Eased towards where the server says they are.
+            // Glided towards where the server says they are.
             //
             // Done here, before anything reads a position, so the instance
             // transforms, the nameplates and the walk/run decision all agree
-            // about where an entity is. The rate is per second and framerate
-            // independent; a step is caught up in about a tenth of a second,
-            // which is short enough not to lag behind a runner and long enough
-            // to fill the gaps between updates.
+            // about where an entity is.
+            //
+            // The server speaks a few times a second and says where somebody
+            // is now, not where they are going. Easing to each position as it
+            // arrived caught it up in a tenth of a second and then stood
+            // still until the next - a walk read as step, pause, step. So
+            // each new position is walked to over as long as the previous one
+            // took to be replaced: the body arrives about when the next
+            // position does, and is always moving while its owner is. It runs
+            // one update behind the server, which nobody can see.
             //
             // A large jump is taken whole rather than glided through: that is
             // a teleport, a zone line or a spawn, and sliding a body across a
             // zone to meet it looks far stranger than the jump it replaces.
-            const float sinceLast = lastFrameSeconds > 0.0f
-                                        ? std::min(nowSeconds - lastFrameSeconds, 0.25f)
-                                        : 0.0f;
-            const float ease = 1.0f - std::exp(-12.0f * sinceLast);
             for (mh::RadarEntity& entity : radarEntities)
             {
+                const mh::Vec3 reported{entity.x, entity.y, entity.z};
                 auto found = drawnAt.find(entity.id);
                 if (found == drawnAt.end())
                 {
-                    drawnAt.emplace(entity.id, mh::Vec3{entity.x, entity.y, entity.z});
+                    DrawnEntity fresh;
+                    fresh.at = fresh.from = fresh.target = reported;
+                    fresh.targetTime = nowSeconds;
+                    drawnAt.emplace(entity.id, fresh);
                     continue;
                 }
 
-                mh::Vec3& at = found->second;
-                const float dx = entity.x - at.x;
-                const float dy = entity.y - at.y;
-                const float dz = entity.z - at.z;
-                if (dx * dx + dy * dy + dz * dz > 64.0f)
+                DrawnEntity& drawn = found->second;
+                const float tx = reported.x - drawn.target.x;
+                const float ty = reported.y - drawn.target.y;
+                const float tz = reported.z - drawn.target.z;
+                if (tx * tx + ty * ty + tz * tz > 1e-6f)
                 {
-                    at = mh::Vec3{entity.x, entity.y, entity.z};
-                    continue;
+                    // Somewhere new. Start from wherever the body is drawn
+                    // now, so a target replaced mid-glide does not snap.
+                    const float dx = reported.x - drawn.at.x;
+                    const float dy = reported.y - drawn.at.y;
+                    const float dz = reported.z - drawn.at.z;
+                    if (dx * dx + dy * dy + dz * dz > 64.0f)
+                    {
+                        drawn.at = drawn.from = reported;
+                    }
+                    else
+                    {
+                        drawn.from = drawn.at;
+                    }
+                    drawn.target = reported;
+                    // Bounded: a first update after a long quiet is not a
+                    // reason to take seconds over one step, and two updates
+                    // in one frame are not a reason to jump.
+                    drawn.interval = std::clamp(nowSeconds - drawn.targetTime, 0.1f, 1.0f);
+                    drawn.targetTime = nowSeconds;
                 }
 
-                at.x += dx * ease;
-                at.y += dy * ease;
-                at.z += dz * ease;
-                entity.x = at.x;
-                entity.y = at.y;
-                entity.z = at.z;
+                const float progress = drawn.interval > 0.0f
+                                           ? std::clamp((nowSeconds - drawn.targetTime) / drawn.interval, 0.0f, 1.0f)
+                                           : 1.0f;
+                drawn.at.x = drawn.from.x + (drawn.target.x - drawn.from.x) * progress;
+                drawn.at.y = drawn.from.y + (drawn.target.y - drawn.from.y) * progress;
+                drawn.at.z = drawn.from.z + (drawn.target.z - drawn.from.z) * progress;
+                entity.x = drawn.at.x;
+                entity.y = drawn.at.y;
+                entity.z = drawn.at.z;
             }
 
             // Anything that has gone is not worth remembering a position for.
@@ -5456,6 +6425,21 @@ constexpr float kGravity = 26.0f;
             const ffxi::Animation* walk = clipNamed("wlk0");
             const ffxi::Animation* run = clipNamed("run0");
 
+            // A body with clips, but none of those names, is a creature or an
+            // NPC built from its own file, and such a body drawn standing
+            // still while it moves is the "sliding" NPC. Say what it does
+            // have, once per model, so the names can be learned from the log.
+            if (!walk && !idle && !run && !state.clipsReported)
+            {
+                state.clipsReported = true;
+                std::printf("entity %u has no idl0/wlk0/run0; its clips:", entity.id);
+                for (const auto& [clipName, unused] : model->loaded.animations)
+                {
+                    std::printf(" %s", clipName.c_str());
+                }
+                std::printf("\n");
+            }
+
             // Walking in FFXI is a little under three units a second and
             // running a little over five, so the two part company around four.
             const bool moving = nowSeconds < state.movingUntil;
@@ -5533,7 +6517,7 @@ constexpr float kGravity = 26.0f;
             skyUniforms.up[1] = u.y * tanHalfFov;
             skyUniforms.up[2] = u.z * tanHalfFov;
 
-            const ffxi::LightingSet skySet = active->at(clockMinutes);
+            const ffxi::LightingSet& skySet = frameLighting;
             for (size_t i = 0; i < 8; ++i)
             {
                 skyUniforms.skyColours[i][0] = skySet.skyColours[i].r;
@@ -5549,6 +6533,29 @@ constexpr float kGravity = 26.0f;
             pass.SetPipeline(skyPipeline);
             pass.SetBindGroup(0, skyBindGroup);
             pass.Draw(3);
+        }
+
+        if (indexCount && skyIndexBuffer && effectPipeline)
+        {
+            // The cloud dome and the stars, around the camera, before the
+            // zone so anything solid draws over them. The uniforms they read
+            // are written further down for the zone; a queue write lands
+            // before the pass that follows it, so they see this frame's.
+            const bool night = clockMinutes < 6 * 60 || clockMinutes >= 18 * 60;
+            pass.SetVertexBuffer(0, skyVertexBuffer);
+            pass.SetVertexBuffer(1, skyInstanceBuffer);
+            pass.SetIndexBuffer(skyIndexBuffer, wgpu::IndexFormat::Uint32);
+            for (size_t i = 0; i < skyObjects.draws.size() && i < skyObjectBindGroups.size(); ++i)
+            {
+                const mh::InstancedDraw& draw = skyObjects.draws[i];
+                if (!skyObjectBindGroups[i] || (draw.nightOnly && !night))
+                {
+                    continue;
+                }
+                pass.SetPipeline(draw.nightOnly ? effectAdditivePipeline : effectPipeline);
+                pass.SetBindGroup(0, skyObjectBindGroups[i]);
+                pass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
+            }
         }
 
         if (indexCount)
@@ -5572,7 +6579,7 @@ constexpr float kGravity = 26.0f;
             uniforms.lightDirection[1] = light.y;
             uniforms.lightDirection[2] = light.z;
 
-            const ffxi::LightingSet set = active->at(clockMinutes);
+            const ffxi::LightingSet& set = frameLighting;
             uniforms.ambient[0] = set.landscapeAmbient.r * 0.5f;
             uniforms.ambient[1] = set.landscapeAmbient.g * 0.5f;
             uniforms.ambient[2] = set.landscapeAmbient.b * 0.5f;
@@ -5584,6 +6591,9 @@ constexpr float kGravity = 26.0f;
             uniforms.fogColour[2] = set.landscapeFog.b;
             uniforms.fogRange[0] = set.landscapeMinFog;
             uniforms.fogRange[1] = set.landscapeMaxFog > 0.0f ? set.landscapeMaxFog : 10000.0f;
+            // Spare in the zone pass; the water pass reads it as "this is the
+            // sea". The two share this buffer.
+            uniforms.fogRange[2] = waterIsSea ? 1.0f : 0.0f;
             const mh::Vec3 eyePoint = camera.eye();
             uniforms.eye[0] = eyePoint.x;
             uniforms.eye[1] = eyePoint.y;
@@ -5613,9 +6623,33 @@ constexpr float kGravity = 26.0f;
             // list in model-name order does not give that for free.
             for (int layer = 0; layer < 2; ++layer)
             {
+                size_t nextHidden = 0;
                 for (size_t i = 0; i < zone->draws.size() && i < batchBindGroups.size(); ++i)
                 {
+                    // Ranges are in draw order, as the rooms were appended, so
+                    // one cursor walks them alongside the draws.
+                    while (nextHidden < hiddenDraws.size() && i >= hiddenDraws[nextHidden].second)
+                    {
+                        ++nextHidden;
+                    }
+                    if (nextHidden < hiddenDraws.size() && i >= hiddenDraws[nextHidden].first)
+                    {
+                        continue;   // a room the player is not in
+                    }
+
                     const mh::InstancedDraw& draw = zone->draws[i];
+                    if (draw.texture.empty() && !draw.water)
+                    {
+                        // A mesh with no texture named is not a thing to be
+                        // seen: the arch over a stair in Southern San d'Oria
+                        // drawn as a cream shell is one of the game's own
+                        // occlusion volumes, which its client never draws.
+                        continue;
+                    }
+                    if (draw.effect)
+                    {
+                        continue;   // drawn by the effect pass below
+                    }
                     const bool translucent = draw.water || draw.blend;
                     if (translucent != (layer == 1))
                     {
@@ -5628,6 +6662,28 @@ constexpr float kGravity = 26.0f;
                                                           : draw.cutout;
                     pass.SetPipeline(translucent ? translucentPipeline : (cutout ? cutoutPipeline : pipeline));
                     pass.SetBindGroup(0, batchBindGroups[i]);
+                    pass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
+                }
+            }
+
+            // The effects: the fountain's jets and flames, the waterfalls -
+            // generator-placed meshes whose texture the game scrolls. After
+            // the water, blended, no depth writes. The night-only ones - the
+            // flames - are left out by day; Vana'diel's night is 18:00 to
+            // 6:00 here, a guess at the game's switch until it is read from
+            // the file.
+            if (effectPipeline)
+            {
+                const bool night = clockMinutes < 6 * 60 || clockMinutes >= 18 * 60;
+                for (size_t i = 0; i < zone->draws.size() && i < effectBindGroups.size(); ++i)
+                {
+                    const mh::InstancedDraw& draw = zone->draws[i];
+                    if (!draw.effect || !effectBindGroups[i] || (draw.nightOnly && !night))
+                    {
+                        continue;
+                    }
+                    pass.SetPipeline(effectPipeline);
+                    pass.SetBindGroup(0, effectBindGroups[i]);
                     pass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
                 }
             }
@@ -5741,10 +6797,31 @@ constexpr float kGravity = 26.0f;
                         {
                             continue;   // has its own model, drawn below
                         }
+                        if (index < radarEntities.size() && !radarEntities[index].hasLook() &&
+                            !radarEntities[index].hasModel())
+                        {
+                            // Nothing was ever said about what this looks
+                            // like. That is an event trigger or a marker, not
+                            // a body somebody forgot to describe, and a plaza
+                            // has a dozen of them standing on its steps.
+                            continue;
+                        }
 
+                        // As a pale blank shape, the way the blank figure at
+                        // character select is drawn - not as a copy of the
+                        // player. A row of guards whose gear the loader cannot
+                        // resolve used to stand there as a dozen of you.
                         pass.SetVertexBuffer(0, entityVertexBuffer);
+                        if (ghostBindGroup && fadePipeline)
+                        {
+                            pass.SetBlendConstant(&kFadedBody);
+                            pass.SetPipeline(fadePipeline);
+                            pass.SetBindGroup(0, ghostBindGroup);
+                        }
                         pass.DrawIndexed(batch.indexCount, 1, batch.indexOffset, 0,
                                          static_cast<uint32_t>(body + 1));
+                        pass.SetPipeline(batch.cutout ? cutoutPipeline : pipeline);
+                        pass.SetBindGroup(0, characterBindGroups[i]);
                     }
                 }
                 }   // the player's own body, and the shared one everyone borrows
@@ -6201,7 +7278,8 @@ constexpr float kGravity = 26.0f;
                     }
                 }
 
-                // HP, MP and TP, bottom left, above the chat log.
+                // HP, MP and TP as three bars in the bottom right corner,
+                // with the numbers written on them.
                 //
                 // The one thing the window never said was whether the player
                 // was alive. Being dead read as being unable to move, which is
@@ -6209,40 +7287,103 @@ constexpr float kGravity = 26.0f;
                 // how it was reported. The numbers come straight off
                 // GP_SERV_COMMAND_GROUP_ATTR; the percentages are the server's
                 // own, so a full bar means what the server thinks it means.
+                //
+                // Bottom right rather than bottom left, where they began as
+                // three lines of text: the chat log lives bottom left and grew
+                // over them, so the TP line was the first thing a busy zone
+                // hid. The radar has the top right, the corner links the top
+                // left, and this corner was empty.
                 if (link)
                 {
                     const mh::ViewerLink::Vitals vitals = link->vitals();
                     if (vitals.known)
                     {
-                        constexpr float kVitalScale = 0.75f;
-                        const float vitalLeft = -0.97f;
-                        float vitalY = -0.62f;
+                        constexpr float kVitalScale = 0.62f;
+                        const float textHigh = line * kVitalScale;
+                        const float barHigh = textHigh * 1.45f;
+                        const float barGap = textHigh * 0.22f;
+                        const float barWide = 0.34f;
+                        const float barLeft = 0.97f - barWide;
+                        const float inset = textHigh * 0.35f / windowAspect;
 
-                        // Red when it is low enough to matter, and plainly
-                        // different when it is zero - a corpse should not look
-                        // like a character on one hit point.
-                        const float kDead[3] = {1.00f, 0.35f, 0.35f};
-                        const float kHurt[3] = {1.00f, 0.78f, 0.42f};
+                        // Green while it is fine, amber when it is low enough
+                        // to matter, red when it is empty - a corpse should not
+                        // look like a character on one hit point.
+                        const float kHpFull[3] = {0.36f, 0.80f, 0.42f};
+                        const float kHpLow[3] = {0.95f, 0.75f, 0.30f};
+                        const float kHpGone[3] = {0.90f, 0.30f, 0.30f};
+                        const float kMpFill[3] = {0.36f, 0.56f, 0.95f};
+                        // TP turns gold at a thousand, which is the number
+                        // that lets a weapon skill go.
+                        const float kTpFill[3] = {0.85f, 0.60f, 0.28f};
+                        const float kTpReady[3] = {1.00f, 0.86f, 0.36f};
+                        const float kTrack[3] = {0.05f, 0.05f, 0.07f};
+
                         const bool dead = vitals.hp == 0;
-                        const float* hpTint = dead ? kDead : (vitals.hpPercent <= 25 ? kHurt : kHudBright);
+                        const float* hpFill = dead ? kHpGone : (vitals.hpPercent <= 25 ? kHpLow : kHpFull);
+
+                        int bar = 0;
+                        const auto meter = [&](const std::string& text, float bottom, float fraction,
+                                               const float* fill) {
+                            if (bar + 2 > mh::kHudBars)
+                            {
+                                return;
+                            }
+                            // The track, then the fill over it. Two rectangles
+                            // rather than one with a threshold, so the fill's
+                            // colour and the track's stay independent.
+                            hud.bars[bar][0] = barLeft;
+                            hud.bars[bar][1] = bottom;
+                            hud.bars[bar][2] = barWide;
+                            hud.bars[bar][3] = barHigh;
+                            hud.barColours[bar][0] = kTrack[0];
+                            hud.barColours[bar][1] = kTrack[1];
+                            hud.barColours[bar][2] = kTrack[2];
+                            hud.barColours[bar][3] = 0.62f;
+                            ++bar;
+
+                            const float portion = std::clamp(fraction, 0.0f, 1.0f);
+                            hud.bars[bar][0] = barLeft;
+                            hud.bars[bar][1] = bottom;
+                            hud.bars[bar][2] = barWide * portion;
+                            hud.bars[bar][3] = barHigh;
+                            hud.barColours[bar][0] = fill[0];
+                            hud.barColours[bar][1] = fill[1];
+                            hud.barColours[bar][2] = fill[2];
+                            hud.barColours[bar][3] = portion > 0.0f ? 0.80f : 0.0f;
+                            ++bar;
+
+                            // The words on the bar, with no box of their own:
+                            // the bar is the box.
+                            place(text, barLeft + inset, bottom + (barHigh - textHigh) * 0.5f,
+                                  kVitalScale, kHudBright, 0.0f, false);
+                        };
 
                         char row[48] = {};
-                        std::snprintf(row, sizeof(row), "HP %u  (%u%%)", vitals.hp, vitals.hpPercent);
-                        place(row, vitalLeft, vitalY, kVitalScale, hpTint, 0.55f, false);
-                        vitalY -= line * kVitalScale + gap * 0.4f;
-
-                        std::snprintf(row, sizeof(row), "MP %u  (%u%%)", vitals.mp, vitals.mpPercent);
-                        place(row, vitalLeft, vitalY, kVitalScale, kHudDim, 0.55f, false);
-                        vitalY -= line * kVitalScale + gap * 0.4f;
+                        float bottom = -0.95f;
 
                         std::snprintf(row, sizeof(row), "TP %u", vitals.tp);
-                        place(row, vitalLeft, vitalY, kVitalScale, kHudDim, 0.55f, false);
+                        meter(row, bottom, static_cast<float>(vitals.tp) / 3000.0f,
+                              vitals.tp >= 1000 ? kTpReady : kTpFill);
+                        bottom += barHigh + barGap;
+
+                        std::snprintf(row, sizeof(row), "MP %u  (%u%%)", vitals.mp, vitals.mpPercent);
+                        meter(row, bottom, static_cast<float>(vitals.mpPercent) / 100.0f, kMpFill);
+                        bottom += barHigh + barGap;
 
                         if (dead)
                         {
-                            vitalY -= line * kVitalScale + gap * 0.4f;
-                            place("DEAD", vitalLeft, vitalY, kVitalScale, kDead, 0.55f, false);
+                            std::snprintf(row, sizeof(row), "HP 0  DEAD");
                         }
+                        else
+                        {
+                            std::snprintf(row, sizeof(row), "HP %u  (%u%%)", vitals.hp, vitals.hpPercent);
+                        }
+                        // A dead character's bar is drawn full and red rather
+                        // than empty: an empty track reads as "no data", and
+                        // this is the one number that most needs to be seen.
+                        meter(row, bottom, dead ? 1.0f : static_cast<float>(vitals.hpPercent) / 100.0f,
+                              hpFill);
                     }
                 }
 
@@ -6352,6 +7493,38 @@ constexpr float kGravity = 26.0f;
 
                     const float line = hud.counts[1] * 0.4f;
 
+                    // One box, the height of the panel and the width of a full
+                    // line, rather than a chip behind each line sized to its
+                    // text. The chips read as a staircase of unrelated labels;
+                    // a box reads as the chat window it is, and is what the
+                    // retail client draws. The bars array draws it, after the
+                    // vitals have taken their slots.
+                    {
+                        const float rowStep = line * 1.15f;
+                        const float rows = static_cast<float>(mh::kChatLines) + (typing ? 1.0f : 0.0f);
+                        const float padY = line * 0.35f;
+                        const float padX = line * 0.5f / windowAspect;
+                        const float boxLeft = -0.98f - padX;
+                        const float boxBottom = -0.97f - padY;
+                        const float boxWide = measure(std::string(mh::kHudChars, 'M'), 0.4f) * 0.62f + padX * 2.0f;
+                        const float boxHigh = rowStep * rows + padY * 2.0f;
+                        for (int bar = 0; bar < mh::kHudBars; ++bar)
+                        {
+                            if (hud.bars[bar][2] <= 0.0f)
+                            {
+                                hud.bars[bar][0] = boxLeft;
+                                hud.bars[bar][1] = boxBottom;
+                                hud.bars[bar][2] = boxWide;
+                                hud.bars[bar][3] = boxHigh;
+                                hud.barColours[bar][0] = 0.03f;
+                                hud.barColours[bar][1] = 0.035f;
+                                hud.barColours[bar][2] = 0.05f;
+                                hud.barColours[bar][3] = 0.6f;
+                                break;
+                            }
+                        }
+                    }
+
                     // The panel stacks upwards from the bottom, so the line
                     // being typed takes the bottom row and the history moves up
                     // to make room rather than being written over.
@@ -6359,12 +7532,12 @@ constexpr float kGravity = 26.0f;
                     for (size_t i = 0; i < lines.size(); ++i)
                     {
                         const float bottom = base + line * 1.15f * static_cast<float>(lines.size() - 1 - i);
-                        place(lines[i], -0.98f, bottom, 0.4f, kHudBright, 0.5f, false);
+                        place(lines[i], -0.98f, bottom, 0.4f, kHudBright, 0.0f, false);
                     }
 
                     if (typing)
                     {
-                        place("> " + typed + "_", -0.98f, -0.97f, 0.4f, kHudBright, 0.65f, false);
+                        place("> " + typed + "_", -0.98f, -0.97f, 0.4f, kHudBright, 0.0f, false);
                     }
                 }
 
@@ -6543,7 +7716,10 @@ constexpr float kGravity = 26.0f;
                             : (plateModel ? plateModel->loaded.geometry.height()
                                           : (character ? character->geometry.height() : 1.8f));
 
-                    const float headY = entity.y + bodyHeight + kPlateClearance;
+                    const float headY = entity.y +
+                                        bodyHeight * mh::bodyScale(entity.size) *
+                                            (mh::isChildRace(entity.look[0]) ? mh::kChildScale : 1.0f) +
+                                        kPlateClearance;
 
                     // Behind a wall, so not shown.
                     //
@@ -6848,16 +8024,24 @@ constexpr float kGravity = 26.0f;
             // the form that is actually up. A different one starts empty rather
             // than inheriting a password somebody typed into the last screen.
             std::string signature = activeForm.title;
+            std::string choices;
             for (const mh::FormRow& row : activeForm.rows)
             {
                 signature += '\x1f';
                 signature += std::to_string(static_cast<int>(row.kind));
                 signature += row.text;
+                if (row.kind == mh::FormRowKind::Choice)
+                {
+                    choices += row.value;
+                    choices += '\x1e';
+                }
             }
 
             if (signature != formSignature)
             {
                 formSignature = signature;
+                formChoiceSignature = choices;
+                formOpenChoice = -1;
                 formValues.assign(activeForm.rows.size(), std::string{});
                 for (size_t i = 0; i < activeForm.rows.size(); ++i)
                 {
@@ -6879,12 +8063,29 @@ constexpr float kGravity = 26.0f;
                 }
                 SDL_StartTextInput(window);
             }
+            else if (choices != formChoiceSignature)
+            {
+                // The same screen, but the client moved a choice - a race that
+                // changed reset the face, say. Only those rows are refreshed,
+                // so what was typed elsewhere stays and the focus stays put.
+                formChoiceSignature = choices;
+                for (size_t i = 0; i < activeForm.rows.size() && i < formValues.size(); ++i)
+                {
+                    if (activeForm.rows[i].kind == mh::FormRowKind::Choice)
+                    {
+                        formValues[i] = activeForm.rows[i].value;
+                    }
+                }
+            }
 
             DialogUniforms form{};
             const float windowAspect = static_cast<float>(width) / static_cast<float>(height);
             form.counts[1] = static_cast<float>(textFont.cell) * 2.0f * uiScale / static_cast<float>(height);
             form.counts[2] = windowAspect;
-            form.counts[3] = 0.62f;   // dimmer than the death box: there may be no world behind it
+            // Dimmer than the death box: there may be no world behind it. Unless
+            // the form stands aside for something in the world, which then has
+            // to be seen.
+            form.counts[3] = activeForm.aside ? 0.10f : 0.62f;
             form.atlas[0] = static_cast<float>(textFont.columns);
             form.atlas[1] = static_cast<float>(textFont.cell);
             form.atlas[2] = static_cast<float>(textFont.width);
@@ -6983,6 +8184,28 @@ constexpr float kGravity = 26.0f;
                     continue;
                 }
 
+                if (row.kind == mh::FormRowKind::Choice)
+                {
+                    // One box reading "CAPTION: OPTION v", unfolding into the
+                    // options when pressed. No caption row of its own: a
+                    // screen with seven of these would be twice the height.
+                    const std::vector<std::string> options = choiceOptions(formValues[i]);
+                    const int chosen = choiceSelected(formValues[i]);
+                    std::string shown = row.text;
+                    if (!shown.empty())
+                    {
+                        shown += ": ";
+                    }
+                    if (chosen >= 0 && static_cast<size_t>(chosen) < options.size())
+                    {
+                        shown += options[static_cast<size_t>(chosen)];
+                    }
+                    shown += "  v";
+                    addText(formRow, shown, kValueScale,
+                            row.enabled ? kDialogLabel : kDialogLabelOff, row.kind, true);
+                    continue;
+                }
+
                 // A field: its caption, then what has been typed into it.
                 if (!row.text.empty())
                 {
@@ -7070,7 +8293,12 @@ constexpr float kGravity = 26.0f;
 
             const float panelWide = std::max(fieldWide, buttonsWide) + padX * 2.0f;
             const float panelHigh = contentHigh + padY * 2.0f;
-            form.panel[0] = -panelWide * 0.5f;
+
+            // Centred, or stood against the left edge with the world showing
+            // beside it. Everything below is laid out about x = 0 and shifted
+            // by this, so the one decision is made once.
+            const float shiftX = activeForm.aside ? (-0.96f + panelWide * 0.5f) : 0.0f;
+            form.panel[0] = -panelWide * 0.5f + shiftX;
             form.panel[1] = -panelHigh * 0.5f;
             form.panel[2] = panelWide;
             form.panel[3] = panelHigh;
@@ -7092,6 +8320,16 @@ constexpr float kGravity = 26.0f;
             formFieldRects.assign(activeForm.rows.size() * 4, 0.0f);
             formButtons.clear();
             formButtonRow.clear();
+            formChoiceBoxes.clear();
+            formChoiceBoxRow.clear();
+            formChoiceHits.clear();
+            formChoiceHitOption.clear();
+
+            // Where the unfolded choice's box ended up, for hanging its
+            // options off it once everything else is placed.
+            bool openFound = false;
+            float openLeft = 0.0f;
+            float openBottom = 0.0f;
 
             float cursorY = form.panel[1] + panelHigh - padY;
             for (const Placed& item : placed)
@@ -7105,14 +8343,19 @@ constexpr float kGravity = 26.0f;
                 {
                     cursorY -= fieldHigh;
 
-                    const float left = -fieldWide * 0.5f;
+                    const float left = -fieldWide * 0.5f + shiftX;
                     form.rects[item.drawRow][0] = left;
                     form.rects[item.drawRow][1] = cursorY;
                     form.rects[item.drawRow][2] = fieldWide;
                     form.rects[item.drawRow][3] = fieldHigh;
 
                     const bool focused = item.formRow == formFocus;
-                    const float* fill = focused ? kDialogButtonHot : kDialogButtonOff;
+                    const bool isChoice = item.kind == mh::FormRowKind::Choice;
+                    const bool unfolded = isChoice && item.formRow == formOpenChoice;
+                    // A choice is drawn as a button - something to press -
+                    // rather than as a box to type into.
+                    const float* fill = isChoice ? ((focused || unfolded) ? kDialogButtonHot : kDialogButton)
+                                                 : (focused ? kDialogButtonHot : kDialogButtonOff);
                     form.fills[item.drawRow][0] = fill[0];
                     form.fills[item.drawRow][1] = fill[1];
                     form.fills[item.drawRow][2] = fill[2];
@@ -7134,8 +8377,27 @@ constexpr float kGravity = 26.0f;
                         rect[3] = fieldHigh;
                     }
 
+                    if (isChoice)
+                    {
+                        DialogButton hit{};
+                        hit.left = left;
+                        hit.bottom = cursorY;
+                        hit.width = fieldWide;
+                        hit.height = fieldHigh;
+                        hit.enabled = item.formRow >= 0 &&
+                                      activeForm.rows[static_cast<size_t>(item.formRow)].enabled;
+                        formChoiceBoxes.push_back(hit);
+                        formChoiceBoxRow.push_back(item.formRow);
+                        if (unfolded)
+                        {
+                            openFound = true;
+                            openLeft = left;
+                            openBottom = cursorY;
+                        }
+                    }
+
                     // The caret, just past the last glyph of the focused field.
-                    if (focused)
+                    if (focused && !isChoice)
                     {
                         const float textWide = form.boxes[item.drawRow][2] * high / windowAspect;
                         form.caret[0] = form.boxes[item.drawRow][0] + textWide;
@@ -7151,7 +8413,7 @@ constexpr float kGravity = 26.0f;
                 const float high = line * item.scale;
                 cursorY -= high;
                 const float wide = form.boxes[item.drawRow][2] * high / windowAspect;
-                form.boxes[item.drawRow][0] = -wide * 0.5f;
+                form.boxes[item.drawRow][0] = -wide * 0.5f + shiftX;
                 form.boxes[item.drawRow][1] = cursorY;
                 cursorY -= rowGap;
             }
@@ -7161,7 +8423,7 @@ constexpr float kGravity = 26.0f;
                 cursorY -= groupGap;
                 cursorY -= buttonHigh;
 
-                float buttonLeft = -buttonsWide * 0.5f;
+                float buttonLeft = -buttonsWide * 0.5f + shiftX;
                 for (const Placed& item : placed)
                 {
                     if (item.kind != mh::FormRowKind::Button)
@@ -7212,6 +8474,60 @@ constexpr float kGravity = 26.0f;
                 }
             }
 
+            // The unfolded choice's options, a column of buttons hanging from
+            // its box. Laid out last so they sit over whatever is beneath
+            // them, and downward unless there is no room, in which case they
+            // climb.
+            if (openFound && formOpenChoice >= 0 && static_cast<size_t>(formOpenChoice) < formValues.size())
+            {
+                const std::string& value = formValues[static_cast<size_t>(formOpenChoice)];
+                const std::vector<std::string> options = choiceOptions(value);
+                const int chosen = choiceSelected(value);
+                const float optionHigh = line * kValueScale * 1.7f;
+                const float needed = optionHigh * static_cast<float>(options.size());
+                const bool upward = openBottom - needed < -0.98f;
+                float optionBottom = upward ? openBottom + fieldHigh : openBottom - optionHigh;
+
+                for (size_t i = 0; i < options.size() && drawn < mh::kDialogRows; ++i)
+                {
+                    const bool over = pointerX >= openLeft && pointerX < openLeft + fieldWide &&
+                                      pointerY >= optionBottom && pointerY < optionBottom + optionHigh;
+                    const bool current = static_cast<int>(i) == chosen;
+
+                    layOutRow(form, drawn, options[i]);
+                    form.colours[drawn][0] = kDialogLabel[0];
+                    form.colours[drawn][1] = kDialogLabel[1];
+                    form.colours[drawn][2] = kDialogLabel[2];
+                    form.colours[drawn][3] = kValueScale;
+
+                    form.rects[drawn][0] = openLeft;
+                    form.rects[drawn][1] = optionBottom;
+                    form.rects[drawn][2] = fieldWide;
+                    form.rects[drawn][3] = optionHigh;
+                    const float* fill = over ? kDialogButtonHot : (current ? kDialogButton : kDialogButtonOff);
+                    form.fills[drawn][0] = fill[0];
+                    form.fills[drawn][1] = fill[1];
+                    form.fills[drawn][2] = fill[2];
+                    form.fills[drawn][3] = 1.0f;
+
+                    const float high = line * kValueScale;
+                    form.boxes[drawn][0] = openLeft + padX * 0.35f;
+                    form.boxes[drawn][1] = optionBottom + (optionHigh - high) * 0.5f;
+
+                    DialogButton hit{};
+                    hit.left = openLeft;
+                    hit.bottom = optionBottom;
+                    hit.width = fieldWide;
+                    hit.height = optionHigh;
+                    hit.enabled = true;
+                    formChoiceHits.push_back(hit);
+                    formChoiceHitOption.push_back(static_cast<int>(i));
+
+                    ++drawn;
+                    optionBottom += upward ? optionHigh : -optionHigh;
+                }
+            }
+
             formShown = true;
             form.counts[0] = static_cast<float>(drawn);
             queue.WriteBuffer(dialogUniformBuffer, 0, &form, sizeof(form));
@@ -7224,8 +8540,12 @@ constexpr float kGravity = 26.0f;
             // The form came down. Stop taking text, or the next key press goes
             // into a field nobody can see.
             formSignature.clear();
+            formChoiceSignature.clear();
             formValues.clear();
             formButtons.clear();
+            formChoiceBoxes.clear();
+            formChoiceHits.clear();
+            formOpenChoice = -1;
             formFocus = -1;
             SDL_StopTextInput(window);
         }
@@ -7302,7 +8622,22 @@ constexpr float kGravity = 26.0f;
                 // texture cache, so a character built first loses its textures
                 // to the zone that follows and renders as white nothing. This
                 // is the order the startup path uses for the same reason.
-                if (std::string wanted; link && link->takeLook(wanted) && !wanted.empty())
+                std::string wanted;
+                if (link && link->takeLook(wanted) && !wanted.empty())
+                {
+                    currentLook = wanted;
+                    characterScale = scaleOfLook(currentLook);
+                }
+                else if (character && !currentLook.empty())
+                {
+                    // Nobody new, but the body has to be built again all the
+                    // same: readZone emptied the texture cache and the
+                    // character's textures went with it. Left as it was, it
+                    // uploads with none and stands in the new zone white.
+                    wanted = currentLook;
+                }
+
+                if (!wanted.empty())
                 {
                     if (auto rebuilt = buildFromLook(wanted.c_str()))
                     {
@@ -7317,6 +8652,15 @@ constexpr float kGravity = 26.0f;
                         // follows anyone, and the world is viewed from
                         // wherever the empty screen happened to leave it.
                         driving = true;
+
+                        // And the clips it animates with, which were bound
+                        // before the loop from a character that did not exist
+                        // then. Nothing is playing yet: the next frame picks
+                        // idle, walk or run from what the body is doing, as it
+                        // does for a character present from the start.
+                        bindClips();
+                        playing = nullptr;
+                        jumpUntil = 0.0f;
                     }
                 }
 

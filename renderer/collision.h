@@ -67,7 +67,13 @@ public:
                                   float stepUp = kDefaultStepUp) const;
 
     /// How far above your feet a surface can be and still be a step.
-    static constexpr float kDefaultStepUp = 0.95f;
+    ///
+    /// 0.95 caught on the fountain plaza steps in Bastok Markets: the server's
+    /// own mesh there has a riser from -9.48 to -8.52, a rise of 0.96, and a
+    /// character stopped dead on it until a sideways wiggle changed the exact
+    /// height by a few hundredths. 1.0 clears it; the railing that set the
+    /// old value is taller than that.
+    static constexpr float kDefaultStepUp = 1.0f;
 
     /// The same, for someone standing in water. FFXI has no swimming, so
     /// wading in and then being unable to get out is a trap rather than a

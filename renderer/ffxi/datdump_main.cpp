@@ -4,6 +4,7 @@
 
 #include "dat.h"
 #include "lighting.h"
+#include "generator.h"
 #include "mmb.h"
 #include "mzb.h"
 #include "os2.h"
@@ -76,6 +77,7 @@ int main(int argc, char** argv)
         // Every model the file holds, so the zone block below can say which
         // of them no placement ever names.
         std::set<std::string> modelNames;
+        std::map<std::string, std::string> modelByChunk;
         const char* key2Path = std::getenv("MOGHOUSE_FFXI_KEYTABLE2");
         if (key2Path)
         {
@@ -105,6 +107,7 @@ int main(int argc, char** argv)
                     }
                     ++models;
                     modelNames.insert(m.name);
+                    modelByChunk[std::string(chunk.id, 4)] = m.name;
                     // Per-model geometry, for finding a model that parses but comes out empty.
                     if (std::getenv("MOGHOUSE_MODEL_STATS"))
                     {
@@ -358,6 +361,35 @@ int main(int argc, char** argv)
                     std::printf("    %02d:00  ambient %.2f %.2f %.2f  maxfog %7.1f\n", hour, set.landscapeAmbient.r,
                                 set.landscapeAmbient.g, set.landscapeAmbient.b, set.landscapeMaxFog);
                 }
+            }
+        }
+
+        // MOGHOUSE_LIST_GENERATORS: every effect generator that places a
+        // model, and whether the model's chunk was found.
+        if (std::getenv("MOGHOUSE_LIST_GENERATORS"))
+        {
+            const std::vector<ffxi::EffectPlacement> generated = ffxi::parseGenerators(dat);
+            std::printf("generators placing a model: %zu\n", generated.size());
+            for (const ffxi::EffectPlacement& g : generated)
+            {
+                std::string resolved = "-";
+                for (const auto& [id, name] : modelByChunk)
+                {
+                    std::string trimmed = id;
+                    while (!trimmed.empty() && (trimmed.back() == ' ' || trimmed.back() == 0))
+                    {
+                        trimmed.pop_back();
+                    }
+                    if (trimmed == g.modelId)
+                    {
+                        resolved = name;
+                        break;
+                    }
+                }
+                std::printf("  %-4s -> %-4s (%s) at %8.2f %8.2f %8.2f rot %.2f %.2f %.2f scale %.2f %.2f %.2f tex %s\n",
+                            g.generator.c_str(), g.modelId.c_str(), resolved.c_str(), g.translate[0], g.translate[1],
+                            g.translate[2], g.rotate[0], g.rotate[1], g.rotate[2], g.scale[0], g.scale[1], g.scale[2],
+                            g.textureAnimation.c_str());
             }
         }
 

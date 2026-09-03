@@ -326,7 +326,7 @@ public sealed class LiveRadar : IDisposable
     /// zone's collision and framing them takes the camera, and both of those
     /// live in the renderer - so this says who, and the renderer says where.
     /// </remarks>
-    public void ShowLineup(IReadOnlyList<(uint Id, string Name, ushort Race, ushort Face, int Style)> cast)
+    public void ShowLineup(IReadOnlyList<(uint Id, string Name, ushort Race, ushort Face, int Style, int Size)> cast)
     {
         if (_closed)
         {
@@ -352,6 +352,8 @@ public sealed class LiveRadar : IDisposable
                 // 1 draws a pale blank shape, 2 draws them faded until pointed
                 // at. See MhRadarEntity.silhouette.
                 Silhouette = cast[i].Style,
+                // The server's 0 to 2, plus one - see NativeRadarEntity.Size.
+                Size = cast[i].Size + 1,
             };
             entity.SetName(cast[i].Name);
 
@@ -450,6 +452,18 @@ public sealed class LiveRadar : IDisposable
         if (!_closed)
         {
             _viewer.HideForm();
+        }
+    }
+
+    /// <summary>
+    /// Whether screens from now on stand aside, against the left edge with the
+    /// world left bright, rather than in the middle over a dimmed world.
+    /// </summary>
+    public void SetFormAside(bool aside)
+    {
+        if (!_closed)
+        {
+            _viewer.SetFormAside(aside);
         }
     }
 
@@ -696,6 +710,7 @@ public sealed class LiveRadar : IDisposable
             entity.GmLevel = visible[i].GmLevel;
             entity.HealthPercent = visible[i].HealthPercent ?? -1;
             entity.Triggerable = visible[i].Triggerable ? 1 : 0;
+            entity.Size = visible[i].ModelSize is { } bodySize ? bodySize + 1 : 0;
             entities[i] = entity;
         }
         _viewer.SetEntities(entities);

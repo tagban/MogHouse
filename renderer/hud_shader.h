@@ -19,6 +19,10 @@ inline constexpr int kHudStrings = 24;
 /// Characters per label. Long enough for a zone name and a timestamp.
 inline constexpr int kHudChars = 48;
 
+/// Filled rectangles drawn under the labels: the HP, MP and TP bars, and
+/// whatever else wants a meter rather than a number.
+inline constexpr int kHudBars = 8;
+
 inline constexpr const char* kHudShader = R"(
 struct HudUniforms {
     // Labels in use, one atlas cell in NDC y, the aspect, unused.
@@ -31,6 +35,10 @@ struct HudUniforms {
     colours : array<vec4<f32>, 24>,
     // Per glyph: atlas cell index, x offset in cells, advance in cells.
     glyphs : array<vec4<f32>, 1152>,
+    // Per bar: left, bottom, width, height in NDC. Width zero is no bar.
+    bars : array<vec4<f32>, 8>,
+    // Per bar: colour, then how opaque it is.
+    barColours : array<vec4<f32>, 8>,
 };
 
 const kChars = 48;
@@ -70,6 +78,24 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
 
     var colour = vec3<f32>(0.0);
     var alpha = 0.0;
+
+    // Bars first, so a label placed over one draws on top of it: the text
+    // reads off the bar rather than the bar painting over the text.
+    for (var bar = 0; bar < 8; bar = bar + 1) {
+        let rect = hud.bars[bar];
+        if (rect.z <= 0.0) {
+            continue;
+        }
+        if (in.ndc.x < rect.x || in.ndc.x >= rect.x + rect.z ||
+            in.ndc.y < rect.y || in.ndc.y >= rect.y + rect.w) {
+            continue;
+        }
+        let paint = hud.barColours[bar];
+        // Later bars sit on earlier ones - the fill over its track - so this
+        // blends rather than replaces.
+        colour = mix(colour, paint.rgb, paint.a);
+        alpha = max(alpha, paint.a);
+    }
 
     for (var slot = 0; slot < count; slot = slot + 1) {
         let box = hud.boxes[slot];
@@ -147,7 +173,10 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
 
         let together = max(fill, outline);
         if (together > 0.02) {
-            colour = mix(vec3<f32>(0.0, 0.0, 0.0), hud.colours[slot].rgb, fill);
+            // Over a bar the outline has to blend in rather than replace, or
+            // every letter carries a hard black halo across the meter.
+            let ink = mix(vec3<f32>(0.0, 0.0, 0.0), hud.colours[slot].rgb, fill);
+            colour = mix(colour, ink, together);
             alpha = max(alpha, together);
         }
     }

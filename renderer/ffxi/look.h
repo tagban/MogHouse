@@ -45,6 +45,9 @@ struct Look
 {
     Race race{Race::HumeMale};
     std::array<uint16_t, static_cast<size_t>(LookSlot::Count)> model{};
+    /// 0 small, 1 medium, 2 large - the server's char_look.size. Not a file;
+    /// the body is drawn a little larger or smaller.
+    uint8_t size{1};
 };
 
 /// The file id holding this race's skeleton and animation set.
@@ -71,7 +74,8 @@ size_t modelFileId(Race race, LookSlot slot, uint16_t modelId);
 std::vector<std::filesystem::path> lookFiles(const FileTable& table, const Look& look);
 
 /// Parses "race,face,head,body,hands,legs,feet" - the shape a look arrives in
-/// from the server. Returns false if it does not have seven numbers.
+/// from the server - with an optional eighth number, the size. Returns false
+/// if it does not have at least seven.
 bool parseLook(const std::string& text, Look& look);
 
 const char* raceName(Race race);

@@ -167,6 +167,16 @@ WATERLINE_RADIUS = 6
 # third of the way up a wall about four units tall.
 WATERLINE_MIN_DEPTH = 1.0
 
+# A sea is not a bed. Port Bastok's harbour arrives as 6,144 water triangles
+# at exactly one height - half a unit under the quay - which is the surface
+# the mesh gives players to stand at the edge of, not a floor with water on
+# top. Lifting that by WATERLINE_MIN_DEPTH put the harbour over the quay and
+# a Galka knee-deep on the dock. A pool this large and this flat is the
+# surface itself, raised only enough not to z-fight with its own plane.
+FLAT_SEA_TRIANGLES = 500
+FLAT_SEA_TOLERANCE = 0.25
+FLAT_SEA_LIFT = 0.05
+
 # How far a surface will reach across a hole in its own bed, in cells.
 #
 # The server's mesh is the terrain the server cares about, which is what a
@@ -254,7 +264,27 @@ def waterlines(triangles):
     (WATERLINE_RADIUS), and a surface resting exactly on its own bed z-fights
     with the stone (WATERLINE_MIN_DEPTH).
     """
-    _, owner, _, local = _pools(triangles)
+    _, owner, pool_of, local = _pools(triangles)
+
+    # Which pools are a flat sea - see FLAT_SEA_TRIANGLES. A harbour pool also
+    # takes in the drains and steps beside it, so the test is not "all one
+    # height" but "overwhelmingly one height": the level most of the pool's
+    # bed sits at, when four fifths of it sits within a hair of that level.
+    beds = {}
+    for i, tri in enumerate(triangles):
+        beds.setdefault(pool_of[owner[i]], []).append(min(c[1] for c in tri))
+    sea_level = {}
+    for pool, tops in beds.items():
+        if len(tops) < FLAT_SEA_TRIANGLES:
+            continue
+        counts = {}
+        for top in tops:
+            key = round(top / FLAT_SEA_TOLERANCE)
+            counts[key] = counts.get(key, 0) + 1
+        key, count = max(counts.items(), key=lambda kv: kv[1])
+        level = key * FLAT_SEA_TOLERANCE
+        if sum(1 for top in tops if abs(top - level) <= FLAT_SEA_TOLERANCE) >= 0.8 * len(tops):
+            sea_level[pool] = level
 
     # Never below the triangle's own highest corner, and never resting exactly
     # on it. Below means water buried in the channel it belongs to - invisible,
@@ -262,8 +292,15 @@ def waterlines(triangles):
     # with the stone, which z-fights and reads as patchy.
     #
     # Subtracting raises it: DAT y increases downward.
-    return [min(local[owner[i]], min(c[1] for c in triangles[i]) - WATERLINE_MIN_DEPTH)
-            for i in range(len(triangles))]
+    out = []
+    for i, tri in enumerate(triangles):
+        top = min(c[1] for c in tri)
+        level = sea_level.get(pool_of[owner[i]])
+        if level is not None and abs(top - level) <= FLAT_SEA_TOLERANCE:
+            out.append(top - FLAT_SEA_LIFT)
+        else:
+            out.append(min(local[owner[i]], top - WATERLINE_MIN_DEPTH))
+    return out
 
 
 def bridged(triangles):

@@ -87,6 +87,12 @@ typedef struct MhRadarEntity
     /// It has a race and a build so it reads as a person, and no face, no
     /// colour and no clothes so it reads as nobody in particular.
     int32_t silhouette;
+
+    /// How big the body is: 1 small, 2 medium, 3 large, as the server's
+    /// char_look.size plus one. 0 means nobody said, which is drawn medium.
+    /// Plus one so that a caller who never sets it gets medium rather than
+    /// small, which is what a zeroed struct would otherwise mean.
+    int32_t size;
 } MhRadarEntity;
 
 /// What to open. Every string is borrowed for the duration of the create call
@@ -306,7 +312,12 @@ MH_API void mh_viewer_set_riding(MhViewerHandle viewer, int32_t aboard);
 /// of a row anyway, so the widths here are generous rather than tight.
 typedef struct MhFormRow
 {
-    /// 0 label, 1 field, 2 secret (typed, drawn as dots), 3 button.
+    /// 0 label, 1 field, 2 secret (typed, drawn as dots), 3 button, 4 choice.
+    ///
+    /// A choice's value is "<selected>;first|second|third" going in and
+    /// coming back. Picking an option hands the form back at once with the
+    /// choice's own row as the button, so the caller can react to it before
+    /// anything else is pressed.
     int32_t kind;
 
     /// 0 for a button that cannot be pressed or a field that cannot be typed
@@ -330,6 +341,12 @@ typedef struct MhFormRow
 /// client side where it already lives.
 MH_API void mh_viewer_set_form(MhViewerHandle viewer, const char* title, const char* message,
                                const MhFormRow* rows, int32_t count);
+
+/// Whether forms put up from now on stand against the left edge with the
+/// world left bright beside them, rather than in the middle over a dimmed
+/// world. For a screen that describes something standing in the world - a
+/// character being made - which has to be seen while it is described.
+MH_API void mh_viewer_set_form_aside(MhViewerHandle viewer, int32_t aside);
 
 /// What the player pressed, taken once. Returns 0 while they are still filling
 /// it in, so a caller polls this the way it polls the jump.

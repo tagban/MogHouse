@@ -85,4 +85,11 @@ public sealed class ScreenHost(LiveRadar world)
 
     /// <summary>Takes whatever is showing down, so the world is unobscured.</summary>
     public void Clear() => world.HideForm();
+
+    /// <summary>
+    /// Stands the screens that follow to one side, with the world bright
+    /// beside them, for a screen about something standing in the world.
+    /// Callers put it back when they are done.
+    /// </summary>
+    public void Aside(bool on) => world.SetFormAside(on);
 }

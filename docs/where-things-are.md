@@ -26,11 +26,13 @@ is the one that builds the renderer - Apple's has no `std::jthread`.
 **The client**, screens and all:
 
 ```sh
-dotnet run --project src/MogHouse.App/MogHouse.App.csproj --no-launch-profile -- --screens
+dotnet run --project src/MogHouse.App/MogHouse.App.csproj --no-launch-profile
 ```
 
-Without `--screens` it starts the old Avalonia launcher, which is still the
-default. Sign-in fills itself from the saved profile; tab to the password.
+There is no launcher any more: Avalonia was deleted on 2026-09-02 and the
+renderer's screens are the only path. `--screens` is accepted and ignored, for
+scripts that still pass it. Sign-in fills itself from the saved profile; tab to
+the password.
 
 **The renderer on its own**, which needs no server and is how most of the
 graphics work was done:
@@ -72,11 +74,10 @@ second half and is not user interface.
 
 ## What is next, in the order worth doing it
 
-**Delete Avalonia.** The blocker is gone - the game logic that was trapped in
-`GameViewModel` is in Core now. What remains is genuinely user interface: the
-launcher window, the XAML views, the radar control, the observable properties.
-The job is removing those, making `--screens` the default, and following it
-through `MogHouse.App.csproj` and `tools/package-*.sh`.
+**Avalonia is gone** (2026-09-02, on Windows). `MogHouse.App` is one file:
+`Program.cs` starts the log and hands the main thread to `ClientFlow`. What the
+old shell set up that the screens path had not - zone lines, the dialogue file
+table, the session's status lines in the log - moved into `ClientFlow`.
 
 **Bastok Mines blows out to white around noon and goes black at night.** An
 underground zone lit by the outdoor day and night cycle; only the thirteen rooms

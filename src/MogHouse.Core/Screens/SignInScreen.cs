@@ -1,3 +1,4 @@
+using System.Linq;
 using MogHouse.Core.Ffxi;
 using MogHouse.Core.Interop;
 
@@ -82,13 +83,15 @@ public static class SignInScreen
             // was "step to the next saved server" rather than "sign in".
             rows.Add(NativeFormRow.Button(SignIn));
 
-            // A button that names the server it would load and steps to the
-            // next one, rather than a list taking up the screen. Only worth
-            // showing when there is more than one to step between - with a
-            // single saved server it is already filled in.
+            // A dropdown of the saved servers, by the names their owner gave
+            // them. Picking one fills the fields in at once. Only shown when
+            // there is more than one to pick between - with a single saved
+            // server it is already filled in.
+            int savedRow = -1;
             if (profiles.Count > 1)
             {
-                rows.Add(NativeFormRow.Button($"{Saved}: {profiles[chosen].Name.ToUpperInvariant()}"));
+                savedRow = rows.Count;
+                rows.Add(NativeFormRow.Choice(Saved, [.. profiles.Select(p => p.Name.ToUpperInvariant())], chosen));
             }
 
             rows.AddRange([
@@ -111,12 +114,9 @@ public static class SignInScreen
             username = result[2].Trim();
             password = result[3];
 
-            // The picker names the server it holds, so it is matched by what it
-            // starts with rather than by its whole label.
-            string pressed = rows[result.Button].Text;
-            if (pressed.StartsWith(Saved, StringComparison.Ordinal))
+            if (savedRow >= 0 && result.Button == savedRow)
             {
-                chosen = (chosen + 1) % profiles.Count;
+                chosen = Math.Clamp(result.Choice(savedRow, chosen), 0, profiles.Count - 1);
 
                 FfxiServerProfile next = profiles[chosen];
                 name = next.Name;
@@ -127,6 +127,7 @@ public static class SignInScreen
                 continue;
             }
 
+            string pressed = rows[result.Button].Text;
             switch (pressed)
             {
                 case Quit:

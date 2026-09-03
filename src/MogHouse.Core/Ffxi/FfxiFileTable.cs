@@ -4,16 +4,25 @@ namespace MogHouse.Core.Ffxi;
 /// Resolves FFXI file ids to paths, the way the client does.
 ///
 /// The retail install indexes its content by a flat file id rather than by
-/// path. Two tables at the install root map one to the other, with one entry
-/// per id in each:
+/// path. Two tables map one to the other, with one entry per id in each:
 ///
 ///     VTABLE.DAT   u8   the ROM number holding it, 0 if it is not installed
 ///     FTABLE.DAT   u16  (directory &lt;&lt; 7) | file
 ///
-/// The renderer has its own copy of this in C++. Duplicated rather than
-/// exposed across the interop boundary on purpose: it is twenty lines either
-/// side, and widening the C ABI to carry a file system is a worse trade than
-/// writing the lookup twice.
+/// That pair at the install root describes the original game. Each expansion
+/// brings a pair of its own - <c>ROM2/VTABLE2.DAT</c> and <c>FTABLE2.DAT</c>,
+/// up through <c>ROM9</c> - covering the same id range, with a non-zero entry
+/// only for the files that expansion holds. The client reads them all, later
+/// ones overriding earlier, which is how a patch in a later ROM replaces a
+/// file from an earlier one. Reading only the base pair - which this did for
+/// some time - makes every expansion zone and model "not installed": Yhoator
+/// Jungle is zone 123, its map is file 223, and file 223 is in ROM2.
+///
+/// The renderer has its own copy of this in C++, and tools/filetable.py a
+/// third. Duplicated rather than exposed across the interop boundary on
+/// purpose: it is thirty lines either side, and widening the C ABI to carry a
+/// file system is a worse trade than writing the lookup three times. Change
+/// one, change all three.
 /// </summary>
 public sealed class FfxiFileTable
 {
@@ -23,6 +32,9 @@ public sealed class FfxiFileTable
 
     /// <summary>A zone's map data sits at its zone id plus this.</summary>
     public const int ZoneFileIdOffset = 100;
+
+    /// <summary>The highest-numbered expansion folder looked for.</summary>
+    private const int LastRom = 9;
 
     public FfxiFileTable(string installRoot)
     {
@@ -35,6 +47,46 @@ public sealed class FfxiFileTable
         if (_ftable.Length != _vtable.Length * 2)
         {
             throw new InvalidDataException("VTABLE and FTABLE disagree on how many ids there are");
+        }
+
+        for (int rom = 2; rom <= LastRom; rom++)
+        {
+            Overlay(rom);
+        }
+    }
+
+    /// <summary>
+    /// Lays an expansion's tables over what has been read so far. Missing is
+    /// normal - an install without that expansion has no such folder - and a
+    /// pair that does not match the base is skipped rather than fatal, since
+    /// one broken expansion should not take the whole install with it.
+    /// </summary>
+    private void Overlay(int rom)
+    {
+        string folder = System.IO.Path.Combine(_root, $"ROM{rom}");
+        string vPath = System.IO.Path.Combine(folder, $"VTABLE{rom}.DAT");
+        string fPath = System.IO.Path.Combine(folder, $"FTABLE{rom}.DAT");
+        if (!File.Exists(vPath) || !File.Exists(fPath))
+        {
+            return;
+        }
+
+        byte[] vtable = File.ReadAllBytes(vPath);
+        byte[] ftable = File.ReadAllBytes(fPath);
+        if (vtable.Length != _vtable.Length || ftable.Length != _ftable.Length)
+        {
+            Console.WriteLine($"filetable: ROM{rom}'s tables do not match the base install's; ignoring them");
+            return;
+        }
+
+        for (int id = 0; id < vtable.Length; id++)
+        {
+            if (vtable[id] != 0)
+            {
+                _vtable[id] = vtable[id];
+                _ftable[id * 2] = ftable[id * 2];
+                _ftable[id * 2 + 1] = ftable[id * 2 + 1];
+            }
         }
     }
 

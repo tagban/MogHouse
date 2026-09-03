@@ -75,6 +75,7 @@ add_library(ffxi-dat STATIC
     ffxi/bgw.cpp
     ffxi/dat.cpp
     ffxi/filetable.cpp
+    ffxi/generator.cpp
     ffxi/lighting.cpp
     ffxi/look.cpp
     ffxi/mmb.cpp

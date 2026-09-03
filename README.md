@@ -63,10 +63,15 @@ about the file formats so far.
 
 ## Running
 
+    dotnet run --project src/MogHouse.App/MogHouse.App.csproj --no-launch-profile
+
+starts the client: one window, with sign-in, character select and the world
+all drawn by the renderer. It needs a LandSandBoat server to sign in to.
+
     .\run.ps1 -ZoneId 235 -Look 1,0,0,1,1,1,1
 
-opens a zone with a character standing in it, no server needed. To play against
-a LandSandBoat server, `MogHouse.Console login --help` lists what it takes.
+opens a zone with a character standing in it, no server needed. For a scripted
+login, `MogHouse.Console login --help` lists what it takes.
 
 ## Making a build for somebody else
 

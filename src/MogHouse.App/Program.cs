@@ -1,48 +1,44 @@
-﻿using Avalonia;
 using System;
 
 namespace MogHouse.App;
 
+/// <summary>
+/// The executable. Everything it does is in <see cref="MogHouse.Core.Screens.ClientFlow"/>;
+/// what is here is the little that has to happen before there is a window,
+/// and the reason this file is so short is worth keeping in mind when adding
+/// to it.
+///
+/// <para>
+/// This used to be an Avalonia application: a launcher window for signing in
+/// and choosing a character, which then opened the renderer's window beside
+/// it for the world. Two windowing systems in one process, competing for the
+/// one main thread that macOS insists windows are made on - which is what
+/// black-screened the Mac after every successful login. The screens moved
+/// into the renderer, the game logic moved into Core, and Avalonia went with
+/// the last view that needed it. The renderer owns the main thread now and
+/// the process has one window, on all three platforms.
+/// </para>
+/// </summary>
 sealed class Program
 {
-    // Initialization code. Don't use any Avalonia, third-party APIs or any
-    // SynchronizationContext-reliant code before AppMain is called: things aren't initialized
-    // yet and stuff might break.
+    // STA for the folder chooser: on Windows it is a COM dialog, and COM
+    // wants the thread that shows it to say so.
     [STAThread]
     public static int Main(string[] args)
     {
         StartLogging();
         HideRuntimeFolder();
 
-        // The client drawing its own screens, in the renderer's window, with no
-        // Avalonia anywhere. Behind a flag while both exist; it becomes the
-        // only path once it has been through everything the old one had.
-        //
         // Note what is NOT here: no await, and no thread of its own. This call
         // hands the main thread to the renderer, and the main thread is the
         // only one AppKit will make a window on.
-        if (Array.IndexOf(args, "--screens") >= 0)
-        {
-            return MogHouse.Core.Screens.ClientFlow.Run();
-        }
-
-        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
-        return 0;
+        //
+        // `args` is not looked at. `--screens` used to choose this path over
+        // the launcher; it is the only path now, and a script still passing
+        // the flag should keep working rather than be told off.
+        return MogHouse.Core.Screens.ClientFlow.Run();
     }
 
-    /// <summary>
-    /// Sends everything this client says to a file, if asked.
-    ///
-    /// This is a windowed application, so it has no console: anything written
-    /// to standard output goes nowhere, and redirecting it captures an empty
-    /// file. Which means that for every bug reported from inside the game
-    /// there has been nothing to read afterwards, and the only way to work out
-    /// what happened has been to reason about it - twice at length, and wrong
-    /// both times.
-    ///
-    /// MOGHOUSE_LOG=path writes it down instead. Unbuffered, because the
-    /// interesting case is a client that stopped.
-    /// </summary>
     /// <summary>
     /// Marks the runtime folder hidden, so the folder a player opens holds an
     /// executable, their own settings and a README rather than the several
@@ -77,6 +73,19 @@ sealed class Program
         }
     }
 
+    /// <summary>
+    /// Sends everything this client says to a file.
+    ///
+    /// This is a windowed application, so it has no console: anything written
+    /// to standard output goes nowhere, and redirecting it captures an empty
+    /// file. Which means that for every bug reported from inside the game
+    /// there has been nothing to read afterwards, and the only way to work out
+    /// what happened has been to reason about it - twice at length, and wrong
+    /// both times.
+    ///
+    /// MOGHOUSE_LOG=path says where. Unbuffered, because the interesting case
+    /// is a client that stopped.
+    /// </summary>
     private static void StartLogging()
     {
         string? path = Environment.GetEnvironmentVariable("MOGHOUSE_LOG");
@@ -109,7 +118,7 @@ sealed class Program
             AppDomain.CurrentDomain.UnhandledException += (_, e) =>
                 Console.WriteLine($"UNHANDLED: {e.ExceptionObject}");
 
-            // An exception inside a Dispatcher.Post is swallowed and the app
+            // An exception in a task nobody awaited is swallowed and the client
             // carries on half-broken, which is its own kind of invisible.
             System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (_, e) =>
                 Console.WriteLine($"UNOBSERVED: {e.Exception}");
@@ -118,14 +127,4 @@ sealed class Program
         {
         }
     }
-
-    // Avalonia configuration, don't remove; also used by visual designer.
-    public static AppBuilder BuildAvaloniaApp()
-        => AppBuilder.Configure<App>()
-            .UsePlatformDetect()
-#if DEBUG
-            .WithDeveloperTools()
-#endif
-            .WithInterFont()
-            .LogToTrace();
 }

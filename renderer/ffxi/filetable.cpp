@@ -1,5 +1,6 @@
 #include "filetable.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -38,6 +39,40 @@ FileTable::FileTable(std::filesystem::path installRoot) : root_(std::move(instal
     if (ftable_.size() != vtable_.size() * 2)
     {
         throw std::runtime_error("VTABLE and FTABLE disagree on how many ids there are");
+    }
+
+    // Then each expansion over the top, later ones winning - see the header.
+    // An absent pair is an expansion that is not installed, which is normal;
+    // a pair the wrong shape is skipped rather than fatal, so one broken
+    // expansion does not take the whole install with it.
+    for (int rom = 2; rom <= kLastRom; ++rom)
+    {
+        const std::filesystem::path folder = root_ / ("ROM" + std::to_string(rom));
+        const std::filesystem::path vPath = folder / ("VTABLE" + std::to_string(rom) + ".DAT");
+        const std::filesystem::path fPath = folder / ("FTABLE" + std::to_string(rom) + ".DAT");
+        std::error_code ignored;
+        if (!std::filesystem::exists(vPath, ignored) || !std::filesystem::exists(fPath, ignored))
+        {
+            continue;
+        }
+
+        const std::vector<uint8_t> vtable = readWholeFile(vPath);
+        const std::vector<uint8_t> ftable = readWholeFile(fPath);
+        if (vtable.size() != vtable_.size() || ftable.size() != ftable_.size())
+        {
+            std::printf("filetable: ROM%d's tables do not match the base install's; ignoring them\n", rom);
+            continue;
+        }
+
+        for (size_t id = 0; id < vtable.size(); ++id)
+        {
+            if (vtable[id] != 0)
+            {
+                vtable_[id] = vtable[id];
+                ftable_[id * 2] = ftable[id * 2];
+                ftable_[id * 2 + 1] = ftable[id * 2 + 1];
+            }
+        }
     }
 }
 

@@ -134,9 +134,15 @@ predicts.
 
 ## Water
 
-Water is not placed by the placement table - the models exist in the DAT and
-nothing references them. It comes from a **height carried on each collision grid
-entry**, 164 bytes into the entry's placement block, as fixed point:
+**Corrected 2026-09-03.** Water is not placed by the placement table, but the
+models are referenced: by the **effect generator chunks** (type `0x05`) in the
+`effe` directory, one per surface, each naming a model by its chunk id and
+giving position, rotation and scale. See `docs/generator-format.md`. The
+per-cell height below is real but is not what draws the water; it is kept
+because `Collision::waterDepthAt` reads it.
+
+The field: a **height carried on each collision grid entry**, 164 bytes into
+the entry's placement block, as fixed point:
 
 ```
 height = ((packed << 6) >> 10) / 1024.0

@@ -613,6 +613,20 @@ Vec3 Collision::move(const Vec3& from, const Vec3& to, float radius) const
     }
     const Vec3 probe{to.x + step.x / length * radius, to.y, to.z + step.z / length * radius};
 
+    // A wall's height is judged from the tread being stepped onto, not from
+    // the one being stood on. The probe reaches half a unit past the step, so
+    // near the far edge of a stair tread it crosses the riser two steps up -
+    // 1.8 above the feet on Bastok's 0.9 risers, well over kStepUp - and the
+    // staircase became a wall. The slide hit the same riser; only the
+    // axis-at-a-time fallback, whose probe is shorter, got through, which is
+    // why a character stuck on a stair came free by wiggling sideways. The
+    // tread ahead is 0.9 up, and from there the second riser is one step, so
+    // a stair walks like a ramp. On flat ground the tread ahead is the floor
+    // underfoot and nothing changes; a railing is still a railing, because
+    // the floor at its foot is the floor being stood on.
+    const std::optional<float> treadAhead = groundAt(to.x, to.z, from.y, kStepUp, kStepUp);
+    const float footing = treadAhead ? std::max(from.y, *treadAhead) : from.y;
+
     for (uint32_t index : *candidates)
     {
         const Triangle& triangle = triangles_[index];
@@ -626,7 +640,7 @@ Vec3 Collision::move(const Vec3& from, const Vec3& to, float radius) const
         // an obstacle.
         const float lowest = std::min({triangle.a.y, triangle.b.y, triangle.c.y});
         const float highest = std::max({triangle.a.y, triangle.b.y, triangle.c.y});
-        if (highest < from.y + kStepUp || lowest > from.y + kCharacterHeight)
+        if (highest < footing + kStepUp || lowest > from.y + kCharacterHeight)
         {
             continue;
         }
@@ -650,7 +664,7 @@ Vec3 Collision::move(const Vec3& from, const Vec3& to, float radius) const
                     }
                     const float low = std::min({t.a.y, t.b.y, t.c.y});
                     const float high = std::max({t.a.y, t.b.y, t.c.y});
-                    if (high < from.y + kStepUp || low > from.y + kCharacterHeight)
+                    if (high < footing + kStepUp || low > from.y + kCharacterHeight)
                     {
                         continue;
                     }

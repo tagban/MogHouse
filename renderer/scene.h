@@ -46,6 +46,14 @@ struct InstancedDraw
     uint32_t indexCount{};
     uint32_t instanceOffset{};
     uint32_t instanceCount{};
+
+    /// A generator-placed mesh whose texture the game scrolls: the fountain's
+    /// jets and flames, a waterfall. Drawn by the effect pass, after the
+    /// water, with `scroll` in uv per second; skipped by day when nightOnly.
+    /// After the counts so the brace initialisers above them still line up.
+    bool effect{};
+    float scroll[2]{};
+    bool nightOnly{};
 };
 
 struct Scene
@@ -64,11 +72,26 @@ struct Scene
     /// again on every frame it moves.
     std::unordered_map<std::string, std::pair<uint32_t, uint32_t>> instanceRanges;
 
-    /// Water surfaces, as flat quads. Not instanced - each cell's plane is its
-    /// own rectangle - and not placed by the placement table: water comes from a
-    /// height carried on each collision grid entry.
+    /// Water surfaces, world space, drawn by the water pass.
+    ///
+    /// From the zone's own water meshes when it has them - see isWaterMesh -
+    /// with every placement expanded, since a stream is thirty small models
+    /// each placed once. A zone with none gets the collision-derived sheets
+    /// loaded in afterwards (viewer.cpp loadWater) as a fallback.
     std::vector<Vertex> waterVertices;
     std::vector<uint32_t> waterIndices;
+
+    /// The ripple sheet the zone's water meshes name most often - "effect
+    /// kaw1" for East Ronfaure's stream, "sea     sea01" for a harbour -
+    /// so the water pass scrolls the texture the artists put on that water
+    /// rather than one picked from a list. Empty when no water mesh named one,
+    /// or when most of the water names none - Bastok Markets' canal and
+    /// fountain are untextured meshes the client paints at run time, and only
+    /// the sea beyond the harbour wall names a sheet. Voted by triangle.
+    std::string waterTexture;
+    /// Triangles of water whose mesh named no sheet. They are a river or a
+    /// canal, never the sea, and the water pass tints them as one.
+    size_t waterUntextured{};
 
     Vec3 boundsMin{};
     Vec3 boundsMax{};
@@ -78,11 +101,25 @@ struct Scene
 
     size_t triangles() const;      ///< unique geometry
     size_t drawnTriangles() const; ///< what the GPU actually processes
+    size_t waterTriangles() const { return waterIndices.size() / 3; }
+};
+
+/// Whether a mesh is a water surface: a water model by name, or a mesh
+/// textured with one of the ripple sheets. See scene.cpp.
+bool isWaterMesh(const std::string& modelName, const ffxi::ModelMesh& mesh);
+
+/// What an effect generator says about how to draw a model: see
+/// InstancedDraw::effect. Keyed by model name when passed to buildScene.
+struct EffectParams
+{
+    float scrollU{};
+    float scrollV{};
+    bool nightOnly{};
 };
 
 Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, ffxi::Model>& models,
                  const std::unordered_map<std::string, ffxi::Texture>& textures, size_t& placementsResolved,
-                 size_t& placementsMissing);
+                 size_t& placementsMissing, const std::unordered_map<std::string, EffectParams>* effects = nullptr);
 
 /// Adds one scene's geometry to another.
 ///

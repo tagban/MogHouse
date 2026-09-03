@@ -61,6 +61,14 @@ public sealed record FfxiEntityUpdate(
     byte? HealthPercent = null,
     byte? BattleFlags = null,
     byte? RenderFlags = null,
+    /// <summary>
+    /// The status byte at 0x20, when the update carried the status block.
+    /// 0 normal, 1 updating, 2 disappeared, 3 invisible, 6 cutscene only, as
+    /// LandSandBoat numbers them. The retail client draws nothing for 2, 3
+    /// or 6, which is how an event's actors stand in a plaza unseen until
+    /// their scene begins.
+    /// </summary>
+    byte? Status = null,
     FfxiEntityLook? Look = null,
     byte? NameVis = null,
     byte SendFlags = 0)
@@ -267,6 +275,7 @@ public sealed record FfxiEntityUpdate(
     ///
     /// These change while you play: an event can reveal something that was
     /// hidden, so they are read on every update rather than remembered.
+    private const int OffsetStatus = 0x20;
     private const int OffsetEntityFlags = 0x21;
 
     private const uint EntityFlagHideName = 0x00000008;
@@ -370,6 +379,10 @@ public sealed record FfxiEntityUpdate(
             id == PlayerPacketId
                 ? ((subPacket[OffsetSendFlags] & UpdateModel) != 0 ? ReadPlayerLook(subPacket) : null)
                 : ((subPacket[OffsetSendFlags] & UpdateClaimStatus) != 0 ? ReadLook(subPacket) : null);
+        byte? status = (subPacket[OffsetSendFlags] & UpdateClaimStatus) != 0 && subPacket.Length > OffsetStatus
+            ? subPacket[OffsetStatus]
+            : null;
+
         uint? entityFlags = (subPacket[OffsetSendFlags] & UpdateClaimStatus) != 0 &&
                             subPacket.Length >= OffsetEntityFlags + 4 && id == NpcPacketId
             ? BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(OffsetEntityFlags, 4))
@@ -398,6 +411,7 @@ public sealed record FfxiEntityUpdate(
             HealthPercent: healthPercent,
             BattleFlags: battleFlags,
             RenderFlags: renderFlags,
+            Status: status,
             Look: look,
             NameVis: nameVis);
     }
@@ -424,6 +438,15 @@ public sealed record FfxiEntityUpdate(
     /// event has yet to reveal.
     /// </summary>
     public bool IsModelHidden => (EntityFlags & EntityFlagHideModel) != 0;
+
+    /// <summary>
+    /// Whether the status block says this is not to be drawn: a status the
+    /// retail client draws nothing for, or the hide-model flag. Null when the
+    /// update carried no status block, so a position-only update says nothing
+    /// either way.
+    /// </summary>
+    public bool? HiddenByStatus =>
+        Status is null ? null : Status is 2 or 3 or 6 || IsModelHidden;
 
     /// <summary>Nothing the player can click. Warp triggers carry this.</summary>
     public bool IsUntargetable => (EntityFlags & EntityFlagUntargetable) != 0;

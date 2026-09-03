@@ -52,7 +52,13 @@ fn fragmentMain(in : WaterOut) -> @location(0) vec4<f32> {
     // client standing in the same spot in Windurst Waters: theirs is a deep
     // green-teal that reads as depth, ours was a pale blue-grey that read as a
     // slab laid on the ground.
-    let body = vec3<f32>(0.09, 0.20, 0.17);
+    // A river or pond, or the sea. Which one the zone has is decided by the
+    // ripple sheet it ships - umi and sea sheets are the sea - and passed in
+    // fogRange.z, which the zone pass leaves unused. Retail's harbour at
+    // Port Bastok is close to black with the dusk sky on it; a green-teal
+    // river tint made it a grey-green slab.
+    let sea = uniforms.fogRange.z;
+    let body = mix(vec3<f32>(0.09, 0.20, 0.17), vec3<f32>(0.015, 0.03, 0.04), sea);
 
     // The ripple sheet, sampled twice drifting at different speeds and angles so
     // it does not read as one sheet sliding.
@@ -67,7 +73,17 @@ fn fragmentMain(in : WaterOut) -> @location(0) vec4<f32> {
     // The foam was most of why it looked washed out: at 0.40 a bright ripple
     // sheet lifted the whole surface toward grey, which is a lake in overcast
     // daylight rather than a canal.
-    colour = colour + ambient * foam * 0.16;
+    colour = colour + ambient * foam * mix(0.16, 0.07, sea);
+
+    // The sky on the water. There is no reflection pass; the fog colour is
+    // the horizon's, which is what a flat sheet mostly mirrors, and how much
+    // of it shows depends on how flat the view is - straight down sees the
+    // bed, along the surface sees the sky. That grazing brightening is most
+    // of what makes retail's harbour read as water rather than as tar.
+    let toEye = normalize(uniforms.eye.xyz - in.worldPosition);
+    let facing = clamp(toEye.y, 0.0, 1.0);
+    let fresnel = pow(1.0 - facing, 3.0);
+    colour = mix(colour, uniforms.fogColour.rgb * mix(0.55, 0.85, sea), fresnel * mix(0.45, 0.7, sea));
 
     let distance = length(in.worldPosition - uniforms.eye.xyz);
     let fogStart = uniforms.fogRange.x;
@@ -77,7 +93,8 @@ fn fragmentMain(in : WaterOut) -> @location(0) vec4<f32> {
 
     // Clear enough to see the bed through it, which is most of what makes water
     // read as water rather than as a coloured lid.
-    let alpha = clamp(0.50 + foam * 0.22, 0.0, 0.86);
+    // A sea hides its bed; a river shows it.
+    let alpha = clamp(mix(0.50, 0.88, sea) + foam * 0.22 + fresnel * 0.1 * sea, 0.0, 0.96);
     return vec4<f32>(colour, alpha);
 }
 )";

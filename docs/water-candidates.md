@@ -1,4 +1,13 @@
-# Water: solved
+# Water: solved twice
+
+**Solved properly on 2026-09-03: water is the zone's own water meshes, placed
+by the effect generator chunks.** See `docs/generator-format.md`. The
+collision-material approach below was the second answer, shipped 2026-09-01,
+and it is now the fallback for a zone with no water mesh at all. It is kept
+because the tools still exist and because its record of the failed attempts
+is still the record.
+
+---
 
 **Water is a material on each collision triangle.** Not a model you can
 recognise by name, and not the MZB's per-cell height field - both were tried

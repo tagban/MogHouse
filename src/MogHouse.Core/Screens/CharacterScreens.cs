@@ -1,3 +1,4 @@
+using System.Linq;
 using MogHouse.Core.Ffxi;
 using MogHouse.Core.Interop;
 
@@ -66,15 +67,16 @@ public static class CharacterScreens
         // Everyone on the account, standing in the world, plus the figure that
         // means "one more". The renderer stands them on the floor and looks at
         // them; all this decides is who is in the row and in what order.
-        var cast = new List<(uint Id, string Name, ushort Race, ushort Face, int Style)>();
+        var cast = new List<(uint Id, string Name, ushort Race, ushort Face, int Style, int Size)>();
         for (int i = 0; i < named.Count; i++)
         {
             // Faded until pointed at, the way an invisible player looks, so the
             // one under the cursor is plainly the one that would be picked.
-            cast.Add((FirstCharacterId + (uint)i, named[i].Name, named[i].Race, named[i].Face, FadedStyle));
+            cast.Add((FirstCharacterId + (uint)i, named[i].Name, named[i].Race, named[i].Face, FadedStyle,
+                      named[i].Size));
         }
 
-        cast.Add((NewCharacterId, "NEW CHARACTER", NewCharacterRace, 0, BlankStyle));
+        cast.Add((NewCharacterId, "NEW CHARACTER", NewCharacterRace, 0, BlankStyle, 1));
 
         world.ShowLineup(cast);
 
@@ -136,17 +138,29 @@ public static class CharacterScreens
     }
 
     /// <summary>Everything the server needs to build somebody, and how to say it.</summary>
-    private static readonly (string Label, FfxiRaceId Value)[] Races =
+    /// <summary>
+    /// The races as people think of them, with the two the lobby server
+    /// numbers separately for each gender. Mithra and Galka have one each.
+    /// </summary>
+    private static readonly (string Label, FfxiRaceId Male, FfxiRaceId Female)[] Races =
     [
-        ("HUME MALE", FfxiRaceId.HumeMale),
-        ("HUME FEMALE", FfxiRaceId.HumeFemale),
-        ("ELVAAN MALE", FfxiRaceId.ElvaanMale),
-        ("ELVAAN FEMALE", FfxiRaceId.ElvaanFemale),
-        ("TARUTARU MALE", FfxiRaceId.TarutaruMale),
-        ("TARUTARU FEMALE", FfxiRaceId.TarutaruFemale),
-        ("MITHRA", FfxiRaceId.Mithra),
-        ("GALKA", FfxiRaceId.Galka),
+        ("HUME", FfxiRaceId.HumeMale, FfxiRaceId.HumeFemale),
+        ("ELVAAN", FfxiRaceId.ElvaanMale, FfxiRaceId.ElvaanFemale),
+        ("TARUTARU", FfxiRaceId.TarutaruMale, FfxiRaceId.TarutaruFemale),
+        ("MITHRA", FfxiRaceId.Mithra, FfxiRaceId.Mithra),
+        ("GALKA", FfxiRaceId.Galka, FfxiRaceId.Galka),
     ];
+
+    private static readonly string[] Genders = ["MALE", "FEMALE"];
+
+    /// <summary>
+    /// Eight faces, each with two hairstyles. The game stores the pair as one
+    /// number, face times two plus hair, and that number is the model id of
+    /// the head - which is why a face is a face and a hair colour at once.
+    /// </summary>
+    private static readonly string[] Faces = ["1", "2", "3", "4", "5", "6", "7", "8"];
+
+    private static readonly string[] Hairs = ["A", "B"];
 
     private static readonly (string Label, FfxiStartingJob Value)[] Jobs =
     [
@@ -173,63 +187,135 @@ public static class CharacterScreens
     ];
 
     /// <summary>
+    /// The id of the figure shown while a character is being made. Its own,
+    /// clear of the roster and of the blank figure, so nothing else answers
+    /// for it.
+    /// </summary>
+    private const uint PreviewId = 0xFFFF_FF02;
+
+    /// <summary>
     /// Makes a character. Returns what to ask the server for, or null if the
     /// player backed out.
     ///
     /// <para>
-    /// The choices are buttons that show what they are set to and step on when
-    /// pressed, rather than fields to type a number into. The form widget has
-    /// text boxes and buttons and nothing else, and a button that names its own
-    /// value needs neither a new kind of row nor anyone to know that a Galka is
-    /// an 8.
+    /// Every choice is a dropdown, and the character stands in the world beside
+    /// the screen looking the way the choices say: change the race and the
+    /// figure changes race, change the face and the face changes. The screen
+    /// stands aside so the figure can be seen, and each pick hands the form
+    /// back at once so the figure never lags the choice.
+    /// </para>
+    ///
+    /// <para>
+    /// Size scales the figure a little, the way the game does; the exact
+    /// factors are the renderer's approximation.
     /// </para>
     /// </summary>
-    public static FfxiNewCharacter? Make(ScreenHost screens, string suggestedName = "")
+    public static FfxiNewCharacter? Make(ScreenHost screens, LiveRadar world, string suggestedName = "")
     {
         string name = suggestedName;
-        int race = 0, job = 0, nation = 0, size = 0;
+        int race = 0, gender = 0, face = 0, hair = 0, size = 0, job = 0, nation = 0;
         string message = "";
 
-        while (true)
+        // Rows by index, so the switch below reads as the screen does.
+        const int NameRow = 0, RaceRow = 1, GenderRow = 2, FaceRow = 3, HairRow = 4,
+                  SizeRow = 5, JobRow = 6, NationRow = 7, CreateRow = 8;
+
+        screens.Aside(true);
+        try
         {
-            NativeFormRow[] rows =
-            [
-                NativeFormRow.Field("NAME", name),
-                NativeFormRow.Button($"RACE: {Races[race].Label}"),
-                NativeFormRow.Button($"JOB: {Jobs[job].Label}"),
-                NativeFormRow.Button($"NATION: {Nations[nation].Label}"),
-                NativeFormRow.Button($"BUILD: {Sizes[size].Label}"),
-                NativeFormRow.Button("CREATE"),
-                NativeFormRow.Button(Back),
-            ];
-
-            NativeFormResult? result = screens.Ask("CREATE A CHARACTER", message, rows);
-            if (result is null)
+            while (true)
             {
-                return null;
+                (string raceLabel, FfxiRaceId male, FfxiRaceId female) = Races[race];
+                bool hasGender = male != female;
+                if (!hasGender)
+                {
+                    // Mithra are women and Galka are men, and the dropdown
+                    // says which rather than offering a choice there is not.
+                    gender = male == FfxiRaceId.Mithra ? 1 : 0;
+                }
+                FfxiRaceId raceId = gender == 0 ? male : female;
+                byte faceValue = (byte)(face * 2 + hair);
+
+                // The figure, as the choices currently describe them. Re-shown
+                // rather than updated: the line-up is the one thing that
+                // stands a look in the world, and one figure is a line-up of
+                // one.
+                world.ShowLineup([(PreviewId, name.Length > 0 ? name : "NEW CHARACTER",
+                                   (ushort)raceId, faceValue, 0, (int)Sizes[size].Value)]);
+
+                string[] raceLabels = [.. Races.Select(r => r.Label)];
+                string[] genderOptions = hasGender ? Genders : [Genders[gender]];
+
+                NativeFormRow[] rows =
+                [
+                    NativeFormRow.Field("NAME", name),
+                    NativeFormRow.Choice("RACE", raceLabels, race),
+                    NativeFormRow.Choice("GENDER", genderOptions, hasGender ? gender : 0, enabled: hasGender),
+                    NativeFormRow.Choice("FACE", Faces, face),
+                    NativeFormRow.Choice("HAIR", Hairs, hair),
+                    NativeFormRow.Choice("SIZE", [.. Sizes.Select(s => s.Label)], size),
+                    NativeFormRow.Choice("JOB", [.. Jobs.Select(j => j.Label)], job),
+                    NativeFormRow.Choice("NATION", [.. Nations.Select(n => n.Label)], nation),
+                    NativeFormRow.Button("CREATE"),
+                    NativeFormRow.Button(Back),
+                ];
+
+                NativeFormResult? result = screens.Ask("CREATE A CHARACTER", message, rows);
+                if (result is null)
+                {
+                    return null;
+                }
+
+                name = result[NameRow].Trim();
+                message = "";
+
+                switch (result.Button)
+                {
+                    case RaceRow:
+                        race = Math.Clamp(result.Choice(RaceRow, race), 0, Races.Length - 1);
+                        break;
+                    case GenderRow when hasGender:
+                        gender = Math.Clamp(result.Choice(GenderRow, gender), 0, 1);
+                        break;
+                    case FaceRow:
+                        face = Math.Clamp(result.Choice(FaceRow, face), 0, Faces.Length - 1);
+                        break;
+                    case HairRow:
+                        hair = Math.Clamp(result.Choice(HairRow, hair), 0, Hairs.Length - 1);
+                        break;
+                    case SizeRow:
+                        size = Math.Clamp(result.Choice(SizeRow, size), 0, Sizes.Length - 1);
+                        break;
+                    case JobRow:
+                        job = Math.Clamp(result.Choice(JobRow, job), 0, Jobs.Length - 1);
+                        break;
+                    case NationRow:
+                        nation = Math.Clamp(result.Choice(NationRow, nation), 0, Nations.Length - 1);
+                        break;
+
+                    case CreateRow when FfxiCharacterCreation.WhyNameIsInvalid(name) is { } why:
+                        message = why.ToUpperInvariant();
+                        break;
+
+                    case CreateRow:
+                        return new FfxiNewCharacter(name, raceId, faceValue,
+                                                    Sizes[size].Value, Jobs[job].Value,
+                                                    Nations[nation].Value);
+
+                    case GenderRow:
+                        break;   // a race with one gender; nothing to change
+
+                    default:
+                        return null;   // Back
+                }
             }
-
-            name = result[0].Trim();
-
-            switch (result.Button)
-            {
-                case 1: race = (race + 1) % Races.Length; break;
-                case 2: job = (job + 1) % Jobs.Length; break;
-                case 3: nation = (nation + 1) % Nations.Length; break;
-                case 4: size = (size + 1) % Sizes.Length; break;
-
-                case 5 when name.Length == 0:
-                    message = "A NAME IS NEEDED.";
-                    break;
-
-                case 5:
-                    return new FfxiNewCharacter(name, Races[race].Value, 0,
-                                                Sizes[size].Value, Jobs[job].Value,
-                                                Nations[nation].Value);
-
-                default:
-                    return null;   // Back
-            }
+        }
+        finally
+        {
+            // Both put back on every way out, so the next screen is centred
+            // over a dimmed world and the figure is not left standing there.
+            screens.Aside(false);
+            world.HideLineup();
         }
     }
 }

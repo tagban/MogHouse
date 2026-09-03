@@ -10,14 +10,29 @@
 
 namespace ffxi
 {
-/// The install's own index: a flat file id maps to a path through two tables
-/// at the install root, one entry per id in each.
+/// The install's own index: a flat file id maps to a path through two tables,
+/// one entry per id in each.
 ///
 ///     VTABLE.DAT   u8   the ROM number holding it, 0 if it is not installed
 ///     FTABLE.DAT   u16  (directory << 7) | file
+///
+/// The pair at the install root describes the original game. Each expansion
+/// brings a pair of its own - ROM2/VTABLE2.DAT and FTABLE2.DAT, up through
+/// ROM9 - covering the same id range with a non-zero entry only for the files
+/// that expansion holds. The client reads them all, later ones overriding
+/// earlier, which is how a patch in a later ROM replaces a file from an
+/// earlier one. Reading only the base pair makes every expansion zone and
+/// model "not installed": Yhoator Jungle's map is file 223, and that is in
+/// ROM2.
+///
+/// MogHouse.Core has the same lookup in C#, and tools/filetable.py in
+/// Python. Change one, change all three.
 class FileTable
 {
 public:
+    /// The highest-numbered expansion folder looked for.
+    static constexpr int kLastRom = 9;
+
     /// Throws std::runtime_error if the tables are missing or disagree.
     explicit FileTable(std::filesystem::path installRoot);
 

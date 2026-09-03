@@ -21,9 +21,10 @@
 
 namespace mh
 {
-/// How many rows the box holds: a heading, two lines of explanation, and the
-/// two buttons.
-inline constexpr int kDialogRows = 20;
+/// How many rows the box holds. A form is a title, a message, a row per
+/// field and button, and - when a choice is unfolded - a row per option under
+/// it; character creation with its options open needs the most.
+inline constexpr int kDialogRows = 32;
 
 /// Characters per row. Long enough for a sentence at this width.
 inline constexpr int kDialogChars = 40;
@@ -35,7 +36,7 @@ inline constexpr int kDialogButtons = 2;
 /// they are asserted rather than trusted. Getting them out of step resizes the
 /// uniform buffer without changing what the shader reads, which shows up as
 /// garbage rows rather than as an error.
-static_assert(kDialogRows == 20, "dialog_shader.h WGSL hardcodes 20 rows");
+static_assert(kDialogRows == 32, "dialog_shader.h WGSL hardcodes 32 rows");
 static_assert(kDialogChars == 40, "dialog_shader.h WGSL hardcodes kChars = 40");
 
 inline constexpr const char* kDialogShader = R"(
@@ -52,16 +53,16 @@ struct DialogUniforms {
     caret : vec4<f32>,
     // Per row, the button behind it: left, bottom, width, height. A width of
     // zero is a row of plain text with nothing drawn behind it.
-    rects : array<vec4<f32>, 20>,
+    rects : array<vec4<f32>, 32>,
     // Per row, that button's fill: colour, then how opaque it is.
-    fills : array<vec4<f32>, 20>,
+    fills : array<vec4<f32>, 32>,
     // Per row, the text: left and bottom in NDC, width in cells, unused.
-    boxes : array<vec4<f32>, 20>,
+    boxes : array<vec4<f32>, 32>,
     // Per row, the text's colour, then its size against the shared cell.
-    colours : array<vec4<f32>, 20>,
+    colours : array<vec4<f32>, 32>,
     // Per glyph: atlas cell index, x offset in cells, advance in cells.
     // Laid out row-major, kDialogChars apart.
-    glyphs : array<vec4<f32>, 800>,
+    glyphs : array<vec4<f32>, 1280>,
 };
 
 const kChars = 40;
@@ -123,6 +124,12 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
         alpha = select(0.93, 1.0, onEdge);
     }
 
+    // The last opaque rectangle over this fragment. Rows are drawn in order,
+    // so a later rectangle sits on an earlier one - an unfolded choice's
+    // options hang over the rows beneath - and the text of anything under it
+    // must not show through.
+    var covering = -1;
+
     for (var row = 0; row < rows; row = row + 1) {
         let rect = dialog.rects[row];
         if (rect.z <= 0.0) {
@@ -134,6 +141,9 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
         }
 
         let fill = dialog.fills[row];
+        if (fill.a >= 0.999) {
+            covering = row;
+        }
         let onEdge = in.ndc.x < rect.x + edgeX || in.ndc.x >= rect.x + rect.z - edgeX ||
                      in.ndc.y < rect.y + edge || in.ndc.y >= rect.y + rect.w - edge;
         colour = select(fill.rgb, mix(fill.rgb, vec3<f32>(1.0, 1.0, 1.0), 0.45), onEdge);
@@ -149,6 +159,9 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
     }
 
     for (var row = 0; row < rows; row = row + 1) {
+        if (row < covering) {
+            continue;   // under something solid drawn after it
+        }
         let text = dialog.boxes[row];
         let widthCells = text.z;
         if (widthCells <= 0.0) {

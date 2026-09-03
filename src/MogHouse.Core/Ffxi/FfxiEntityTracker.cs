@@ -36,7 +36,9 @@ public sealed record FfxiTrackedEntity(
     FfxiEntityLook? Look,
     byte? HealthPercent,
     bool Triggerable,
-    DateTimeOffset LastSeen);
+    DateTimeOffset LastSeen,
+    /// <summary>The server's body size, 0 to 2, when an update carried it.</summary>
+    byte? ModelSize = null);
 
 /// <summary>
 /// What is visible right now, assembled from the entity updates the server
@@ -186,8 +188,13 @@ public sealed class FfxiEntityTracker
             Depth: known is not null && IsUnset(update) ? known.Depth : update.Depth,
             Direction: update.Direction,
             // Sticky the way the name is: a later update that carries no flags
-            // must not turn an invisible thing visible.
-            Hidden: update.RawFlags1 is null ? known?.Hidden ?? false : update.IsHidden,
+            // must not turn an invisible thing visible. Two things can hide an
+            // entity - the flags word, and the status block - and either saying
+            // so is enough. Southern San d'Oria's plaza holds a row of royal
+            // knights that only an event ever shows; they arrive with a
+            // "disappeared" status and an innocent flags word, and stood there
+            // as ghosts until the status was read.
+            Hidden: HiddenAfter(update, known),
             // Sticky for the same reason: a position-only update carries no
             // namevis byte, and must not reveal a door's name.
             // Two ways to earn this. The namevis bit is what the protocol
@@ -202,8 +209,51 @@ public sealed class FfxiEntityTracker
             // demote a GM back to an ordinary player.
             GmLevel: update.RawFlags1 is null ? known?.GmLevel ?? 0 : update.GmLevel,
             HealthPercent: update.HealthPercent ?? known?.HealthPercent,
-            LastSeen: now);
+            LastSeen: now,
+            ModelSize: update.ModelSize ?? known?.ModelSize);
     }
+
+    private static bool HiddenAfter(FfxiEntityUpdate update, FfxiTrackedEntity? known)
+    {
+        bool? byFlags = update.RawFlags1 is null ? null : update.IsHidden;
+        bool? byStatus = update.HiddenByStatus;
+        if (byFlags is null && byStatus is null)
+        {
+            return known?.Hidden ?? false;
+        }
+
+        bool hidden = (byFlags ?? false) || (byStatus ?? false);
+
+        // Said once per NPC on its first sighting, so the log shows what the
+        // server sent for the things that puzzle people: what it looks like,
+        // which status, which flags, and whether that hid it. A city is a few
+        // hundred lines, once.
+        if (known is null && update.PacketId != FfxiEntityUpdate.PlayerPacketId)
+        {
+            string look = update.Look is { } l
+                ? (l.IsEquipment ? $"race {l.Race} face {l.Face}" : $"{l.Kind} model {l.ModelId}")
+                : "no look";
+            Console.WriteLine($"entity {update.UniqueNo:X8} {update.Name ?? "-"}: {look}, " +
+                              $"status {(update.Status?.ToString() ?? "-")}, entityFlags 0x{update.EntityFlags:X}, " +
+                              $"flags1 {(update.RawFlags1 is uint f ? $"0x{f:X8}" : "-")}, hidden={hidden}");
+        }
+
+        // A look that changes is worth a line too: NPCs were seen flickering
+        // between two appearances, and which two - and how often - is the
+        // question.
+        if (known?.Look is { } before && update.Look is { } after && !before.Equals(after))
+        {
+            Console.WriteLine($"entity {update.UniqueNo:X8} {update.Name ?? known.Name ?? "-"}: look changed " +
+                              $"{Describe(before)} -> {Describe(after)}, send 0x{update.SendFlags:X2}");
+        }
+
+        return hidden;
+    }
+
+    private static string Describe(FfxiEntityLook look) =>
+        look.IsEquipment
+            ? $"race {look.Race} face {look.Face} {look.Head}/{look.Body}/{look.Hands}/{look.Legs}/{look.Feet}"
+            : $"{look.Kind} model {look.ModelId}";
 
     /// <summary>
     /// Everything still believed to be nearby, forgetting anything that has

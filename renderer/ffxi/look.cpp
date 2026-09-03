@@ -98,12 +98,14 @@ std::vector<std::filesystem::path> lookFiles(const FileTable& table, const Look&
 
 bool parseLook(const std::string& text, Look& look)
 {
-    unsigned values[7] = {};
-    if (std::sscanf(text.c_str(), "%u,%u,%u,%u,%u,%u,%u", &values[0], &values[1], &values[2], &values[3], &values[4],
-                    &values[5], &values[6]) != 7)
+    unsigned values[8] = {1, 0, 0, 0, 0, 0, 0, 1};
+    const int given = std::sscanf(text.c_str(), "%u,%u,%u,%u,%u,%u,%u,%u", &values[0], &values[1], &values[2],
+                                  &values[3], &values[4], &values[5], &values[6], &values[7]);
+    if (given < 7)
     {
         return false;
     }
+    look.size = given >= 8 && values[7] <= 2 ? static_cast<uint8_t>(values[7]) : 1;
     if (values[0] < 1 || values[0] > 8)
     {
         return false;

@@ -84,6 +84,12 @@ public struct NativeRadarEntity
     /// </summary>
     public int Silhouette;
 
+    /// <summary>
+    /// 1 small, 2 medium, 3 large; 0 for nobody said, drawn medium. The
+    /// server's size plus one, so a struct left at zero reads as medium.
+    /// </summary>
+    public int Size;
+
     public unsafe void SetLook(Ffxi.FfxiEntityLook? look)
     {
         if (look is null)
@@ -168,6 +174,13 @@ public enum NativeFormRowKind
 
     /// <summary>Something to press, which ends the form.</summary>
     Button = 3,
+
+    /// <summary>
+    /// One option from several, unfolding into a list when pressed. Picking
+    /// one hands the form back at once with this row as the button, so the
+    /// caller can react to the change before anything else is pressed.
+    /// </summary>
+    Choice = 4,
 }
 
 /// <summary>
@@ -188,6 +201,18 @@ public sealed record NativeFormRow(NativeFormRowKind Kind, string Text, string V
 
     public static NativeFormRow Button(string text, bool enabled = true) =>
         new(NativeFormRowKind.Button, text, "", enabled);
+
+    /// <summary>
+    /// A dropdown: a caption, the options, and which is chosen. The value
+    /// carries all three as "&lt;selected&gt;;first|second|third", which is
+    /// the one shape the renderer and the caller both read.
+    /// </summary>
+    public static NativeFormRow Choice(string caption, IReadOnlyList<string> options, int selected,
+                                       bool enabled = true) =>
+        new(NativeFormRowKind.Choice, caption, EncodeChoice(selected, options), enabled);
+
+    internal static string EncodeChoice(int selected, IReadOnlyList<string> options) =>
+        $"{Math.Clamp(selected, 0, Math.Max(options.Count - 1, 0))};{string.Join('|', options)}";
 }
 
 /// <summary>
@@ -210,6 +235,20 @@ public sealed record NativeFormResult(int Button, IReadOnlyList<string> Values)
     /// value for. Saves every caller writing the same bounds check.
     /// </summary>
     public string this[int row] => row >= 0 && row < Values.Count ? Values[row] : string.Empty;
+
+    /// <summary>
+    /// Which option a <see cref="NativeFormRowKind.Choice"/> row holds, or
+    /// <paramref name="fallback"/> if that row is not a choice or did not come
+    /// back in the expected shape.
+    /// </summary>
+    public int Choice(int row, int fallback = 0)
+    {
+        string value = this[row];
+        int split = value.IndexOf(';');
+        return split > 0 && int.TryParse(value.AsSpan(0, split), out int chosen) && chosen >= 0
+            ? chosen
+            : fallback;
+    }
 }
 
 /// <summary>Blittable, laid out to match MhFormRow.</summary>
@@ -702,6 +741,19 @@ public sealed partial class NativeViewer : IDisposable
     }
 
     /// <summary>
+    /// Whether forms shown from now on stand against the left edge with the
+    /// world left bright beside them, for a screen about something standing
+    /// in the world. Off, they sit in the middle over a dimmed world.
+    /// </summary>
+    public void SetFormAside(bool aside)
+    {
+        if (!_disposed && _handle != IntPtr.Zero)
+        {
+            mh_viewer_set_form_aside(_handle, aside ? 1 : 0);
+        }
+    }
+
+    /// <summary>
     /// What the player pressed, or null while they are still filling the form
     /// in. Polled the same way <see cref="TakeChat"/> is, and answers once.
     /// </summary>
@@ -923,6 +975,9 @@ public sealed partial class NativeViewer : IDisposable
     [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
     private static unsafe partial void mh_viewer_set_form(IntPtr viewer, string title, string message,
                                                           NativeFormRowData* rows, int count);
+
+    [LibraryImport(LibraryName)]
+    private static partial void mh_viewer_set_form_aside(IntPtr viewer, int aside);
 
     [LibraryImport(LibraryName)]
     private static unsafe partial int mh_viewer_take_form_result(IntPtr viewer, out int button,

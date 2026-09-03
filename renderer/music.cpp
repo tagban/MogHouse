@@ -120,47 +120,64 @@ bool Music::play(const std::filesystem::path& path)
     }
 
     const std::string wanted = path.string();
-    std::lock_guard<std::mutex> held{state_->lock};
 
-    // The server mentions music on every zone-in, including the ones that did
-    // not change it. Restarting the same track each time would make walking
-    // between two rooms of one zone sound like a stutter.
-    if (wanted == state_->playing)
+    unsigned track = 0;
+    unsigned sampleRate = 0;
+    bool loops = false;
     {
-        return true;
-    }
+        std::lock_guard<std::mutex> held{state_->lock};
 
-    if (wanted.empty())
-    {
-        state_->playing.clear();
-        return true;
-    }
+        // The server mentions music on every zone-in, including the ones that
+        // did not change it. Restarting the same track each time would make
+        // walking between two rooms of one zone sound like a stutter.
+        if (wanted == state_->playing)
+        {
+            return true;
+        }
 
-    if (!state_->source.open(path))
-    {
-        std::printf("music: %s is not a BGW\n", wanted.c_str());
-        state_->playing.clear();
-        return false;
-    }
+        if (wanted.empty())
+        {
+            state_->playing.clear();
+            return true;
+        }
 
-    state_->playing = wanted;
+        if (!state_->source.open(path))
+        {
+            std::printf("music: %s is not a BGW\n", wanted.c_str());
+            state_->playing.clear();
+            return false;
+        }
+
+        state_->playing = wanted;
+        track = state_->source.track();
+        sampleRate = state_->source.sampleRate();
+        loops = state_->source.loops();
+    }
 
     // Tell the stream what rate this track is, rather than assuming the one the
     // device was opened at. Twenty-nine of the hundred and eleven tracks in a
     // retail install are 48000 and the rest are 44100; played at a flat 44100
     // those twenty-nine run about nine per cent slow, which sounds like a
     // slightly flat recording rather than like a bug, and so went unnoticed.
+    //
+    // Outside our lock, and it matters: SDL takes the stream's own lock in
+    // here, and its audio thread takes that same lock before calling feed(),
+    // which then takes ours. Holding ours across this call is the two locks
+    // taken in opposite orders, and the client froze on zone-in - the render
+    // thread here, the audio thread in feed(), each waiting on the other. It
+    // only happened for tracks that decode, which is why zones whose music
+    // is not a BGW never hung. A callback that lands between the swap above
+    // and this call reads a few frames at the old rate, which is nothing.
     SDL_AudioSpec source{};
     source.format = SDL_AUDIO_S16LE;
     source.channels = ffxi::BgwStream::kChannels;
-    source.freq = static_cast<int>(state_->source.sampleRate());
+    source.freq = static_cast<int>(sampleRate);
     if (!SDL_SetAudioStreamFormat(state_->stream, &source, nullptr))
     {
-        std::printf("music: could not set %u Hz: %s\n", state_->source.sampleRate(), SDL_GetError());
+        std::printf("music: could not set %u Hz: %s\n", sampleRate, SDL_GetError());
     }
 
-    std::printf("music: track %u, %u Hz%s\n", state_->source.track(), state_->source.sampleRate(),
-                state_->source.loops() ? ", looping" : ", once");
+    std::printf("music: track %u, %u Hz%s\n", track, sampleRate, loops ? ", looping" : ", once");
     return true;
 }
 

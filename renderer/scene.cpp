@@ -110,10 +110,63 @@ bool isWaterModel(const std::string& name)
             return true;
         }
     }
-    return lower.rfind("sea", 0) == 0 || lower.rfind("water", 0) == 0 || lower.rfind("ocean", 0) == 0 ||
-           lower.find("suimen") != std::string::npos;
+    // mizu is water and funmiz is the fountain's water, both in Bastok
+    // Markets: the canal and the basin at the top of the steps. Neither
+    // names a texture - the client paints the ripple sheet on at run time -
+    // so the texture rule below cannot find them, and the name has to.
+    return lower == "mizu" || lower == "funmiz" || lower.rfind("sea", 0) == 0 || lower.rfind("water", 0) == 0 ||
+           lower.rfind("ocean", 0) == 0 || lower.find("suimen") != std::string::npos;
 }
 
+/// The texture's own name: the second eight-byte half of the field, trimmed.
+std::string ownTextureName(const std::string& texture)
+{
+    std::string own = texture.size() > 8 ? texture.substr(8) : texture;
+    while (!own.empty() && (own.back() == ' ' || own.back() == 0))
+    {
+        own.pop_back();
+    }
+    return own;
+}
+
+} // namespace
+
+/// Whether a mesh is a water surface, by what it is textured with.
+///
+/// This is how the zones mark most of their water. East Ronfaure's stream is
+/// thirty-six placed meshes, ka1..ka22 and kb1..kb14, each a hand-built
+/// surface that follows its own stretch of bank downhill, and the only thing
+/// they have in common is the ripple sheet "effect  kaw1". A harbour's is
+/// "sea     sea01", a pond's ike1 or ike2, the open sea umi1 and umi2. The
+/// sheets are white with the ripple in their alpha - drawn as ordinary
+/// textured geometry they come out a static chalk slab, which is what the
+/// stream looked like before this.
+///
+/// The surfaces carry the blend flag - every one of the stream's does - so
+/// blending says nothing here. Spray and foam are told apart by their sheet
+/// instead: Bastok's fountain jets are "effect  umi02", which is not one of
+/// the surface sheets below, and stay with the zone pass.
+bool isWaterMesh(const std::string& modelName, const ffxi::ModelMesh& mesh)
+{
+    if (isWaterModel(modelName))
+    {
+        return true;
+    }
+    static const char* const kSheets[] = {"kaw1", "kaw2", "umi1", "umi2", "sea01", "ike1",
+                                          "ike2", "umna", "nami", "miz1", "miz2"};
+    const std::string own = ownTextureName(mesh.texture);
+    for (const char* sheet : kSheets)
+    {
+        if (own == sheet)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+namespace
+{
 Vec3 transformPoint(const float* m, const Vec3& p)
 {
     return {m[0] * p.x + m[4] * p.y + m[8] * p.z + m[12], m[1] * p.x + m[5] * p.y + m[9] * p.z + m[13],
@@ -144,7 +197,7 @@ size_t Scene::drawnTriangles() const
 
 Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, ffxi::Model>& models,
                  const std::unordered_map<std::string, ffxi::Texture>& textures, size_t& placementsResolved,
-                 size_t& placementsMissing)
+                 size_t& placementsMissing, const std::unordered_map<std::string, EffectParams>* effects)
 {
     placementsResolved = 0;
     placementsMissing = 0;
@@ -176,10 +229,13 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
     Vec3 lo{std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
     Vec3 hi{std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest()};
 
+    // Which ripple sheet the water meshes name, by how many triangles name
+    // it. An empty name is a vote too - see Scene::waterUntextured.
+    std::map<std::string, size_t> waterSheets;
+
     for (const auto& [name, transforms] : byModel)
     {
         const ffxi::Model& model = models.find(name)->second;
-        const bool water = isWaterModel(name);
 
         const uint32_t instanceOffset = static_cast<uint32_t>(scene.instances.size() / 16);
         for (const Mat4& transform : transforms)
@@ -196,6 +252,60 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
                 ++meshIndex;
                 continue;
             }
+
+            // Water goes to the water pass as world-space triangles rather
+            // than to the draw list. The pass draws one sheet scrolled over
+            // one bound texture, and the meshes carry their own heights - a
+            // stream slopes, a fountain basin sits above the plaza - so the
+            // geometry is exactly what the artists placed, under the banks
+            // where they tucked it, and the depth test trims it at the
+            // shoreline the way the retail client's does.
+            if (isWaterMesh(name, mesh))
+            {
+                waterSheets[mesh.texture] += (mesh.indices.size() / 3) * transforms.size();
+                for (const Mat4& transform : transforms)
+                {
+                    const uint32_t base = static_cast<uint32_t>(scene.waterVertices.size());
+                    for (const ffxi::ModelVertex& source : mesh.vertices)
+                    {
+                        const Vec3 world = transformPoint(
+                            transform.m, {source.position[0], source.position[1], source.position[2]});
+                        Vertex vertex{};
+                        vertex.position[0] = world.x;
+                        vertex.position[1] = world.y;
+                        vertex.position[2] = world.z;
+                        vertex.normal[1] = 1.0f;
+                        vertex.colour = source.colour;
+                        // The mesh's own mapping when it has a sheet, so the
+                        // ripples run the way its stream does; world-space
+                        // when it names none, which is what the fallback
+                        // sheets use and keeps a canal continuous.
+                        if (mesh.texture.empty())
+                        {
+                            vertex.uv[0] = world.x * 0.06f;
+                            vertex.uv[1] = world.z * 0.06f;
+                        }
+                        else
+                        {
+                            vertex.uv[0] = source.uv[0];
+                            vertex.uv[1] = source.uv[1];
+                        }
+                        scene.waterVertices.push_back(vertex);
+                        lo = {std::min(lo.x, world.x), std::min(lo.y, world.y), std::min(lo.z, world.z)};
+                        hi = {std::max(hi.x, world.x), std::max(hi.y, world.y), std::max(hi.z, world.z)};
+                    }
+                    for (uint16_t index : mesh.indices)
+                    {
+                        if (index < mesh.vertices.size())
+                        {
+                            scene.waterIndices.push_back(base + index);
+                        }
+                    }
+                }
+                ++meshIndex;
+                continue;
+            }
+            const bool water = false;
 
             auto texture = textures.find(mesh.texture);
             // Only the black-where-clear tell, deliberately.
@@ -237,6 +347,21 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
                                                 indexStart,
                                                 static_cast<uint32_t>(scene.indices.size()) - indexStart,
                                                 instanceOffset, static_cast<uint32_t>(transforms.size())});
+
+            // A generator's model with a texture animation is an effect draw,
+            // scrolled by the effect pass rather than shaded by the zone's.
+            if (effects && !mesh.texture.empty())
+            {
+                auto effect = effects->find(name);
+                if (effect != effects->end())
+                {
+                    InstancedDraw& placed = scene.draws.back();
+                    placed.effect = true;
+                    placed.scroll[0] = effect->second.scrollU;
+                    placed.scroll[1] = effect->second.scrollV;
+                    placed.nightOnly = effect->second.nightOnly;
+                }
+            }
 
             // Where a water model actually ends up, which is not where its
             // placement sits: the mesh carries its own heights and the
@@ -364,6 +489,20 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
         }
     }
 
+    size_t winning = 0;
+    for (const auto& [sheet, count] : waterSheets)
+    {
+        if (sheet.empty())
+        {
+            scene.waterUntextured = count;
+        }
+        if (count > winning)
+        {
+            winning = count;
+            scene.waterTexture = sheet;
+        }
+    }
+
     scene.boundsMin = lo;
     scene.boundsMax = hi;
     return scene;
@@ -418,6 +557,11 @@ void append(Scene& into, const Scene& extra)
         into.instanceRanges.emplace(name, std::pair<uint32_t, uint32_t>{range.first + instanceBase, range.second});
     }
 
+    if (into.waterTexture.empty())
+    {
+        into.waterTexture = extra.waterTexture;
+    }
+    into.waterUntextured += extra.waterUntextured;
     const auto waterBase = static_cast<uint32_t>(into.waterVertices.size());
     into.waterVertices.insert(into.waterVertices.end(), extra.waterVertices.begin(), extra.waterVertices.end());
     for (uint32_t index : extra.waterIndices)

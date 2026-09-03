@@ -46,9 +46,24 @@ namespace mh
 /// off, which is exactly what ours looked like.
 struct InteriorLighting
 {
+    /// The room's own times of day, or empty for a room that ships none and
+    /// is lit as the outdoors.
     ffxi::Lighting lighting;
     Vec3 boundsMin{};
     Vec3 boundsMax{};
+    /// Which of the zone's draws are this room's, so it can be left out of a
+    /// frame the player is not inside it for.
+    uint32_t firstDraw{};
+    uint32_t drawCount{};
+
+    bool holdsDraw(size_t draw) const { return draw >= firstDraw && draw < firstDraw + drawCount; }
+
+    bool contains(const Vec3& point, float margin) const
+    {
+        return point.x >= boundsMin.x - margin && point.x <= boundsMax.x + margin &&
+               point.y >= boundsMin.y - margin && point.y <= boundsMax.y + margin &&
+               point.z >= boundsMin.z - margin && point.z <= boundsMax.z + margin;
+    }
 
     bool contains(const Vec3& point) const
     {
@@ -132,6 +147,8 @@ struct RadarEntity
     /// does not exist yet is the first; everyone real is the second, so the one
     /// being pointed at is the one in full colour.
     int silhouette{};
+    /// 1 small, 2 medium, 3 large; 0 for nobody said. See MhRadarEntity.size.
+    int size{};
 
     /// Whether the server will accept a trigger on this one. Only these are
     /// worth picking with a cursor: an auction counter is a real entity with a
@@ -144,6 +161,45 @@ struct RadarEntity
     /// Whether this is a creature with a model of its own.
     bool hasModel() const { return modelId != 0; }
 };
+
+/// The child NPC races, as the server numbers them: 29 Mithra, 30 Elvaan,
+/// 31 Hume. Their own model files have not been found in the file table, so
+/// each is drawn as the grown race at a child's height - a stopgap that puts
+/// a walking, dressed figure where a blank shape stood, at the cost of the
+/// face and clothes being an adult's. Deriving their bases the way
+/// tools/pcmodels.py derived the adults' is the real answer.
+inline bool isChildRace(uint16_t race) { return race >= 29 && race <= 31; }
+
+inline uint16_t adultRaceFor(uint16_t race)
+{
+    switch (race)
+    {
+    case 29: return 7;   // Mithra
+    case 30: return 4;   // Elvaan, drawn as the woman
+    case 31: return 2;   // Hume, drawn as the woman
+    default: return race;
+    }
+}
+
+/// How much of a grown body's height a child is drawn at.
+inline constexpr float kChildScale = 0.68f;
+
+/// How much taller or shorter a body of this size is drawn than medium.
+///
+/// The game offers three sizes and draws them a little apart - enough that a
+/// large Galka and a small one are plainly not the same height. These are
+/// approximations of that, not measurements; the retail client's own factors
+/// have not been read out of it.
+inline float bodyScale(int size)
+{
+    switch (size)
+    {
+    case 1: return 0.92f;
+    case 3: return 1.08f;
+    default: return 1.0f;
+    }
+}
+
 
 /// Where a creature's model lives, from the id the server sends.
 ///
@@ -300,6 +356,11 @@ enum class FormRowKind
     /// Typed into like a Field, drawn as dots. Nothing else differs.
     Secret = 2,
     Button = 3,
+    /// One option from several. `value` is "<selected>;first|second|...".
+    /// Picking one hands the form back with this row as the button, so the
+    /// client can react at once - the figure being made changes race the
+    /// moment the race does.
+    Choice = 4,
 };
 
 /// One row of a form the renderer draws and the client fills in.
@@ -327,6 +388,10 @@ struct Form
     /// Shown under the buttons, for whatever went wrong last time.
     std::string message;
     std::vector<FormRow> rows;
+    /// Stood to the left of the window rather than in the middle, with the
+    /// world behind it left bright, so something standing in the world - a
+    /// character being made - can be seen beside it.
+    bool aside{false};
 };
 
 /// The live half of a running viewer: what a caller on another thread can
@@ -515,6 +580,10 @@ public:
     void chooseDeath(DeathChoice choice);
     DeathChoice takeDeathChoice();
 
+    /// Whether forms put up from now on stand aside - see Form::aside.
+    void setFormAside(bool on);
+    bool formAside() const;
+
     /// Puts a form up, or takes it down with an empty one. Replacing a form
     /// while one is showing is how a screen moves on to the next.
     void setForm(Form form);
@@ -647,6 +716,7 @@ private:
     std::string look_;
     bool lookChanged_{false};
     std::atomic<bool> lineup_{false};
+    std::atomic<bool> formAside_{false};
     std::atomic<bool> hud_{true};
     std::atomic<bool> riding_{false};
     uint32_t serverClock_{0};

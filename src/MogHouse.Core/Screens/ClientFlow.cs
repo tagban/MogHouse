@@ -48,11 +48,17 @@ public static class ClientFlow
         // DATs, so no glyph atlas and nothing to draw a screen with. The
         // platform's own folder chooser is the only prompt that works at this
         // point, and like the window it has to be opened on this thread.
-        if (FfxiInstall.EnsureChosen(say: line => say.WriteLine(line)) is null)
+        if (FfxiInstall.EnsureChosen(say: line => say.WriteLine(line)) is not { } install)
         {
             say.WriteLine("No Final Fantasy XI installation was chosen; there is nothing to run.");
             return 1;
         }
+
+        // Said to the native side as well, whether it was chosen just now or
+        // remembered from last time: the renderer finds the DATs through this
+        // variable, and outside Windows there is no registry to fall back on.
+        Interop.NativeEnvironment.Set("MOGHOUSE_FFXI_INSTALL", install);
+        say.WriteLine($"startup: game files at {install}");
 
         LiveRadar world = LiveRadar.OpenEmpty(ownThread: false);
 
@@ -105,7 +111,34 @@ public static class ClientFlow
                 return;
             }
 
-            var game = new FfxiGameSession(new FfxiHuffman(tables));
+            // Server-side data the project does not ship: zone lines, so that
+            // walking to the edge of a zone changes zone, and navmeshes. Both
+            // optional, and the log says what is missing rather than the
+            // client silently doing less.
+            string? zoneData = ServerData("MOGHOUSE_FFXI_ZONEDATA", "zones");
+            string? navMeshes = ServerData("MOGHOUSE_FFXI_NAVMESHES", "navmeshes");
+            say.WriteLine($"startup: zone data {(zoneData ?? "(none - no zone lines)")}");
+            say.WriteLine($"startup: navmeshes {(navMeshes ?? "(none)")}");
+
+            // The install is also where NPC dialogue lives; the server only
+            // sends line ids, so without this an NPC is seen to speak and not
+            // heard.
+            FfxiFileTable? files = null;
+            try
+            {
+                files = new FfxiFileTable(FfxiFileTable.DefaultInstallRoot());
+            }
+            catch (Exception error)
+            {
+                say.WriteLine($"startup: the install's file table could not be read: {error.Message}");
+            }
+
+            var game = new FfxiGameSession(new FfxiHuffman(tables), navMeshes, zoneData, files);
+
+            // The session explaining itself - "Placed by the server at...",
+            // "Ignored a placement for..." - is the one place that says why a
+            // teleport did or did not happen, so it goes to the log.
+            game.Status += message => say.WriteLine($"session: {message}");
 
             SignIn(screens, world, game, say);
         }
@@ -235,7 +268,7 @@ public static class ClientFlow
                 continue;
             }
 
-            FfxiNewCharacter? wanted = CharacterScreens.Make(screens);
+            FfxiNewCharacter? wanted = CharacterScreens.Make(screens, world);
             if (wanted is null)
             {
                 message = "";
@@ -295,6 +328,17 @@ public static class ClientFlow
                 ? $"{character.Name.ToUpperInvariant()} IS STILL LOGGED IN. TRY AGAIN IN A MINUTE."
                 : refused.Message.ToUpperInvariant();
         }
+        catch (Exception failed) when (failed is InvalidOperationException or System.Net.Sockets.SocketException
+                                                 or TimeoutException or OperationCanceledException)
+        {
+            // The zone server not answering, or answering in a key this side
+            // does not hold - seen straight after a refused entry, when the
+            // map server is still tearing the old session down. Either way it
+            // is a failed attempt and not a broken client: back to character
+            // select with the reason, where trying again a moment later works.
+            say.WriteLine($"could not enter the world as {character.Name}: {failed.Message}");
+            return "THE ZONE SERVER DID NOT ANSWER PROPERLY. TRY AGAIN IN A MOMENT.";
+        }
 
         FfxiZoneLoginReply? state = game.ZoneState;
         if (state is null)
@@ -316,7 +360,7 @@ public static class ClientFlow
 
         // Who the player turned out to be. None of this was known when the
         // window opened, which is the whole reason it can be said now.
-        world.SetPlayer(character.Name, FfxiAppearance.LookString(character.Race, character.Face));
+        world.SetPlayer(character.Name, FfxiAppearance.LookString(character.Race, character.Face, character.Size));
         world.SetClock(state.GameTime);
 
         string zoneName = FfxiZoneNames.Label(state.ZoneNo) ?? $"ZONE {state.ZoneNo}";
@@ -341,6 +385,34 @@ public static class ClientFlow
         new WorldLoop(game, world, tracker, state.ZoneNo, character.Name, say).Run();
 
         say.WriteLine("the window closed; leaving the world");
+        return null;
+    }
+
+    /// <summary>
+    /// Server-side data: what the environment says, or a folder beside the
+    /// executable, or nothing.
+    ///
+    /// Both of these are optional and the client says what it loses without
+    /// them, but a packaged build that ships a folder nobody looks in is worse
+    /// than one that ships nothing - which is exactly what happened the first
+    /// time: 836 files of zone data in the zip, and "no zone lines" in the log.
+    /// </summary>
+    private static string? ServerData(string variable, string folder)
+    {
+        if (Environment.GetEnvironmentVariable(variable) is { Length: > 0 } configured)
+        {
+            return configured;
+        }
+
+        foreach (string root in new[] { AppContext.BaseDirectory, Path.Combine(AppContext.BaseDirectory, "data") })
+        {
+            string beside = Path.Combine(root, folder);
+            if (Directory.Exists(beside))
+            {
+                return beside;
+            }
+        }
+
         return null;
     }
 }
