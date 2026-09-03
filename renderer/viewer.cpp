@@ -610,6 +610,24 @@ bool isLightSource(const std::string& texture)
     return own == "light" || own == "light2";
 }
 
+/// Whether a generator belongs to this zone or to the library every zone
+/// carries a copy of.
+///
+/// `fser` and `fses` hold the same 39 and 32 generators in every DAT - checked
+/// across Southern San d'Oria, Bastok Markets and East Ronfaure, identical
+/// counts in all three. They are the effects the game fires when something
+/// happens, a spell landing or a weapon skill, rather than anything standing
+/// in the world, and every one of them says it is at the origin because where
+/// it goes is settled when it is used.
+///
+/// The zone's own generators are in `effe` and `mode`, and between them those
+/// two have not one generator at the origin in any zone looked at.
+bool isTriggeredEffectLibrary(const std::string& directory)
+{
+    return directory.find("/fser") != std::string::npos ||
+           directory.find("/fses") != std::string::npos;
+}
+
 /// Placed models the retail client does not show, from assets/hidden-models.txt:
 /// the older of two versions of a building the placement table lists at the
 /// same spot. See the file for the case and what is not known.
@@ -1065,6 +1083,17 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
     std::unordered_map<std::string, mh::EffectParams> skyParams;
     for (const ffxi::EffectPlacement& effect : generated)
     {
+        // Not the zone's furniture: the library every DAT carries, which says
+        // it stands at the origin because it is placed when it is fired. Drawn
+        // as scenery they stack up at 0,0,0 - in Southern San d'Oria that is
+        // seventy-odd torch flames burning on the pavement a few paces from
+        // where a player zones in, with nothing under them. Left in under
+        // MOGHOUSE_ALL_GENERATORS, which exists to look at exactly this.
+        if (!everyGenerator && isTriggeredEffectLibrary(effect.directory))
+        {
+            continue;
+        }
+
         // A generator whose id has a sprite animation places one, whether or
         // not it also has a mesh: hi12 has both, the flame and its haze; the
         // lamp glow lt has the sprite alone. Sky and hidden ones excepted.
