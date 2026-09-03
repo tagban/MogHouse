@@ -610,6 +610,28 @@ bool isLightSource(const std::string& texture)
     return own == "light" || own == "light2";
 }
 
+/// The same thing, asked of the directory rather than the texture.
+///
+/// The name test above catches Bastok Markets, whose light sheets are actually
+/// called "light" and "light2". It catches nothing in West Ronfaure, where the
+/// same job is done by sheets named hit3 and hit4 - so forty-two of them drew,
+/// as pale pixelated discs two and a half to three units across, sitting over
+/// every torch and waterfall and washing out the trees behind them.
+///
+/// What both have in common is where they live: a `ligh` directory. West
+/// Ronfaure's are under `mode/ligh/taki` and `mode/ligh/s_li`, Bastok's under
+/// `effe/ligh`. The directory is the reliable signal and the texture name was
+/// the incidental one.
+///
+/// Same reasoning as before: these mark where a lamp throws light on the
+/// ground, retail draws nothing for them, and the lighting they should cast is
+/// not built yet - so for now they are left out rather than drawn.
+bool isLightDirectory(const std::string& directory)
+{
+    return directory.find("/ligh/") != std::string::npos ||
+           (directory.size() >= 5 && directory.compare(directory.size() - 5, 5, "/ligh") == 0);
+}
+
 /// Which of a zone's four skies the weather calls for.
 ///
 /// A zone's DAT ships exactly four - `suny`, `fine`, `clod` and `mist`, each
@@ -1170,12 +1192,28 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
             // it. Drawn, they were the white flares hanging beside every
             // lantern and over the player's head. The lighting they should
             // cast is not built yet, so for now they are simply left out.
-            if (animation != sprites.end() && isLightSource(animation->second.texture))
+            if (animation != sprites.end() &&
+                (isLightSource(animation->second.texture) || isLightDirectory(effect.directory)))
             {
                 animation = sprites.end();
             }
             if (animation != sprites.end())
             {
+                // MOGHOUSE_SPRITE_WATCH=1 says what each placed sprite is, how
+                // big it was told to be and where it went. A lamp halo that is
+                // too large and one that is drawn from the wrong sheet look the
+                // same from inside the zone.
+                static const bool watchSprites = std::getenv("MOGHOUSE_SPRITE_WATCH") != nullptr;
+                if (watchSprites)
+                {
+                    std::printf("sprite %-6s tex %-16s scale %.2f x %.2f  at %8.1f %8.1f %8.1f  fade %.0f %.0f %.0f %.0f  %s\n",
+                                effect.modelId.c_str(), animation->second.texture.c_str(),
+                                effect.scale[0], effect.scale[1],
+                                effect.translate[0], -effect.translate[1], -effect.translate[2],
+                                effect.fade[0], effect.fade[1], effect.fade[2], effect.fade[3],
+                                effect.directory.c_str());
+                }
+
                 mh::SpriteInstance instance;
                 // The DAT's frame to the world's: (x, -y, -z), as everywhere.
                 instance.centre = {effect.translate[0], -effect.translate[1], -effect.translate[2]};
