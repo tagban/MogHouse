@@ -78,7 +78,17 @@ fn shade(in : VertexOut, cutout : bool) -> vec4<f32> {
     // Against the texture's own alpha, not the combined one. Vertex alpha is
     // a shading term on terrain and folding it into a discard test takes the
     // ground with it.
-    if (cutout && sampled.a < 0.03) {
+    //
+    // Cut at the midpoint, which is what an alpha test is for. It used to cut
+    // at 0.03, which discards only an exact zero: DXT3 alpha is four bits, so
+    // the smallest step above nothing is 1/15 - about 0.067 - and a texel the
+    // artist meant as invisible but stored one step up survived. These
+    // pipelines do not blend, so surviving means drawn at full strength, and
+    // what a cutout texture holds where it is transparent is black. That is
+    // where the black cards around every leaf came from. Bilinear filtering
+    // makes it worse by putting intermediate alpha along each edge, which is
+    // exactly the band a midpoint test is meant to split.
+    if (cutout && sampled.a < 0.5) {
         discard;
     }
 
