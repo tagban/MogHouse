@@ -5053,6 +5053,7 @@ constexpr float kGravity = 26.0f;
 
         uint32_t best = 0;
         float bestDepth = 0.0f;
+        float bestOffBy = 0.0f;
         for (const mh::RadarEntity& entity : radarEntities)
         {
             // Anything with a body, whether or not the server flagged it.
@@ -5100,9 +5101,24 @@ constexpr float kGravity = 26.0f;
                 continue;
             }
 
-            if (best == 0 || clipW < bestDepth)
+            // How centrally the click landed on this one, as a fraction of its
+            // own radius - so a big near body and a small far one are judged
+            // on the same scale rather than the near one always winning.
+            //
+            // This used to be decided by depth alone: every body whose radius
+            // held the cursor was a candidate, and the one nearest the camera
+            // took it. That is a fair guess for NPCs scattered about a zone,
+            // which is all there was when it was written. It is quite wrong for
+            // a row of characters standing shoulder to shoulder - these radii
+            // are generous, in a line-up they overlap almost entirely, and the
+            // whole row's clicks went to whichever figure happened to stand
+            // closest to the camera. Character select always chose that one
+            // person however carefully you aimed at somebody else.
+            const float offBy = (dx * dx + dy * dy) / (onScreen * onScreen);
+            if (best == 0 || offBy < bestOffBy || (offBy == bestOffBy && clipW < bestDepth))
             {
                 best = entity.id;
+                bestOffBy = offBy;
                 bestDepth = clipW;
             }
         }
