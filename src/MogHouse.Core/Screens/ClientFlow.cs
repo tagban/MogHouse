@@ -350,14 +350,35 @@ public static class ClientFlow
         }
         catch (FfxiLoginErrorException refused)
         {
-            // The commonest of these by far is the server still holding a
-            // session for a client closed moments ago, which clears itself
-            // after about a minute - so it is worth saying that rather than
-            // just repeating the server's own wording.
+            // Two of these are ordinary and both are worth saying properly.
+            // The server's own wording is written for whoever reads its
+            // source: it names the table, the key and the insert that failed,
+            // which tells the person holding the mouse nothing they can act
+            // on. What they need is what to do next.
             say.WriteLine($"the server would not let {character.Name} in: {refused.Message}");
-            return refused.Message.Contains("ALREADY_LOGGED_IN", StringComparison.OrdinalIgnoreCase)
-                ? $"{character.Name.ToUpperInvariant()} IS STILL LOGGED IN. TRY AGAIN IN A MINUTE."
-                : refused.Message.ToUpperInvariant();
+
+            string who = character.Name.ToUpperInvariant();
+
+            // The commonest by far: a client closed moments ago and the server
+            // is still holding the session. It clears itself.
+            if (refused.Message.Contains("ALREADY_LOGGED_IN", StringComparison.OrdinalIgnoreCase))
+            {
+                return $"{who} IS STILL LOGGED IN. THE SERVER LETS GO ABOUT A MINUTE AFTER THE LAST " +
+                       "CLIENT CLOSED - WAIT A MOMENT AND PICK THEM AGAIN.";
+            }
+
+            // The other one, which reads as a connection fault and is not.
+            // accounts_sessions has a unique key on the account, so a second
+            // character on the same account is refused with "unable to connect
+            // to world server" - a message about the world server that has
+            // nothing to do with the world server.
+            if (refused.Message.Contains("UNABLE_TO_CONNECT_TO_WORLD_SERVER", StringComparison.OrdinalIgnoreCase))
+            {
+                return "ANOTHER CHARACTER ON THIS ACCOUNT IS STILL LOGGED IN. ONLY ONE AT A TIME - " +
+                       "CLOSE THE OTHER CLIENT, WAIT ABOUT A MINUTE, AND TRY AGAIN.";
+            }
+
+            return refused.Message.ToUpperInvariant();
         }
         catch (Exception failed) when (failed is InvalidOperationException or System.Net.Sockets.SocketException
                                                  or TimeoutException or OperationCanceledException)

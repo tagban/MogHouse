@@ -80,21 +80,37 @@ public static class CharacterScreens
 
         world.ShowLineup(cast);
 
-        // No panel. The people standing there are the choice - a dialog listing
-        // the same names in front of them is asking the question twice, and it
-        // covers the very thing it is asking about.
-        screens.Clear();
+        // No panel in the ordinary case. The people standing there are the
+        // choice - a dialog listing the same names in front of them is asking
+        // the question twice, and it covers the very thing it is asking about.
+        //
+        // A failure is the exception, and goes in front.
+        //
+        // This used to go to the chat line, on the reasoning that a box over
+        // the roster covers the very thing it is about. The reasoning was
+        // sound and the place was not: the chat log is switched off during the
+        // screens - there is no world for it to be about yet - so every
+        // explanation was written to a panel that is not drawn. A server
+        // refusing a character with "still logged in, try again in a minute"
+        // looked exactly like a client that did nothing when clicked.
+        //
+        // Acknowledged rather than flashed past, because it ends the step:
+        // whoever clicked is owed a reason they cannot miss. The line-up is
+        // put up afterwards, so nothing covers it.
+        if (message.Length > 0)
+        {
+            screens.Tell("THAT DID NOT WORK", message);
+        }
 
+        // Same reasoning: an empty account needs telling what to do, and the
+        // chat line it used to be told through is not drawn here either.
         if (named.Count == 0)
         {
-            world.Say(null, "No characters on this account yet - pick the Mithra to make one.");
+            screens.Tell("NOBODY HERE YET",
+                         "THIS ACCOUNT HAS NO CHARACTERS. PICK THE MITHRA TO MAKE ONE.");
         }
-        else if (message.Length > 0)
-        {
-            // Whatever went wrong last time goes to the chat line rather than
-            // into a box over the roster.
-            world.Say(null, message);
-        }
+
+        screens.Clear();
 
         try
         {

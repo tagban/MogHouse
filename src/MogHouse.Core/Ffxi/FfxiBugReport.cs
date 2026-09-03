@@ -59,25 +59,87 @@ public static class FfxiBugReport
             return fromEnvironment.Trim();
         }
 
-        try
+        foreach (string directory in WebhookDirectories())
         {
-            string beside = Path.Combine(FfxiServerProfileStore.DefaultConfigDirectory(), "bug-webhook.txt");
-            if (File.Exists(beside))
+            try
             {
-                string url = File.ReadAllText(beside).Trim();
-                return url.Length > 0 ? url : null;
+                string path = Path.Combine(directory, WebhookFileName);
+                if (File.Exists(path))
+                {
+                    string url = File.ReadAllText(path).Trim();
+                    if (url.Length > 0)
+                    {
+                        return url;
+                    }
+                }
             }
-        }
-        catch (Exception)
-        {
+            catch (Exception)
+            {
+            }
         }
 
         return null;
     }
 
-    /// <summary>Where the reports go - beside moghouse.log, which is already writable.</summary>
-    public static string FilePath =>
-        Path.Combine(FfxiServerProfileStore.DefaultConfigDirectory(), "bug-reports.md");
+    /// <summary>The name the packaging scripts write, and this reads.</summary>
+    public const string WebhookFileName = "bug-webhook.txt";
+
+    /// <summary>
+    /// Everywhere a webhook might have been put, nearest first.
+    ///
+    /// Three, because three different things need it. A shipped build carries
+    /// one written in at packaging time, and finds it beside the executable or
+    /// under data/ with the rest of the runtime. Somebody working on the client
+    /// runs it through `dotnet run`, where "beside the executable" is
+    /// bin/Debug and gets wiped by a clean, so their own copy lives in the
+    /// per-user directory instead - which is also where tools/bugs.py looks,
+    /// so the two halves agree.
+    ///
+    /// Getting this wrong is what made the first real /bug report say "no
+    /// webhook is configured" while the file sat there in the other directory.
+    /// </summary>
+    private static IEnumerable<string> WebhookDirectories()
+    {
+        yield return AppContext.BaseDirectory;
+        yield return Path.Combine(AppContext.BaseDirectory, "data");
+        yield return FfxiServerProfileStore.DefaultConfigDirectory();
+        yield return PerUserDirectory();
+    }
+
+    /// <summary>
+    /// The per-user directory, whatever the config directory turned out to be.
+    ///
+    /// <see cref="FfxiServerProfileStore.DefaultConfigDirectory"/> prefers
+    /// beside the executable when that is writable, which is right for a
+    /// portable folder and wrong for anything a person drops in by hand.
+    /// </summary>
+    private static string PerUserDirectory()
+    {
+        try
+        {
+            string data = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (data.Length == 0)
+            {
+                return Path.GetTempPath();
+            }
+            return Path.Combine(data, "MogHouse");
+        }
+        catch (Exception)
+        {
+            return Path.GetTempPath();
+        }
+    }
+
+    /// <summary>
+    /// Where the reports go.
+    ///
+    /// The per-user directory rather than the config directory, which prefers
+    /// beside the executable: under `dotnet run` that is bin/Debug, so the
+    /// first real report landed in a build output folder that the next clean
+    /// would have deleted. Reports are worth keeping and are read back by
+    /// tools/bugs.py, which looks here.
+    /// </summary>
+    public static string FilePath => Path.Combine(PerUserDirectory(), "bug-reports.md");
 
     /// <summary>Everything worth knowing about the moment somebody hit /bug.</summary>
     public sealed record Context(
@@ -184,7 +246,9 @@ public static class FfxiBugReport
             if (screenshot is not null && File.Exists(screenshot))
             {
                 var picture = new ByteArrayContent(await File.ReadAllBytesAsync(screenshot, ct));
-                picture.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/bmp");
+                string kind = Path.GetExtension(screenshot).Equals(".png", StringComparison.OrdinalIgnoreCase)
+                    ? "image/png" : "image/bmp";
+                picture.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(kind);
                 form.Add(picture, "files[0]", Path.GetFileName(screenshot));
             }
 

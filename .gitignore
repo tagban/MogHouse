@@ -17,6 +17,13 @@ bin/
 build-engine/
 build/
 local.credentials.json
+
+# The bug-report webhook and the bot token that reads the channel back. These
+# are written into a build at packaging time and belong in a build, not here -
+# a repository is permanently searchable, keeps what you delete, and is
+# scraped. See tools/package-*.sh.
+bug-webhook.txt
+bug-bot-token.txt
 obj/
 out/
 

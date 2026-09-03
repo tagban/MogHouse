@@ -151,6 +151,29 @@ Copy-Item (Join-Path $root "renderer\assets\font.*") $assets -Force
 Copy-Item (Join-Path $root "renderer\assets\subrooms.txt") $assets -Force
 Copy-Item (Join-Path $root "renderer\assets\hidden-models.txt") $assets -Force
 
+# --- where bug reports go -----------------------------------------------------
+
+# `/bug` posts to a Discord webhook and a tester cannot configure one, so a
+# shipped build carries it. In the build, not in the repository: anything
+# shipped can be taken apart, which a webhook survives - the worst it allows is
+# posting into one channel, revoked in a click - while a repository is
+# permanently searchable and keeps what you delete.
+#
+# Without one, /bug still writes its local file and says nobody has seen it.
+Step "Bug report webhook"
+$webhook = $env:MOGHOUSE_BUG_WEBHOOK
+if (-not $webhook) {
+    $local = Join-Path $env:LOCALAPPDATA "MogHouse\bug-webhook.txt"
+    if (Test-Path $local) { $webhook = (Get-Content $local -Raw).Trim() }
+}
+if ($webhook) {
+    Set-Content -Path (Join-Path $data "bug-webhook.txt") -Value $webhook -NoNewline
+    Write-Host "    bug-webhook.txt (reports will reach the channel)"
+} else {
+    Warn "No bug webhook: /bug will write its local file and go no further. Set MOGHOUSE_BUG_WEBHOOK to include one."
+}
+
+
 if ($NoWater) {
     Warn "No water: canals and seas will be dry."
 } else {

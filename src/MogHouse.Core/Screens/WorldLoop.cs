@@ -342,7 +342,14 @@ public sealed class WorldLoop
             // standards and an unnoticeable one by anybody else's.
             Thread.Sleep(200);
 
-            string outcome = FfxiBugReport.SendAsync(now, File.Exists(shot) ? shot : null)
+            // As a PNG. The renderer writes a BMP because that needs no
+            // encoder, which is right for a debugging aid and wrong for
+            // something to send: a 2560x1440 frame is eleven megabytes
+            // uncompressed and Discord will not take it from most accounts.
+            // If the conversion fails, send the BMP rather than nothing.
+            string? picture = File.Exists(shot) ? (FfxiPng.FromBmp(shot) ?? shot) : null;
+
+            string outcome = FfxiBugReport.SendAsync(now, picture)
                                           .GetAwaiter().GetResult();
             _say.WriteLine($"  {outcome}");
             _world.Say(null, $"Reported: {what} ({outcome}).");

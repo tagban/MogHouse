@@ -190,6 +190,35 @@ cp "$root/renderer/assets/font."* "$data/assets/"
 cp "$root/renderer/assets/subrooms.txt" "$data/assets/"
 cp "$root/renderer/assets/hidden-models.txt" "$data/assets/"
 
+# --- where bug reports go -----------------------------------------------------
+
+# `/bug` posts to a Discord webhook, and a tester has no way to configure one -
+# so a shipped build has to carry it. Taken from MOGHOUSE_BUG_WEBHOOK or from
+# the per-user copy, and written into data/ beside the runtime.
+#
+# In the build, not in the repository. Anything shipped can be taken apart, so
+# this URL should be treated as public to anyone holding the client - which is
+# survivable for a webhook, because the worst it allows is posting into one
+# channel and it is revoked in a click. A repository is different: it is
+# permanently searchable and scraped, and history keeps what you delete.
+#
+# Without one, /bug still writes its local file and says nobody has seen it.
+step "Bug report webhook"
+webhook="${MOGHOUSE_BUG_WEBHOOK:-}"
+if [ -z "$webhook" ] && [ -f "$HOME/Library/Application Support/MogHouse/bug-webhook.txt" ]; then
+    webhook="$(cat "$HOME/Library/Application Support/MogHouse/bug-webhook.txt")"
+fi
+if [ -z "$webhook" ] && [ -f "$HOME/.local/share/MogHouse/bug-webhook.txt" ]; then
+    webhook="$(cat "$HOME/.local/share/MogHouse/bug-webhook.txt")"
+fi
+if [ -n "$webhook" ]; then
+    printf '%s\n' "$webhook" > "$data/bug-webhook.txt"
+    echo "    bug-webhook.txt (reports will reach the channel)"
+else
+    warn "No bug webhook: /bug will write its local file and go no further. Set MOGHOUSE_BUG_WEBHOOK to include one."
+fi
+
+
 if [ "$NO_WATER" -eq 1 ]; then
     warn "No water: canals and seas will be dry."
 else

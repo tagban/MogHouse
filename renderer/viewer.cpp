@@ -8345,7 +8345,21 @@ constexpr float kGravity = 26.0f;
 
                     if (typing)
                     {
-                        place("> " + typed + "_", -0.98f, -0.97f, 0.4f, kHudBright, 0.0f, false);
+                        // The tail, not the head. A HUD string is forty-eight
+                        // characters and the line was drawn from its start, so
+                        // past that the screen simply stopped changing while
+                        // the keys still went in - which reads as typing
+                        // having broken, and stops people mid-sentence. It
+                        // did: the first real bug report came in at
+                        // sixty-eight characters, cut mid-word, with nothing
+                        // wrong with the buffer at all.
+                        //
+                        // Every text field in the world scrolls to keep the
+                        // caret in view. This one now does too.
+                        constexpr size_t kRoom = static_cast<size_t>(mh::kHudChars) - 3;
+                        const std::string shown =
+                            typed.size() > kRoom ? typed.substr(typed.size() - kRoom) : typed;
+                        place("> " + shown + "_", -0.98f, -0.97f, 0.4f, kHudBright, 0.0f, false);
                     }
                 }
 
@@ -9048,9 +9062,41 @@ constexpr float kGravity = 26.0f;
                 ++drawn;
             }
 
-            if (!activeForm.message.empty() && drawn < mh::kDialogRows)
+            // Wrapped, not cut. A row holds forty characters and the message
+            // was drawn as one, so every explanation longer than that lost its
+            // end - and the messages worth showing here are the ones that
+            // explain something, which are exactly the long ones. "ANOTHER
+            // CHARACTER ON THIS ACCOUNT IS STILL LOGGED IN..." stopped at
+            // "ACCOUNT".
+            //
+            // Broken at spaces where there is one, and mid-word only for a
+            // word longer than a line, which is not a thing English does but
+            // is a thing a server's error code does.
+            if (!activeForm.message.empty())
             {
-                addText(-1, activeForm.message, kMessageScale, kDialogTitle, mh::FormRowKind::Label, false);
+                const size_t width = static_cast<size_t>(mh::kDialogChars);
+                size_t at = 0;
+                while (at < activeForm.message.size() && drawn < mh::kDialogRows)
+                {
+                    size_t take = std::min(width, activeForm.message.size() - at);
+                    if (at + take < activeForm.message.size())
+                    {
+                        const size_t space = activeForm.message.rfind(' ', at + take);
+                        if (space != std::string::npos && space > at)
+                        {
+                            take = space - at;
+                        }
+                    }
+
+                    addText(-1, activeForm.message.substr(at, take), kMessageScale, kDialogTitle,
+                            mh::FormRowKind::Label, false);
+
+                    at += take;
+                    while (at < activeForm.message.size() && activeForm.message[at] == ' ')
+                    {
+                        ++at;
+                    }
+                }
             }
 
             // A form too tall for the uniform simply stops being drawn part way
