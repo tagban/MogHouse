@@ -647,6 +647,18 @@ public sealed partial class NativeViewer : IDisposable
     }
 
     /// <summary>
+    /// The weather the zone is under, as the server numbers it. Which of the
+    /// zone's four skies that calls for is the renderer's decision.
+    /// </summary>
+    public void SetWeather(int weather)
+    {
+        if (!_disposed && _handle != IntPtr.Zero)
+        {
+            mh_viewer_set_weather(_handle, weather);
+        }
+    }
+
+    /// <summary>
     /// Puts the character aboard the monorail, or takes them off.
     ///
     /// While aboard the train carries them - walking and gravity are ignored -
@@ -968,6 +980,9 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static partial void mh_viewer_set_clock(IntPtr viewer, uint serverClock);
+
+    [LibraryImport(LibraryName)]
+    private static partial void mh_viewer_set_weather(IntPtr viewer, int weather);
 
     [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
     private static partial void mh_viewer_set_player(IntPtr viewer, string? name, string? look);

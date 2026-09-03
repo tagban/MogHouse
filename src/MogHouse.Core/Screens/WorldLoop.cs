@@ -68,6 +68,7 @@ public sealed class WorldLoop
         // up.
         _world.ShowDeath(_session.IsDead, _session.HasRaiseOffer);
         _world.ShowZoneLines(_session.ZoneLines);
+        _world.ShowWeather(_session.CurrentWeather);
         PlayMusic(_session.CurrentTrack);
 
         try
@@ -86,6 +87,7 @@ public sealed class WorldLoop
         _session.EntitiesChanged += OnEntities;
         _session.ZoneChanged += OnZoneChanged;
         _session.MusicChanged += PlayMusic;
+        _session.WeatherChanged += OnWeatherChanged;
         _session.MovedByServer += OnMovedByServer;
         _session.DeathChanged += OnDeathChanged;
         _session.RaiseOfferChanged += OnRaiseOfferChanged;
@@ -97,6 +99,7 @@ public sealed class WorldLoop
         _session.EntitiesChanged -= OnEntities;
         _session.ZoneChanged -= OnZoneChanged;
         _session.MusicChanged -= PlayMusic;
+        _session.WeatherChanged -= OnWeatherChanged;
         _session.MovedByServer -= OnMovedByServer;
         _session.DeathChanged -= OnDeathChanged;
         _session.RaiseOfferChanged -= OnRaiseOfferChanged;
@@ -268,6 +271,20 @@ public sealed class WorldLoop
     /// rather than computes, and a track this install does not have goes quiet
     /// rather than failing.
     /// </summary>
+    /// <summary>
+    /// The weather turning while somebody is standing in it.
+    ///
+    /// Handed on so the next zone comes up under the right sky. It does not
+    /// change the one overhead: a zone's sky is built with the zone, and
+    /// swapping it without reloading everything else needs a rebuild path that
+    /// does not exist yet.
+    /// </summary>
+    private void OnWeatherChanged(FfxiWeather weather)
+    {
+        _say.WriteLine($"the weather turned to {weather}");
+        _world.ShowWeather(weather);
+    }
+
     private void PlayMusic(int track)
     {
         string? path = FfxiMusicFile.Resolve(FfxiInstall.Find() ?? "", track);
@@ -309,6 +326,9 @@ public sealed class WorldLoop
 
         string name = FfxiZoneNames.Label(zone) ?? $"zone {zone}";
         _say.WriteLine($"zoning to {zone} ({name})");
+
+        // Told before the zone is read, because that is when its sky is built.
+        _world.ShowWeather(_session.CurrentWeather);
 
         if (_world.LoadZone((int)zone, name, _session.PosX, _session.PosVertical, _session.PosDepth,
                             _session.Facing))

@@ -36,7 +36,8 @@ public sealed record FfxiZoneLoginReply(
     ushort EventPara = 0,
     ushort EventMode = 0,
     uint LoginState = 0,
-    IReadOnlyList<ushort>? Music = null)
+    IReadOnlyList<ushort>? Music = null,
+    FfxiWeather Weather = FfxiWeather.None)
 {
     public const ushort PacketId = 0x00A;
     public const int PacketSize = 260;
@@ -79,6 +80,21 @@ public sealed record FfxiZoneLoginReply(
     private const int OffsetEventPara = Body + 96;
     private const int OffsetEventMode = Body + 98;
     private const int OffsetLoginState = Body + 124;
+
+    /// <summary>
+    /// The zone's weather when we walked in, which is the only way to know it:
+    /// the server sends 0x057 when it changes, and a client that only listened
+    /// for that would stand under whatever the last zone had until the weather
+    /// happened to turn.
+    ///
+    /// Counted forward through the server's own struct and landing between two
+    /// offsets already confirmed against live traffic - EventMode ends at 100
+    /// and LoginState begins at 124, with WeatherNumber2 and the three weather
+    /// timers filling the gap. Only the current one is read; the second and
+    /// the timers are what drive a weather that is part way through changing,
+    /// and nothing here can use them yet.
+    /// </summary>
+    private const int OffsetWeather = Body + 100;
     private const int OffsetGameTime = Body + 56;
     private const int OffsetMapNumber = Body + 62;
     private const int OffsetName = Body + 128;
@@ -127,7 +143,8 @@ public sealed record FfxiZoneLoginReply(
             EventPara: BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(OffsetEventPara, 2)),
             EventMode: BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(OffsetEventMode, 2)),
             LoginState: BinaryPrimitives.ReadUInt32LittleEndian(subPacket.Slice(OffsetLoginState, 4)),
-            Music: ReadMusic(subPacket));
+            Music: ReadMusic(subPacket),
+            Weather: (FfxiWeather)BinaryPrimitives.ReadUInt16LittleEndian(subPacket.Slice(OffsetWeather, 2)));
     }
 
     /// <summary>The zone's opening music, one track per slot.</summary>

@@ -424,6 +424,7 @@ public sealed class FfxiGameSession : IDisposable
             {
                 ZoneState = FfxiZoneLoginReply.Parse(reply.Plaintext.AsSpan(offset, size));
                 AdoptZoneMusic();
+                AdoptZoneWeather();
             }
         }
 
@@ -650,6 +651,36 @@ public sealed class FfxiGameSession : IDisposable
         MusicChanged?.Invoke(CurrentTrack);
     }
 
+    /// <summary>Raised when the sky the zone is under has changed.</summary>
+    public event Action<FfxiWeather>? WeatherChanged;
+
+    /// <summary>
+    /// The weather this zone is under.
+    ///
+    /// Comes from two places for the same reason the music does: the zone
+    /// login reply says what it is on arrival, and 0x057 says when it turns.
+    /// Listening only for the change would leave a client under the last
+    /// zone's sky until the weather happened to move.
+    /// </summary>
+    public FfxiWeather CurrentWeather { get; private set; } = FfxiWeather.None;
+
+    /// <summary>
+    /// Takes the weather the zone login reply carries, and says so if it is
+    /// different from what we were standing under.
+    /// </summary>
+    private void AdoptZoneWeather()
+    {
+        FfxiWeather arrived = ZoneState?.Weather ?? FfxiWeather.None;
+        if (arrived == CurrentWeather)
+        {
+            return;
+        }
+
+        CurrentWeather = arrived;
+        Status?.Invoke($"weather: {arrived}");
+        WeatherChanged?.Invoke(arrived);
+    }
+
     /// <summary>Vana'diel's hour, which decides day music from night.</summary>
     public int VanadielHour =>
         ZoneState is null ? 12 : (int)(((ulong)ZoneState.GameTime * 25 / 3600) % 24);
@@ -765,6 +796,7 @@ public sealed class FfxiGameSession : IDisposable
             ZoneChanged?.Invoke(ZoneState.ZoneNo);
             _placementSuspended = false;
             AdoptZoneMusic();
+            AdoptZoneWeather();
 
             Status?.Invoke($"Now in zone {ZoneState.ZoneNo}.");
         }
@@ -999,6 +1031,17 @@ public sealed class FfxiGameSession : IDisposable
                 {
                     MusicChanged?.Invoke(CurrentTrack);
                 }
+            }
+
+            // The zone's weather turning. Sent to everyone standing in it, on
+            // the zone's own schedule rather than in answer to anything, so
+            // this is the only notice a client gets.
+            FfxiWeatherChange? sky = FfxiWeatherChange.TryParse(reply.Plaintext.AsSpan(offset, size));
+            if (sky is not null && sky.Weather != CurrentWeather)
+            {
+                CurrentWeather = sky.Weather;
+                Status?.Invoke($"weather: {sky.Weather}");
+                WeatherChanged?.Invoke(sky.Weather);
             }
 
             // Being put somewhere. GP_SERV_COMMAND_POS, which is what every

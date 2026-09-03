@@ -388,6 +388,14 @@ void mh_viewer_set_clock(MhViewerHandle viewer, uint32_t server_clock)
     }
 }
 
+void mh_viewer_set_weather(MhViewerHandle viewer, int32_t weather)
+{
+    if (viewer != nullptr)
+    {
+        viewer->link.setWeather(weather);
+    }
+}
+
 void mh_viewer_set_lineup(MhViewerHandle viewer, int32_t on)
 {
     if (viewer != nullptr)

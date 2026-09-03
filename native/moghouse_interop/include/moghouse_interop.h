@@ -276,6 +276,11 @@ MH_API void mh_viewer_set_player(MhViewerHandle viewer, const char* name, const 
 /// arrives, so the sky is not ahead by the time someone spent typing.
 MH_API void mh_viewer_set_clock(MhViewerHandle viewer, uint32_t server_clock);
 
+/// The weather the zone is under, as the server numbers it (xi::Weather,
+/// 0..19). Decides which of the zone's four skies is built; below zero means
+/// nobody has said, which reads as the clear one.
+MH_API void mh_viewer_set_weather(MhViewerHandle viewer, int32_t weather);
+
 /// Whether the entities set on this viewer are a character-select line-up
 /// rather than a zone's population.
 ///

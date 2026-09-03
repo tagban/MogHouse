@@ -610,6 +610,63 @@ bool isLightSource(const std::string& texture)
     return own == "light" || own == "light2";
 }
 
+/// Which of a zone's four skies the weather calls for.
+///
+/// A zone's DAT ships exactly four - `suny`, `fine`, `clod` and `mist`, each
+/// with its own cloud dome, moon, stars and lens flares - while the server
+/// numbers twenty weathers. So several necessarily share a sky, and this is
+/// where it is decided.
+///
+/// **Provisional.** The four names and the twenty numbers are both certain;
+/// which maps to which is read from what the words mean and is not yet checked
+/// against a retail client standing in the same zone under the same weather.
+/// `!weather <n>` on a LandSandBoat server sets it, which makes that a quick
+/// thing to settle one row at a time. Kept as one table so correcting a row
+/// costs nothing.
+const char* skyForWeather(int weather)
+{
+    switch (weather)
+    {
+        case 1:  // sunshine
+        case 4:  // hot spell
+        case 5:  // heat wave
+            return "suny";
+
+        case 2:  // clouds
+        case 10: // wind
+        case 11: // gales
+        case 14: // thunder
+        case 15: // thunderstorms
+            return "clod";
+
+        case 3:  // fog
+        case 6:  // rain
+        case 7:  // squall
+        case 8:  // dust storm
+        case 9:  // sand storm
+        case 12: // snow
+        case 13: // blizzards
+            return "mist";
+
+        // 0 is "none", which every indoor zone reports and which the server
+        // also sends where it simply has no opinion. The odd ones at the top
+        // of the range - auroras, stellar glare, gloom, darkness - belong to
+        // places built long after these four skies were, and have no sky of
+        // their own to pick. Both fall back to the clear one.
+        default:
+            return "fine";
+    }
+}
+
+/// MOGHOUSE_WEATHER=<0..19> stands a zone under a weather of your choosing,
+/// which is the only way to see three of its four skies without a server that
+/// happens to be running that weather. Below zero when unset.
+int forcedWeatherFromEnvironment()
+{
+    const char* set = std::getenv("MOGHOUSE_WEATHER");
+    return set != nullptr ? std::atoi(set) : -1;
+}
+
 /// Whether a generator belongs to this zone or to the library every zone
 /// carries a copy of.
 ///
@@ -741,8 +798,15 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
                                      mh::Scene& skyObjects,
                                      std::unordered_map<std::string, ffxi::IntensityCurve>& curves,
                                      std::unordered_map<std::string, ffxi::SpriteAnimation>& sprites,
-                                     std::vector<mh::SpriteInstance>& spriteInstances)
+                                     std::vector<mh::SpriteInstance>& spriteInstances,
+                                     int weather)
 {
+    // Which of this zone's four skies to build. Chosen once, here, because the
+    // sky is baked into the scene with everything else - changing weather
+    // without reloading the zone needs a rebuild path that does not exist yet.
+    const std::string skyDirectory = std::string("/weat/") + skyForWeather(weather);
+    std::printf("weather: %d, sky %s\n", weather, skyForWeather(weather));
+
     spriteInstances.clear();
     auto keys = ffxi::KeyTable::load(keyPath);
     if (!keys)
@@ -1162,7 +1226,7 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
         // of grey triangles over the city.
         const bool inEffects = effect.directory.find("/effe") != std::string::npos ||
                                effect.directory.rfind("effe", 0) == 0;
-        if (!water && effect.directory.find("/weat/fine") != std::string::npos)
+        if (!water && effect.directory.find(skyDirectory) != std::string::npos)
         {
             bool textured = false;
             for (const ffxi::ModelMesh& mesh : model->second.meshes)
@@ -1293,7 +1357,7 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
                 ffxi::Zone lentSky;
                 for (const ffxi::EffectPlacement& effect : ffxi::parseGenerators(lender))
                 {
-                    if (effect.directory.find("/weat/fine") == std::string::npos)
+                    if (effect.directory.find(skyDirectory) == std::string::npos)
                     {
                         continue;
                     }
@@ -1769,6 +1833,10 @@ void mh::ViewerLink::requestJump() { jump_ = true; }
 bool mh::ViewerLink::takeJump() { return jump_.exchange(false); }
 
 void mh::ViewerLink::requestTalk(uint32_t entityId) { talk_ = entityId; }
+
+void mh::ViewerLink::setWeather(int32_t weather) { weather_ = weather; }
+
+int32_t mh::ViewerLink::weather() const { return weather_.load(); }
 
 /// Exchange rather than a read and a clear, for the same reason takeJump is.
 /// Entity 0 is nobody, which is what makes it usable as "nothing pending".
@@ -2390,9 +2458,15 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                 std::printf("set MOGHOUSE_FFXI_KEYTABLE to the 256-byte MZB key table to load a zone\n");
                 return 2;
             }
+            static const int forcedWeather = forcedWeatherFromEnvironment();
+            // What the server said, or MOGHOUSE_WEATHER for looking at a sky
+            // without one. Below zero means nobody has said, which reads as
+            // fine - the standalone renderer has no server to ask.
+            const int weatherNow = link && link->weather() >= 0 ? link->weather() : forcedWeather;
             zone = loadZone(currentZonePath.c_str(), keyPath,
                             options.keyTable2Path.empty() ? nullptr : options.keyTable2Path.c_str(), zoneId, textures,
-                            lighting, collision, interiors, skyObjects, curves, sprites, spriteInstances);
+                            lighting, collision, interiors, skyObjects, curves, sprites, spriteInstances,
+                            weatherNow);
             if (!zone)
             {
                 return 1;

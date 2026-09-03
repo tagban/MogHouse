@@ -394,6 +394,11 @@ public static class ClientFlow
         world.SetPlayer(character.Name, FfxiAppearance.LookString(character.Race, character.Face, character.Size));
         world.SetClock(state.GameTime);
 
+        // Before LoadZone, not after: the zone's sky is built with the rest of
+        // it, so the weather has to be known by the time the DAT is read or the
+        // zone comes up under the clear sky whatever the server said.
+        world.ShowWeather(game.CurrentWeather);
+
         string zoneName = FfxiZoneNames.Label(state.ZoneNo) ?? $"ZONE {state.ZoneNo}";
         if (!world.LoadZone((int)state.ZoneNo, zoneName, game.PosX, game.PosVertical, game.PosDepth,
                             state.Direction))

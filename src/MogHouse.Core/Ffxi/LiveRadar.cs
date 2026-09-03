@@ -435,6 +435,19 @@ public sealed class LiveRadar : IDisposable
     }
 
     /// <summary>
+    /// What the sky should be doing. Pushed rather than polled, the way the
+    /// clock is: the renderer has no session to ask, and the weather only
+    /// changes when the server says so.
+    /// </summary>
+    public void ShowWeather(FfxiWeather weather)
+    {
+        if (!_closed)
+        {
+            _viewer.SetWeather((int)weather);
+        }
+    }
+
+    /// <summary>
     /// Puts a screen up, replacing whatever was showing. Taking it down is
     /// <see cref="HideForm"/>.
     /// </summary>

@@ -676,6 +676,12 @@ public:
     /// clock only arrives at zone-in, so counting from startup would put the
     /// sky ahead by however long the player spent signing in.
     void setServerClock(uint32_t clock);
+
+    /// The weather the server says this zone is under, as it numbers it -
+    /// 0..19, xi::Weather. Which of the zone's four skies that calls for is
+    /// decided in skyForWeather(); this only carries the number across.
+    void setWeather(int32_t weather);
+    int32_t weather() const;
     bool serverClock(uint32_t& clock, uint64_t& setAtNs) const;
 
 private:
@@ -735,6 +741,7 @@ private:
     std::atomic<bool> formAside_{false};
     std::atomic<bool> hud_{true};
     std::atomic<bool> riding_{false};
+    std::atomic<int32_t> weather_{-1};   ///< -1 until the server has said
     uint32_t serverClock_{0};
     uint64_t serverClockSetAtNs_{0};
     bool serverClockKnown_{false};
