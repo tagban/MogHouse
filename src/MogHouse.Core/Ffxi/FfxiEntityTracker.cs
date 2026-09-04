@@ -63,6 +63,21 @@ public sealed record FfxiTrackedEntity(
 public sealed class FfxiEntityTracker
 {
     private readonly Dictionary<uint, FfxiTrackedEntity> _entities = [];
+
+    /// Guards <see cref="_entities"/>, which two threads reach at once.
+    ///
+    /// The zone client folds updates in as they arrive off the socket while
+    /// the world loop reads the list to draw it. On a fresh character's first
+    /// zone-in a whole city's worth of entities lands in one go, which is a
+    /// wide enough window to hit: enumerating the dictionary threw
+    /// "Collection was modified" and ended the session, on the first login a
+    /// new player ever makes.
+    ///
+    /// Held across each read-modify-write, not just the individual calls -
+    /// Observe reads what it knows, decides what is sticky, and writes the
+    /// result back, and that has to be one step or two updates racing can
+    /// undo each other.
+    private readonly object _gate = new();
     private readonly TimeSpan _forgetAfter;
 
     /// <summary>Whether an update carries no position at all.</summary>
@@ -115,7 +130,16 @@ public sealed class FfxiEntityTracker
     /// </summary>
     public ushort SelfActIndex { get; private set; }
 
-    public int Count => _entities.Count;
+    public int Count
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _entities.Count;
+            }
+        }
+    }
 
     /// <summary>Folds one update into what we know.</summary>
     public void Observe(FfxiEntityUpdate update, DateTimeOffset now)
@@ -145,86 +169,89 @@ public sealed class FfxiEntityTracker
                 (update.Raw is byte[] raw ? "  raw " + Convert.ToHexString(raw) : ""));
         }
 
-        // A despawn is the real answer to "is it still there", and the only
-        // exact one. The timeout below is a backstop for entities that leave
-        // without one.
-        if (update.IsDespawn)
+        lock (_gate)
         {
-            _entities.Remove(update.UniqueNo);
-            return;
+            // A despawn is the real answer to "is it still there", and the only
+            // exact one. The timeout below is a backstop for entities that leave
+            // without one.
+            if (update.IsDespawn)
+            {
+                _entities.Remove(update.UniqueNo);
+                return;
+            }
+
+            _entities.TryGetValue(update.UniqueNo, out FfxiTrackedEntity? known);
+
+            // Enemies are sticky, for two reasons that look the same from here.
+            //
+            // A movement-only update has nothing past the position block, so it
+            // cannot say what kind of thing moved. And the flag that marks a mob
+            // literally means "a mob that is alive", so killing one clears it.
+            // Either way, taking the new Kind would turn a red dot green.
+            FfxiEntityKind kind = known?.Kind == FfxiEntityKind.Enemy ? FfxiEntityKind.Enemy
+                : update.BattleFlags is null && known is not null ? known.Kind
+                : update.Kind;
+
+            _entities[update.UniqueNo] = new FfxiTrackedEntity(
+                UniqueNo: update.UniqueNo,
+                ActIndex: update.ActIndex,
+                Kind: kind,
+                // Only present on an update carrying health, so remembered like
+                // everything else in that block. A shopkeeper does not stop being
+                // clickable because they turned round.
+                Triggerable: update.RenderFlags is null ? known?.Triggerable ?? false : update.IsTriggerable,
+                // Empty counts as absent. A partial update carries a name field
+                // of zeros rather than no name field, and "" is not null - so the
+                // sticky rule every other field here gets was skipped for this one,
+                // and a character who changed anything at all lost their name.
+                Name: string.IsNullOrEmpty(update.Name) ? known?.Name : update.Name,
+                // An update that carries no position reads as the origin, and
+                // moving something there is worse than leaving it alone.
+                //
+                // LandSandBoat writes x, y and z only under SendFlg.Position, so a
+                // packet without it leaves them zero - and a standing player gets
+                // a run of those. Trusted, they put whoever stopped moving at
+                // (0, 0, 0), hundreds of units away and off the edge of the world,
+                // which reads exactly like them blinking out of existence a couple
+                // of seconds after they stand still. It was reported as a player
+                // going invisible, and every flag in the packet was innocent.
+                //
+                // The first sighting has nothing to fall back on, so it is taken
+                // as it comes. After that, a position of exactly zero is treated
+                // as silence: a real entity is never precisely at the origin, and
+                // skipping one update of a thing that has not moved costs nothing.
+                X: known is not null && IsUnset(update) ? known.X : update.X,
+                Vertical: known is not null && IsUnset(update) ? known.Vertical : update.Vertical,
+                Depth: known is not null && IsUnset(update) ? known.Depth : update.Depth,
+                Direction: update.Direction,
+                // Sticky the way the name is: a later update that carries no flags
+                // must not turn an invisible thing visible. Two things can hide an
+                // entity - the flags word, and the status block - and either saying
+                // so is enough. Southern San d'Oria's plaza holds a row of royal
+                // knights that only an event ever shows; they arrive with a
+                // "disappeared" status and an innocent flags word, and stood there
+                // as ghosts until the status was read.
+                Hidden: HiddenAfter(update, known),
+                // Sticky for the same reason: a position-only update carries no
+                // namevis byte, and must not reveal a door's name.
+                // Two ways to earn this. The namevis bit is what the protocol
+                // has for it, but a server need not set it - this one leaves it
+                // zero on every entity, doors included. What it does say reliably
+                // is that a door is a door, and scenery is never labelled.
+                NameHidden: update.NameVis is null && update.Look is null
+                    ? known?.NameHidden ?? false
+                    : update.IsNameHidden || (update.Look?.IsScenery ?? false) || (known?.NameHidden ?? false),
+                Look: update.Look ?? known?.Look,
+                // Sticky like the rest: an update with no flags word must not
+                // demote a GM back to an ordinary player.
+                GmLevel: update.RawFlags1 is null ? known?.GmLevel ?? 0 : update.GmLevel,
+                HealthPercent: update.HealthPercent ?? known?.HealthPercent,
+                LastSeen: now,
+                // Kept from the first sighting, never refreshed - an entity that
+                // is still here has not spawned again.
+                FirstSeen: known?.FirstSeen ?? now,
+                ModelSize: update.ModelSize ?? known?.ModelSize);
         }
-
-        _entities.TryGetValue(update.UniqueNo, out FfxiTrackedEntity? known);
-
-        // Enemies are sticky, for two reasons that look the same from here.
-        //
-        // A movement-only update has nothing past the position block, so it
-        // cannot say what kind of thing moved. And the flag that marks a mob
-        // literally means "a mob that is alive", so killing one clears it.
-        // Either way, taking the new Kind would turn a red dot green.
-        FfxiEntityKind kind = known?.Kind == FfxiEntityKind.Enemy ? FfxiEntityKind.Enemy
-            : update.BattleFlags is null && known is not null ? known.Kind
-            : update.Kind;
-
-        _entities[update.UniqueNo] = new FfxiTrackedEntity(
-            UniqueNo: update.UniqueNo,
-            ActIndex: update.ActIndex,
-            Kind: kind,
-            // Only present on an update carrying health, so remembered like
-            // everything else in that block. A shopkeeper does not stop being
-            // clickable because they turned round.
-            Triggerable: update.RenderFlags is null ? known?.Triggerable ?? false : update.IsTriggerable,
-            // Empty counts as absent. A partial update carries a name field
-            // of zeros rather than no name field, and "" is not null - so the
-            // sticky rule every other field here gets was skipped for this one,
-            // and a character who changed anything at all lost their name.
-            Name: string.IsNullOrEmpty(update.Name) ? known?.Name : update.Name,
-            // An update that carries no position reads as the origin, and
-            // moving something there is worse than leaving it alone.
-            //
-            // LandSandBoat writes x, y and z only under SendFlg.Position, so a
-            // packet without it leaves them zero - and a standing player gets
-            // a run of those. Trusted, they put whoever stopped moving at
-            // (0, 0, 0), hundreds of units away and off the edge of the world,
-            // which reads exactly like them blinking out of existence a couple
-            // of seconds after they stand still. It was reported as a player
-            // going invisible, and every flag in the packet was innocent.
-            //
-            // The first sighting has nothing to fall back on, so it is taken
-            // as it comes. After that, a position of exactly zero is treated
-            // as silence: a real entity is never precisely at the origin, and
-            // skipping one update of a thing that has not moved costs nothing.
-            X: known is not null && IsUnset(update) ? known.X : update.X,
-            Vertical: known is not null && IsUnset(update) ? known.Vertical : update.Vertical,
-            Depth: known is not null && IsUnset(update) ? known.Depth : update.Depth,
-            Direction: update.Direction,
-            // Sticky the way the name is: a later update that carries no flags
-            // must not turn an invisible thing visible. Two things can hide an
-            // entity - the flags word, and the status block - and either saying
-            // so is enough. Southern San d'Oria's plaza holds a row of royal
-            // knights that only an event ever shows; they arrive with a
-            // "disappeared" status and an innocent flags word, and stood there
-            // as ghosts until the status was read.
-            Hidden: HiddenAfter(update, known),
-            // Sticky for the same reason: a position-only update carries no
-            // namevis byte, and must not reveal a door's name.
-            // Two ways to earn this. The namevis bit is what the protocol
-            // has for it, but a server need not set it - this one leaves it
-            // zero on every entity, doors included. What it does say reliably
-            // is that a door is a door, and scenery is never labelled.
-            NameHidden: update.NameVis is null && update.Look is null
-                ? known?.NameHidden ?? false
-                : update.IsNameHidden || (update.Look?.IsScenery ?? false) || (known?.NameHidden ?? false),
-            Look: update.Look ?? known?.Look,
-            // Sticky like the rest: an update with no flags word must not
-            // demote a GM back to an ordinary player.
-            GmLevel: update.RawFlags1 is null ? known?.GmLevel ?? 0 : update.GmLevel,
-            HealthPercent: update.HealthPercent ?? known?.HealthPercent,
-            LastSeen: now,
-            // Kept from the first sighting, never refreshed - an entity that
-            // is still here has not spawned again.
-            FirstSeen: known?.FirstSeen ?? now,
-            ModelSize: update.ModelSize ?? known?.ModelSize);
     }
 
     private static bool HiddenAfter(FfxiEntityUpdate update, FfxiTrackedEntity? known)
@@ -275,23 +302,26 @@ public sealed class FfxiEntityTracker
     /// </summary>
     public IReadOnlyList<FfxiTrackedEntity> Visible(DateTimeOffset now)
     {
-        if (_forgetAfter > TimeSpan.Zero)
+        lock (_gate)
         {
-            List<uint> stale = [];
-            foreach ((uint id, FfxiTrackedEntity entity) in _entities)
+            if (_forgetAfter > TimeSpan.Zero)
             {
-                if (now - entity.LastSeen > _forgetAfter)
+                List<uint> stale = [];
+                foreach ((uint id, FfxiTrackedEntity entity) in _entities)
                 {
-                    stale.Add(id);
+                    if (now - entity.LastSeen > _forgetAfter)
+                    {
+                        stale.Add(id);
+                    }
+                }
+                foreach (uint id in stale)
+                {
+                    _entities.Remove(id);
                 }
             }
-            foreach (uint id in stale)
-            {
-                _entities.Remove(id);
-            }
-        }
 
-        return [.. _entities.Values];
+            return [.. _entities.Values];
+        }
     }
 
     /// <summary>
@@ -305,8 +335,19 @@ public sealed class FfxiEntityTracker
     /// Wanted because a click comes back from the renderer as a UniqueNo and
     /// nothing else, while talking to somebody needs their ActIndex too.
     /// </summary>
-    public FfxiTrackedEntity? Find(uint uniqueNo) =>
-        _entities.TryGetValue(uniqueNo, out FfxiTrackedEntity? found) ? found : null;
+    public FfxiTrackedEntity? Find(uint uniqueNo)
+    {
+        lock (_gate)
+        {
+            return _entities.TryGetValue(uniqueNo, out FfxiTrackedEntity? found) ? found : null;
+        }
+    }
 
-    public void Clear() => _entities.Clear();
+    public void Clear()
+    {
+        lock (_gate)
+        {
+            _entities.Clear();
+        }
+    }
 }

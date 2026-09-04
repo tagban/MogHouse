@@ -59,7 +59,8 @@ public static class CharacterScreens
     private const int FadedStyle = 2;
 
     public static Choice? Select(ScreenHost screens, LiveRadar world,
-                                 IReadOnlyList<FfxiCharacter> characters, string message = "")
+                                 IReadOnlyList<FfxiCharacter> characters,
+                                 (string Heading, string Body)? notice = null)
     {
         List<FfxiCharacter> named =
             [.. characters.Where(c => !string.IsNullOrWhiteSpace(c.Name))];
@@ -97,9 +98,14 @@ public static class CharacterScreens
         // Acknowledged rather than flashed past, because it ends the step:
         // whoever clicked is owed a reason they cannot miss. The line-up is
         // put up afterwards, so nothing covers it.
-        if (message.Length > 0)
+        // The heading comes with the message rather than being assumed.
+        // Creating a character reports its success down this same channel, and
+        // with the heading fixed at "THAT DID NOT WORK" the first thing a new
+        // player saw on succeeding was a failure box reading "TARURUN IS
+        // READY."
+        if (notice is { } toldTo && toldTo.Body.Length > 0)
         {
-            screens.Tell("THAT DID NOT WORK", message);
+            screens.Tell(toldTo.Heading, toldTo.Body);
         }
 
         // Same reasoning: an empty account needs telling what to do, and the

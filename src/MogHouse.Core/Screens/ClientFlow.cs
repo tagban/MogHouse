@@ -270,11 +270,11 @@ public static class ClientFlow
                                         FfxiServerProfile profile, FfxiLoginResponse login,
                                         IReadOnlyList<FfxiCharacter> characters, TextWriter say)
     {
-        string message = "";
+        (string Heading, string Body)? notice = null;
 
         while (!screens.Closed)
         {
-            CharacterScreens.Choice? choice = CharacterScreens.Select(screens, world, characters, message);
+            CharacterScreens.Choice? choice = CharacterScreens.Select(screens, world, characters, notice);
             if (choice is null)
             {
                 return false;
@@ -294,14 +294,14 @@ public static class ClientFlow
                     return true;
                 }
 
-                message = refusedEntry;
+                notice = ("THAT DID NOT WORK", refusedEntry);
                 continue;
             }
 
             FfxiNewCharacter? wanted = CharacterScreens.Make(screens, world);
             if (wanted is null)
             {
-                message = "";
+                notice = null;
                 continue;
             }
 
@@ -313,14 +313,14 @@ public static class ClientFlow
             if (refused is not null)
             {
                 say.WriteLine($"character creation refused: {refused}");
-                message = refused.ToUpperInvariant();
+                notice = ("THAT DID NOT WORK", refused.ToUpperInvariant());
                 continue;
             }
 
             // The roster has to be read again for the new character's id, which
             // the creation exchange does not hand back.
             (login, characters) = game.LoginAsync(profile).GetAwaiter().GetResult();
-            message = $"{wanted.Name.ToUpperInvariant()} IS READY.";
+            notice = ("CHARACTER CREATED", $"{wanted.Name.ToUpperInvariant()} IS READY.");
         }
 
         return false;
