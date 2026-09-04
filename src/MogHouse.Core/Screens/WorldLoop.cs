@@ -20,6 +20,21 @@ namespace MogHouse.Core.Screens;
 /// to the session and to the renderer.
 /// </para>
 /// </summary>
+/// <summary>
+/// Why a character stopped being in the world.
+///
+/// The three want different things afterwards: a closed window ends the
+/// client, /shutdown ends it deliberately, and /logout goes back to the
+/// character list with the account still signed in - which is what the game
+/// does and what the client used to get wrong by ending everything.
+/// </summary>
+public enum WorldExit
+{
+    WindowClosed,
+    LoggedOut,
+    ShutDown,
+}
+
 public sealed class WorldLoop
 {
     private readonly FfxiGameSession _session;
@@ -30,6 +45,9 @@ public sealed class WorldLoop
 
     private uint _openZone;
     private bool _leaving;
+
+    /// <summary>Why the world was left, once it has been.</summary>
+    public WorldExit Exit { get; private set; } = WorldExit.WindowClosed;
 
     /// <summary>
     /// Set from the session's thread when the bags change, cleared on the one
@@ -79,7 +97,7 @@ public sealed class WorldLoop
     /// Wires the session's events to the world and runs until the window
     /// closes. Blocking, and not on the thread drawing the world.
     /// </summary>
-    public void Run()
+    public WorldExit Run()
     {
         Attach();
 
@@ -110,6 +128,8 @@ public sealed class WorldLoop
         {
             Detach();
         }
+
+        return Exit;
     }
 
     private void Attach()
@@ -203,6 +223,7 @@ public sealed class WorldLoop
         }
 
         _leaveWhat = what;
+        Exit = kind == FfxiLogoutKind.Logout ? WorldExit.LoggedOut : WorldExit.ShutDown;
         _leaveAt = DateTimeOffset.UtcNow.AddSeconds(30);
         _lastCount = 30;
         _say.WriteLine($"leaving: {what}, at {_leaveAt:HH:mm:ss}");

@@ -298,8 +298,19 @@ public static class ClientFlow
                 // from a client that was closed less than a minute ago. Ending
                 // the client over it would mean typing the password again to
                 // retry something that fixes itself.
-                string? refusedEntry = EnterWorld(world, screens, game, character,
-                                                  profile.Host, login.SessionHash!, say);
+                (WorldExit? exit, string? refusedEntry) = EnterWorld(
+                    world, screens, game, character, profile.Host, login.SessionHash!, say);
+
+                if (exit == WorldExit.LoggedOut)
+                {
+                    // Back to the list with the account still signed in, which
+                    // is what /logout means. The zone connection is gone;
+                    // picking somebody makes a new one.
+                    world.ShowHud(false);
+                    notice = null;
+                    continue;
+                }
+
                 if (refusedEntry is null)
                 {
                     return true;
@@ -346,9 +357,15 @@ public static class ClientFlow
     /// was refused - which the caller shows on character select so the player
     /// can simply try again.
     /// </returns>
-    private static string? EnterWorld(LiveRadar world, ScreenHost screens, FfxiGameSession game,
-                                      FfxiCharacter character, string host, byte[] sessionHash,
-                                      TextWriter say)
+    /// <summary>
+    /// Puts a character in the world and stays there until it leaves.
+    ///
+    /// Answers with why it left, or with a sentence saying why it never got
+    /// there - which the caller puts on the screen and offers another go.
+    /// </summary>
+    private static (WorldExit? Exit, string? Refused) EnterWorld(
+        LiveRadar world, ScreenHost screens, FfxiGameSession game,
+        FfxiCharacter character, string host, byte[] sessionHash, TextWriter say)
     {
         screens.Busy("ENTERING THE WORLD", $"AS {character.Name.ToUpperInvariant()}...");
         say.WriteLine($"entering the world as {character.Name}...");
@@ -374,8 +391,8 @@ public static class ClientFlow
             // is still holding the session. It clears itself.
             if (refused.Message.Contains("ALREADY_LOGGED_IN", StringComparison.OrdinalIgnoreCase))
             {
-                return $"{who} IS STILL LOGGED IN. THE SERVER LETS GO ABOUT A MINUTE AFTER THE LAST " +
-                       "CLIENT CLOSED - WAIT A MOMENT AND PICK THEM AGAIN.";
+                return (null, $"{who} IS STILL LOGGED IN. THE SERVER LETS GO ABOUT A MINUTE AFTER THE LAST " +
+                       "CLIENT CLOSED - WAIT A MOMENT AND PICK THEM AGAIN.");
             }
 
             // The other one, which reads as a connection fault and is not.
@@ -385,11 +402,11 @@ public static class ClientFlow
             // nothing to do with the world server.
             if (refused.Message.Contains("UNABLE_TO_CONNECT_TO_WORLD_SERVER", StringComparison.OrdinalIgnoreCase))
             {
-                return "ANOTHER CHARACTER ON THIS ACCOUNT IS STILL LOGGED IN. ONLY ONE AT A TIME - " +
-                       "CLOSE THE OTHER CLIENT, WAIT ABOUT A MINUTE, AND TRY AGAIN.";
+                return (null, "ANOTHER CHARACTER ON THIS ACCOUNT IS STILL LOGGED IN. ONLY ONE AT A TIME - " +
+                       "CLOSE THE OTHER CLIENT, WAIT ABOUT A MINUTE, AND TRY AGAIN.");
             }
 
-            return refused.Message.ToUpperInvariant();
+            return (null, refused.Message.ToUpperInvariant());
         }
         catch (Exception failed) when (failed is InvalidOperationException or System.Net.Sockets.SocketException
                                                  or TimeoutException or OperationCanceledException)
@@ -400,13 +417,13 @@ public static class ClientFlow
             // is a failed attempt and not a broken client: back to character
             // select with the reason, where trying again a moment later works.
             say.WriteLine($"could not enter the world as {character.Name}: {failed.Message}");
-            return "THE ZONE SERVER DID NOT ANSWER PROPERLY. TRY AGAIN IN A MOMENT.";
+            return (null, "THE ZONE SERVER DID NOT ANSWER PROPERLY. TRY AGAIN IN A MOMENT.");
         }
 
         FfxiZoneLoginReply? state = game.ZoneState;
         if (state is null)
         {
-            return "THE SERVER LET US IN BUT SENT NO ZONE. THERE IS NOWHERE TO STAND.";
+            return (null, "THE SERVER LET US IN BUT SENT NO ZONE. THERE IS NOWHERE TO STAND.");
         }
 
         say.WriteLine($"in zone {state.ZoneNo} at {game.PosX:F1} {game.PosVertical:F1} {game.PosDepth:F1}");
@@ -441,7 +458,7 @@ public static class ClientFlow
         if (!world.LoadZone((int)state.ZoneNo, zoneName, game.PosX, game.PosVertical, game.PosDepth,
                             state.Direction))
         {
-            return $"{zoneName.ToUpperInvariant()} IS NOT IN THIS INSTALLATION.";
+            return (null, $"{zoneName.ToUpperInvariant()} IS NOT IN THIS INSTALLATION.");
         }
 
         // The screen comes down last, so there is never a frame of empty
@@ -456,10 +473,10 @@ public static class ClientFlow
         // typed, what they jumped over, what killed them, which zone they
         // walked into - lives in WorldLoop rather than here, and used to live
         // in a view model that also drew things.
-        new WorldLoop(game, world, tracker, state.ZoneNo, character.Name, say).Run();
+        WorldExit exit = new WorldLoop(game, world, tracker, state.ZoneNo, character.Name, say).Run();
 
-        say.WriteLine("the window closed; leaving the world");
-        return null;
+        say.WriteLine($"left the world: {exit}");
+        return (exit, null);
     }
 
     /// <summary>
