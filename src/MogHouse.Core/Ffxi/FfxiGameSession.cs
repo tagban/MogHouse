@@ -82,6 +82,9 @@ public sealed class FfxiGameSession : IDisposable
     /// </summary>
     public string? Look { get; private set; }
 
+    /// How many of our own updates arrived describing no appearance.
+    private int _looklessSelfUpdates;
+
     /// <summary>Raised when <see cref="Look"/> changes - which gear does.</summary>
     public event Action<string>? LookChanged;
 
@@ -1245,6 +1248,18 @@ public sealed class FfxiGameSession : IDisposable
                     // that reads its own bags still cannot tell what the gear
                     // in them looks like on a body. Only re-announced when it
                     // changes, because rebuilding the model is not free.
+                    // Logged either way: an update that arrives without a
+                    // look is a different problem from one that never arrives,
+                    // and the difference is invisible from the outside.
+                    if (self.Look is null)
+                    {
+                        _looklessSelfUpdates++;
+                        if (_looklessSelfUpdates % 50 == 1)
+                        {
+                            Status?.Invoke($"self update {_looklessSelfUpdates} carried no look");
+                        }
+                    }
+
                     if (self.Look is { IsEquipment: true } look)
                     {
                         string wearing = look.ToLookString();
@@ -1370,6 +1385,7 @@ public sealed class FfxiGameSession : IDisposable
             return;
         }
 
+        Status?.Invoke($"refresh: asking the server about targid {ZoneState.ActIndex}");
         await _zone.SendCharacterRequestAsync(_zoneEndpoint, ZoneState.ActIndex);
     }
 
