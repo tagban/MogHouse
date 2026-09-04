@@ -98,3 +98,49 @@ It needs `vendor/dawn` cloned and built with `CMAKE_OSX_ARCHITECTURES=x86_64`,
 plus SDL3 built from source for x86_64, plus a third renderer tree. Hours, and
 a cross-compile path this repo has never exercised. It was skipped for 0.2.0
 deliberately rather than forgotten.
+
+---
+
+# Done, 2026-09-04, on Windows
+
+`MogHouse-XI-Alpha-0.2.0-win-x64.zip` (49 MB) is on the v0.2.0 release
+beside the macOS one.
+
+**The build was clean.** All 101 commits compiled with MSVC first time - no
+errors, no warnings, and the `kHudBars` static_assert did not fire. Tests
+187 pass, 12 skipped. The three changed interop signatures caused no
+trouble: the client resolves the DLL from `build-renderer`, so there is only
+ever one and it cannot go stale.
+
+**Three things were wrong, all fixed and pushed.** None was a platform
+difference, so **the released macOS build has all three**:
+
+1. **Bastok Markets' plaza was a hole with the harbour showing through it.**
+   The new binary-alpha test asks whether a texture's alpha is a mask, and
+   the floor texture `s_yuka` is 96% fully transparent with binary alpha - it
+   satisfied the test exactly, and the discard then threw away 96% of the
+   paving. Doors, planks, awnings and the tent are 0.93 to 1.00 the same way.
+   Their alpha means nothing: those draws are opaque and the base pipeline
+   does not blend, so nothing read it until this called them cutouts.
+   `isCutoutMask` now also requires something left to keep, at 0.85. The
+   zone's real masks are nowhere near it - a bubble at 0.79, foliage 0.17 to
+   0.48, and Sel Phiner's tree, the one the binary test was added for, at
+   0.37. All still cutouts afterwards. `MOGHOUSE_CUTOUT_WATCH=1`, which you
+   left in, is what found it; it is exactly the right tool.
+2. **The first-run chooser did not say what it wanted.** A bare "Select
+   Folder" with the explanation written to the log, where nobody looks. The
+   first person to meet it asked what it was for. It now uses SDL's titled
+   dialog and opens at the guess, so on Windows it is usually one click.
+3. **The title bar said Alpha 0.1.2.** The version lives in four places and
+   only the three packaging scripts were bumped.
+
+**Verified from the zip, not the source tree:** fresh unzip, nothing set,
+runs, finds its assets, draws the sign-in screen over Sel Phiner with fonts
+and HUD. That is the path 0.1.x shipped broken.
+
+**Not verified.** The things needing eyes and ears went untested - chat
+colours, the options menu, West Ronfaure's ambience, NPCs turning. The
+ground bug took the session. Worth someone walking through the list at the
+top of this file on the shipped zip.
+
+**Intel macOS:** agreed, and not started. Nothing misrepresents it.
