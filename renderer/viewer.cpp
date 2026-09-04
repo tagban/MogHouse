@@ -6328,7 +6328,11 @@ constexpr float kGravity = 26.0f;
     /// change is happening between the look arriving and the body being drawn,
     /// and this is the only place left to look from.
     std::array<uint16_t, 7> targetWas{};
-    bool targetWasKnown = false;
+
+    /// Who targetWas describes. Without this, tabbing from one body to another
+    /// compared the new one against the old one and reported a change every
+    /// time - which is a diagnostic reporting its own footsteps.
+    uint32_t targetWasFor = 0;
 
     /// Whether the character is walking after whatever is targeted.
     ///
@@ -8590,7 +8594,7 @@ constexpr float kGravity = 26.0f;
                     now[static_cast<size_t>(slot)] = entity.hasModel() ? 0 : entity.look[slot];
                 }
 
-                if (targetWasKnown && now != targetWas)
+                if (targetWasFor == entity.id && now != targetWas)
                 {
                     std::printf("target %08X changed: %u,%u %u/%u/%u/%u/%u -> %u,%u %u/%u/%u/%u/%u\n",
                                 entity.id, targetWas[0], targetWas[1], targetWas[2], targetWas[3],
@@ -8598,7 +8602,7 @@ constexpr float kGravity = 26.0f;
                                 now[3], now[4], now[5], now[6]);
                 }
                 targetWas = now;
-                targetWasKnown = true;
+                targetWasFor = entity.id;
             }
 
             const DrawableCharacter* model = modelForEntity(entity);
