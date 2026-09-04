@@ -6927,7 +6927,26 @@ constexpr float kGravity = 26.0f;
                 }
                 else if (event.key.key == SDLK_ESCAPE)
                 {
-                    running = false;
+                    // Escape shuts the topmost thing that is open, and nothing
+                    // at all when nothing is. It used to quit the game, which
+                    // is what every other window on the machine does with it
+                    // and what no game does - the reflex after opening a panel
+                    // is to press escape, and here that closed the client and
+                    // dropped the session with it. Quitting is the window's
+                    // close button, or the usual key for it.
+                    if (equipmentOpen)
+                    {
+                        equipmentOpen = false;
+                    }
+                    else if (inventoryOpen)
+                    {
+                        inventoryOpen = false;
+                        contextSlot = -1;
+                    }
+                    else if (optionsOpen)
+                    {
+                        optionsOpen = false;
+                    }
                 }
                 else if (event.key.key == SDLK_TAB)
                 {
@@ -7315,6 +7334,8 @@ constexpr float kGravity = 26.0f;
                         }
                         else if (hit.kind == 5 && link && contextSlot >= 0)
                         {
+                            std::printf("equip: container %d slot %d into equipment slot %d\n",
+                                        contextContainer, contextSlot, hit.value);
                             link->requestInventoryAction(
                                 {mh::ViewerLink::InventoryAction::Kind::Equip,
                                  static_cast<uint8_t>(contextContainer),
@@ -7357,6 +7378,8 @@ constexpr float kGravity = 26.0f;
                         }
                         else if (hit.kind == 11 && link && equipmentSlot >= 0)
                         {
+                            std::printf("equip: container %d slot %d into equipment slot %d\n",
+                                        (hit.value >> 8) & 0xFF, hit.value & 0xFF, equipmentSlot);
                             // The value carries both halves of where the item
                             // is, because a hit has only the one number.
                             link->requestInventoryAction(
@@ -10703,10 +10726,13 @@ constexpr float kGravity = 26.0f;
                                                         "SAM", "NIN", "DRG", "SMN"};
                     static const char* kStatNames[7] = {"STR", "DEX", "VIT", "AGI", "INT", "MND", "CHR"};
 
-                    const float eqSlot = 0.095f;
+                    // Bigger than the bags' slots, not smaller: this screen
+                    // is mostly words - a job, seven stats and a list of names
+                    // - and it was laid out as though it were mostly pictures.
+                    const float eqSlot = 0.125f;
                     const float eqSlotWide = eqSlot / windowAspect;
                     const float eqGap = eqSlot * 0.16f;
-                    const float eqText = std::clamp(eqSlot * 0.30f, 0.024f, 0.038f);
+                    const float eqText = std::clamp(eqSlot * 0.34f, 0.032f, 0.048f);
                     const float cellHigh = eqSlot + eqText * 1.15f;
                     const float gridWide = 4.0f * eqSlotWide + 3.0f * eqGap;
                     const float gridHigh = 4.0f * cellHigh + 3.0f * eqGap;
