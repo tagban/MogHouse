@@ -188,6 +188,7 @@ public sealed class WorldLoop
     private void BeginLeaving(string what)
     {
         _leaveAt = DateTimeOffset.UtcNow.AddSeconds(32);
+        _say.WriteLine($"leaving: {what}, at {_leaveAt:HH:mm:ss}");
         _world.Say("", $"You will be {what} in 30 seconds.", FfxiChatMessageType.System1);
     }
 
@@ -463,6 +464,11 @@ public sealed class WorldLoop
     private void Typed(string text)
     {
         FfxiClientCommand command = FfxiClientCommands.Parse(text);
+
+        // Logged, because "/logout did nothing" has two very different causes
+        // - the line never crossed from the renderer, or it crossed and the
+        // command was refused - and they look identical from a chair.
+        _say.WriteLine($"typed: {text}  -> {command.Kind}");
         switch (command.Kind)
         {
             case FfxiClientCommandKind.Logout:
