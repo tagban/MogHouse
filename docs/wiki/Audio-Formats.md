@@ -105,8 +105,32 @@ boundary and keeps the running history rather than resetting it.
   * **Not in `sound/win/se/_bitInfo.inf`.** Four bytes, `03 00 00 00`, a
     version.
 
-  Most likely it is compiled into the retail client rather than stored as
-  data, which was ordinary for a game of that era. That cannot be derived -
-  but it can be recognised, which is what `ffxi-sounddump --wav` is for:
-  convert a folder and the noise a worm makes is obvious to anyone who has
-  played the game.
+  **The best lead is chunk type 0x07, the Scheduler.** A creature's model DAT
+  holds dozens - the worm at model 426 has 38 - and they are named after
+  events rather than after anything graphical:
+
+  ```
+  pop0  dead  corp  damg  atk0  pary  gurd  shot  cast  init  sway ...
+  ```
+
+  `pop0` is a spawn: "pop" is the word FFXI uses for a mob appearing, and
+  every creature looked at has one. They are opcode streams with the same
+  shape as the generators MogHouse already reads - four stream offsets, then
+  `op / length-in-dwords / pad / payload` - and nothing reads them yet.
+
+  `pop0` on the worm decodes to three opcodes, `0x01`, `0x29` and `0x28`, and
+  none of their payloads is obviously a sound number. So the trail stops
+  there, but it stops somewhere specific.
+
+  The test worth running next: decode one scheduler across many creatures and
+  look for an opcode whose payload changes per creature and lands in 0..11862.
+  A sound id must vary by creature and fit the library; a colour or a scale
+  will do neither. `dead` and `damg` are better subjects than `pop0` because
+  every creature certainly makes a noise for those.
+
+  If that finds nothing, the mapping is compiled into the retail client, which
+  was ordinary for a game of that era. That cannot be derived - but it can be
+  recognised, which is what `ffxi-sounddump --wav` is for: convert a folder
+  and the noise a worm makes is obvious to anyone who has played the game.
+  About 172 of the 393 folders hold exactly sixteen files, which reads as one
+  folder per creature with a fixed set of sounds each.
