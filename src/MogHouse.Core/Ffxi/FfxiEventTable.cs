@@ -14,6 +14,63 @@ namespace MogHouse.Core.Ffxi;
 public sealed record FfxiEventScripts(uint EntityId, byte[] Script)
 {
     /// <summary>
+    /// Which events this entity has, as the server names them.
+    ///
+    /// <para>
+    /// A block carries a count, then two tables of sixteen-bit numbers. The
+    /// second is the event ids, and 0xFFFF is a hole rather than an event.
+    /// </para>
+    ///
+    /// <para>
+    /// Cross-checked against LandSandBoat, which is the only way to be sure a
+    /// number found in a file is the number a server would send. Ambrotien's
+    /// script starts 2001, 2008, 2009, 2010 and 2011, and his block holds all
+    /// five - among thirty more the client knows and the server has not been
+    /// taught yet. Ailevia's holds her 655 and 615.
+    /// </para>
+    ///
+    /// <para>
+    /// The first table is presumably where each event begins, and is not read
+    /// here: on most blocks its values land inside, and on plenty they do not
+    /// - entity 0x010E6004 offers 0x279 for a block 296 bytes long - so
+    /// whatever it is, it is not simply an offset from the end of the index.
+    /// Reading it wrongly would be worse than not reading it.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<ushort> EventIds
+    {
+        get
+        {
+            if (Script.Length < 12)
+            {
+                return [];
+            }
+
+            uint count = BinaryPrimitives.ReadUInt32LittleEndian(Script.AsSpan(4));
+            int at = 0x0C + ((int)count * 2);
+            if (count == 0 || count > 4000 || at + ((int)count * 2) > Script.Length)
+            {
+                return [];
+            }
+
+            var found = new List<ushort>();
+            for (int i = 0; i < count; i++)
+            {
+                ushort id = BinaryPrimitives.ReadUInt16LittleEndian(Script.AsSpan(at + (i * 2)));
+                if (id != 0xFFFF)
+                {
+                    found.Add(id);
+                }
+            }
+
+            return found;
+        }
+    }
+
+    /// <summary>Whether the server could ask this entity for that event.</summary>
+    public bool Has(ushort eventId) => EventIds.Contains(eventId);
+
+    /// <summary>
     /// The id the zone's own scripts are filed under, rather than any NPC's.
     ///
     /// Every zone has exactly one of these and it is always the first block.

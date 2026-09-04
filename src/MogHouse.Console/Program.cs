@@ -1745,6 +1745,7 @@ static int Events(Dictionary<string, string> flags)
 
         Console.WriteLine($"{scripts.EntityId:X8}{(scripts.IsZoneItself ? " (the zone itself)" : "")}: " +
                           $"{scripts.Script.Length} bytes");
+        Console.WriteLine($"  events: {string.Join(", ", scripts.EventIds)}");
 
         if (flags.TryGetValue("dump", out string? into) && into.Length > 0)
         {
@@ -1773,7 +1774,8 @@ static int Events(Dictionary<string, string> flags)
         }
 
         FfxiEventScripts? scripts = events.For(id);
-        Console.WriteLine($"  {id:X8}  {scripts?.Script.Length ?? 0,7} bytes" +
+        Console.WriteLine($"  {id:X8}  {scripts?.Script.Length ?? 0,7} bytes  " +
+                          $"{scripts?.EventIds.Count ?? 0,4} events" +
                           (scripts?.IsZoneItself == true ? "   (the zone itself)" : ""));
     }
 
