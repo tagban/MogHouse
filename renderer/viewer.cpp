@@ -7818,13 +7818,15 @@ constexpr float kGravity = 26.0f;
                     // Clamped, because a neck has limits and an NPC folded
                     // double to look at your boots is worse than one that does
                     // not quite reach.
-                    static const float sign = [] {
-                        const char* set = std::getenv("MOGHOUSE_HEAD_PITCH");
-                        return set != nullptr ? static_cast<float>(std::atof(set)) : 1.0f;
-                    }();
+                    //
+                    // Negated, and not arbitrarily: +x runs behind the model in
+                    // this space, so a positive turn about z tips the face away
+                    // from whoever is being looked at. Checked against a running
+                    // client, which had every head politely looking the wrong
+                    // way.
                     const float wanted =
                         std::clamp(std::atan2(mine - theirs, std::max(flat, 0.4f)), -0.5f, 0.5f);
-                    mh::pitchHead(posed, model->loaded.skeleton, found->second, wanted * sign);
+                    mh::pitchHead(posed, model->loaded.skeleton, found->second, -wanted);
                 }
             }
 

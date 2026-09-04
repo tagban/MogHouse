@@ -38,6 +38,12 @@ The same pair settles it. The eyes are at plus and minus z, so **z is the
 ear-to-ear axis**, and a nod is a rotation about it. No separate discovery is
 needed: the thing that identifies the head also orients it.
 
+Which of the two directions is *up* is the one part the bind pose does not
+answer, because it depends on which way +x runs and the numbers there are small
+and inconsistent. It was settled by looking: the first attempt had every head
+tilting politely away from whoever was talking to them, so a positive turn
+about z tips the face **back**, and looking up is the negative one.
+
 `mh::pitchHead` rotates the head and every bone descending from it about that
 axis, through the head's own position. The whole subtree has to move or hair
 and helmets stay behind in mid-air. Bones are stored parents-first, so one
