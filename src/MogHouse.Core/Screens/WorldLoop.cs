@@ -388,7 +388,7 @@ public sealed class WorldLoop
         }
     }
 
-    private void OnChat(FfxiChatLine line) => _world.Say(line.Sender, line.Text);
+    private void OnChat(FfxiChatLine line) => _world.Say(line.Sender, line.Text, line.Kind);
 
     private void OnEntities(IReadOnlyList<FfxiEntityUpdate> entities)
     {

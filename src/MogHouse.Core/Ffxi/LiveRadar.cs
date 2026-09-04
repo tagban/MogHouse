@@ -681,14 +681,29 @@ public sealed class LiveRadar : IDisposable
     /// </summary>
     public NativeDeathChoice TakeDeathChoice() => _closed ? NativeDeathChoice.None : _viewer.TakeDeathChoice();
 
-    public void Say(string? sender, string? text)
+    public void Say(string? sender, string? text, FfxiChatMessageType type = FfxiChatMessageType.Say)
     {
         if (_closed)
         {
             return;
         }
-        string line = string.IsNullOrEmpty(sender) ? (text ?? "") : $"{sender}: {text}";
-        _viewer.PushChat(line);
+
+        // A named speaker who is not on a channel is somebody in the world
+        // talking, and gets its own colour so an NPC's words are not mistaken
+        // for the server narrating at you.
+        bool named = !string.IsNullOrEmpty(sender);
+        int tone = type switch
+        {
+            FfxiChatMessageType.Shout or FfxiChatMessageType.NoSpeakerShout => 1,
+            FfxiChatMessageType.Tell => 3,
+            FfxiChatMessageType.Party or FfxiChatMessageType.NoSpeakerParty => 4,
+            FfxiChatMessageType.Linkshell or FfxiChatMessageType.NoSpeakerLinkshell => 5,
+            FfxiChatMessageType.System1 or FfxiChatMessageType.System2 => named ? 20 : 6,
+            _ => named ? 20 : 0,
+        };
+
+        string line = named ? $"{sender}: {text}" : (text ?? "");
+        _viewer.PushChat(line, tone);
     }
 
     /// <summary>Pushes what the tracker currently believes is nearby.</summary>

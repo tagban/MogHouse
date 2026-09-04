@@ -2052,17 +2052,17 @@ std::vector<mh::RadarEntity> mh::ViewerLink::entities() const
     return entities_;
 }
 
-void mh::ViewerLink::pushChat(const std::string& line)
+void mh::ViewerLink::pushChat(const std::string& line, ChatTone tone)
 {
     const std::lock_guard<std::mutex> guard{mutex_};
-    chat_.push_back(line);
+    chat_.push_back(ChatLine{line, tone});
     while (chat_.size() > static_cast<size_t>(mh::kChatLines))
     {
         chat_.pop_front();
     }
 }
 
-std::vector<std::string> mh::ViewerLink::chat() const
+std::vector<mh::ViewerLink::ChatLine> mh::ViewerLink::chat() const
 {
     const std::lock_guard<std::mutex> guard{mutex_};
     return {chat_.begin(), chat_.end()};
@@ -5528,7 +5528,8 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     std::printf("shift to run, r to auto-run, tab to orbit, p to print position,\n");
     std::printf("c to place the character,\n");
     std::printf("u to back up the trail if collision traps you, n for no collision,\n");
-    std::printf("numpad 8/2 to move and 4/6 to turn, numpad minus to walk, shift to invert it,\n");
+    std::printf("numpad 8/2 to move and 4/6 to turn, numpad star to walk, shift to invert it,\n");
+    std::printf("numpad minus for the options menu, minus/equals for music, shift for sound,\n");
     std::printf("f to swap between driving the character and flying the camera,\n");
     std::printf("t to get on and off the monorail where there is one,\n");
     std::printf("escape to quit\n");
@@ -6329,7 +6330,6 @@ constexpr float kGravity = 26.0f;
                     if (!typed.empty() && link)
                     {
                         link->submitChat(typed);
-                        link->pushChat("> " + typed);
                     }
                     typed.clear();
                     typing = false;
@@ -8969,10 +8969,39 @@ constexpr float kGravity = 26.0f;
                 // the 4x6 bitmap font, which had no lower case at all.
                 if (showHud)
                 {
-                    std::vector<std::string> said = link ? link->chat() : viewerChat;
+                    std::vector<mh::ViewerLink::ChatLine> said;
+                    if (link)
+                    {
+                        said = link->chat();
+                    }
+                    else
+                    {
+                        for (const std::string& line : viewerChat)
+                        {
+                            // MOGHOUSE_CHAT lines may say what they are, as
+                            // "tell|text", so the colours can be looked at
+                            // without a server to send them.
+                            const size_t bar = line.find('|');
+                            mh::ChatTone tone = mh::ChatTone::Say;
+                            std::string text = line;
+                            if (bar != std::string::npos && bar <= 9)
+                            {
+                                const std::string kind = line.substr(0, bar);
+                                text = line.substr(bar + 1);
+                                if (kind == "shout") tone = mh::ChatTone::Shout;
+                                else if (kind == "tell") tone = mh::ChatTone::Tell;
+                                else if (kind == "party") tone = mh::ChatTone::Party;
+                                else if (kind == "ls") tone = mh::ChatTone::Linkshell;
+                                else if (kind == "system") tone = mh::ChatTone::System;
+                                else if (kind == "npc") tone = mh::ChatTone::Npc;
+                                else text = line;
+                            }
+                            said.push_back({text, tone});
+                        }
+                    }
                     if (said.empty())
                     {
-                        said.push_back("Chat - waiting for the server");
+                        said.push_back({"Chat - waiting for the server", mh::ChatTone::System});
                     }
 
                     // Wrapped, not cut. A HUD string holds kHudChars glyphs and
@@ -8983,12 +9012,15 @@ constexpr float kGravity = 26.0f;
                     //
                     // Broken at a space where there is one in reach, and mid
                     // word only when a single word is wider than the panel.
-                    std::vector<std::string> lines;
-                    for (const std::string& whole : said)
+                    // Wrapping keeps the tone: a tell that runs to two lines
+                    // is pink on both of them.
+                    std::vector<mh::ViewerLink::ChatLine> lines;
+                    for (const mh::ViewerLink::ChatLine& entry : said)
                     {
+                        const std::string& whole = entry.text;
                         if (whole.empty())
                         {
-                            lines.push_back(whole);
+                            lines.push_back(entry);
                             continue;
                         }
 
@@ -9004,7 +9036,7 @@ constexpr float kGravity = 26.0f;
                                 }
                             }
 
-                            lines.push_back(whole.substr(at, take));
+                            lines.push_back({whole.substr(at, take), entry.tone});
                             at += take;
                             while (at < whole.size() && whole[at] == ' ')
                             {
@@ -9030,7 +9062,12 @@ constexpr float kGravity = 26.0f;
                     // vitals have taken their slots.
                     {
                         const float rowStep = line * 1.15f;
-                        const float rows = static_cast<float>(mh::kChatLines) + (typing ? 1.0f : 0.0f);
+                        // Always room for the line you type into, whether or
+                        // not it is open. A box that grows a row when you press
+                        // return moves everything above it as you start typing,
+                        // and a chat window that jumps is worse than one that
+                        // reserves the space.
+                        const float rows = static_cast<float>(mh::kChatLines) + 1.0f;
                         const float padY = line * 0.35f;
                         const float padX = line * 0.5f / windowAspect;
                         const float boxLeft = -0.98f - padX;
@@ -9057,14 +9094,13 @@ constexpr float kGravity = 26.0f;
                     // The panel stacks upwards from the bottom, so the line
                     // being typed takes the bottom row and the history moves up
                     // to make room rather than being written over.
-                    const float base = typing ? -0.97f + line * 1.15f : -0.97f;
+                    const float base = -0.97f + line * 1.15f;
                     for (size_t i = 0; i < lines.size(); ++i)
                     {
                         const float bottom = base + line * 1.15f * static_cast<float>(lines.size() - 1 - i);
-                        place(lines[i], -0.98f, bottom, 0.4f, kHudBright, 0.0f, false);
+                        place(lines[i].text, -0.98f, bottom, 0.4f, mh::chatColour(lines[i].tone), 0.0f, false);
                     }
 
-                    if (typing)
                     {
                         // The tail, not the head. A HUD string is forty-eight
                         // characters and the line was drawn from its start, so
@@ -9080,7 +9116,19 @@ constexpr float kGravity = 26.0f;
                         constexpr size_t kRoom = static_cast<size_t>(mh::kHudChars) - 3;
                         const std::string shown =
                             typed.size() > kRoom ? typed.substr(typed.size() - kRoom) : typed;
-                        place("> " + shown + "_", -0.98f, -0.97f, 0.4f, kHudBright, 0.0f, false);
+
+                        // The box says what it is when it is empty, rather than
+                        // sitting there blank and looking broken. No "> " in
+                        // front of what is typed - the box is the prompt.
+                        static const float kHint[3] = {0.42f, 0.46f, 0.56f};
+                        if (typing)
+                        {
+                            place(shown + "_", -0.98f, -0.97f, 0.4f, kHudBright, 0.0f, false);
+                        }
+                        else
+                        {
+                            place("Press Return to chat", -0.98f, -0.97f, 0.4f, kHint, 0.0f, false);
+                        }
                     }
                 }
 

@@ -473,13 +473,13 @@ public sealed partial class NativeViewer : IDisposable
     /// <summary>
     /// Shows one line in the renderer's chat panel.
     /// </summary>
-    public void PushChat(string line)
+    public void PushChat(string line, int tone = 0)
     {
         if (_disposed || string.IsNullOrEmpty(line))
         {
             return;
         }
-        mh_viewer_push_chat(_handle, line);
+        mh_viewer_push_chat(_handle, line, tone);
     }
 
     /// <summary>
@@ -939,7 +939,7 @@ public sealed partial class NativeViewer : IDisposable
     private static partial void mh_viewer_set_zone_lines(IntPtr viewer, ReadOnlySpan<NativeZoneLine> lines, int count);
 
     [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
-    private static partial void mh_viewer_push_chat(IntPtr viewer, string line);
+    private static partial void mh_viewer_push_chat(IntPtr viewer, string line, int tone);
 
     [LibraryImport(LibraryName)]
     private static partial int mh_viewer_get_character(IntPtr viewer, out float x, out float y, out float z,

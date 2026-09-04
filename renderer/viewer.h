@@ -395,6 +395,44 @@ struct FormRow
     bool enabled{true};
 };
 
+/// What a line of chat is. The numbers match FfxiChatMessageType on the client
+/// side, so they cross the C boundary unchanged; the two above the server's
+/// range are this client's own.
+enum class ChatTone : int
+{
+    Say = 0,
+    Shout = 1,
+    Tell = 3,
+    Party = 4,
+    Linkshell = 5,
+    System = 6,
+    /// Somebody in the world speaking, as opposed to the server narrating.
+    Npc = 20,
+};
+
+/// Pink for the two aimed at you personally, a tell brighter than a shout;
+/// lime for a linkshell, blue for a party, white for everything ordinary.
+inline const float* chatColour(ChatTone tone)
+{
+    static constexpr float kSay[3] = {0.92f, 0.94f, 0.98f};
+    static constexpr float kShout[3] = {1.00f, 0.86f, 0.88f};
+    static constexpr float kTell[3] = {1.00f, 0.38f, 0.72f};
+    static constexpr float kParty[3] = {0.48f, 0.68f, 1.00f};
+    static constexpr float kLinkshell[3] = {0.68f, 0.98f, 0.42f};
+    static constexpr float kSystem[3] = {0.86f, 0.84f, 0.62f};
+    static constexpr float kNpc[3] = {1.00f, 0.94f, 0.72f};
+    switch (tone)
+    {
+        case ChatTone::Shout: return kShout;
+        case ChatTone::Tell: return kTell;
+        case ChatTone::Party: return kParty;
+        case ChatTone::Linkshell: return kLinkshell;
+        case ChatTone::System: return kSystem;
+        case ChatTone::Npc: return kNpc;
+        default: return kSay;
+    }
+}
+
 /// A form waiting to be filled in, or nothing.
 ///
 /// This is how the client asks for a screen without the renderer knowing what
@@ -450,8 +488,18 @@ public:
     /// The renderer never asks what a line means - colour, sender and channel
     /// are the client's business. This is a window onto whether anything is
     /// arriving at all.
-    void pushChat(const std::string& line);
-    std::vector<std::string> chat() const;
+    /// A line and what kind of line it is, which is what decides its colour.
+    /// Which channel something came from is most of what you need at a glance:
+    /// a tell and a linkshell line read as different things long before either
+    /// has been read.
+    struct ChatLine
+    {
+        std::string text;
+        ChatTone tone{ChatTone::Say};
+    };
+
+    void pushChat(const std::string& line, ChatTone tone = ChatTone::Say);
+    std::vector<ChatLine> chat() const;
 
     /// Where the character has walked to, posted every frame.
     ///
@@ -711,7 +759,7 @@ private:
     std::deque<std::string> outgoing_;
     float placement_[4]{};
     bool havePlacement_{false};
-    std::deque<std::string> chat_;
+    std::deque<ChatLine> chat_;
 
     // Two flags rather than one guarded pair: a raise only means anything
     // while the character is down, so the two being read a moment apart says

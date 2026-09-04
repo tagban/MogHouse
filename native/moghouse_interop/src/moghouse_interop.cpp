@@ -310,13 +310,13 @@ uint32_t mh_viewer_take_talk(MhViewerHandle viewer)
     return viewer->link.takeTalk(entityId) ? entityId : 0;
 }
 
-void mh_viewer_push_chat(MhViewerHandle viewer, const char* line)
+void mh_viewer_push_chat(MhViewerHandle viewer, const char* line, int32_t tone)
 {
     if (!viewer || !line)
     {
         return;
     }
-    viewer->link.pushChat(std::string{line});
+    viewer->link.pushChat(std::string{line}, static_cast<mh::ChatTone>(tone));
 }
 
 int32_t mh_viewer_get_character(MhViewerHandle viewer, float* x, float* y, float* z, float* heading)

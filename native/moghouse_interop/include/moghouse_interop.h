@@ -234,7 +234,8 @@ MH_API uint32_t mh_viewer_take_talk(MhViewerHandle viewer);
 /// Adds one line to the chat panel. UTF-8 in, though the panel's font only
 /// covers letters, digits and a little punctuation - anything else becomes a
 /// space rather than a wrong glyph.
-MH_API void mh_viewer_push_chat(MhViewerHandle viewer, const char* line);
+/// `tone` matches FfxiChatMessageType, and decides the line's colour.
+MH_API void mh_viewer_push_chat(MhViewerHandle viewer, const char* line, int32_t tone);
 
 /// Where the character has walked to. Returns 0 before the first frame.
 ///
