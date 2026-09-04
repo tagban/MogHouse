@@ -96,12 +96,20 @@ just heard.
 |---|---|---|
 | 000003 | walking | zone footstep tables |
 | 000011 | menu select | — |
+| 006015 | a monster falling | shared, `se006` |
 | 006042 | sword strike | shared, `se006` |
+| 006043 | sword put away | shared, `se006` |
 | 006065 | sword drawn | `sinr`, on 102 creature models |
 
-That last row settles the `s` prefix: `sinr` is unsheathing, not "in" as in
-appearing, which is what it was read as here first. Its pair `sotr` (006066)
-is sheathing.
+006065 settles the `s` prefix: `sinr` is unsheathing, not "in" as in
+appearing, which is what it was read as here first.
+
+It also leaves a loose end. `sinr` and `sotr` point at 006065 and 006066, an
+adjacent pair, and 006065 is confirmed as drawing a sword - but the sound
+confirmed as putting one away is 006043, not 006066. Two pairs, then, and
+what separates them is unknown: most likely one belongs to the weapon a
+creature carries and the other to the player's, or they differ by weapon
+type. Watching a few weapons drawn and sheathed in turn would settle it.
 
 ## What is not known
 
