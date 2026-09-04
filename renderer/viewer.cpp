@@ -5470,6 +5470,8 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     bool equipmentOpen = std::getenv("MOGHOUSE_EQUIPMENT") != nullptr;
     int equipmentSlot = -1;
 
+
+
     // What was open last frame, so closing either panel can be noticed.
     bool wasInventoryOpen = false;
     bool wasEquipmentOpen = false;
@@ -5991,12 +5993,14 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     bool dragMoved = false;
 
     std::printf("wasd to walk, mouse drag to look, space to jump, wheel or numpad 9/3 to zoom,\n");
-    std::printf("shift to run, r to auto-run, tab to orbit, p to print position,\n");
+    std::printf("shift to run, r to auto-run, p to print position,\n");
     std::printf("c to place the character,\n");
     std::printf("u to back up the trail if collision traps you, n for no collision,\n");
     std::printf("numpad 8/2 to move and 4/6 to turn, numpad star to walk, shift to invert it,\n");
     std::printf("numpad minus for the options menu, minus/equals for music, shift for sound,\n");
     std::printf("f to swap between driving the character and flying the camera,\n");
+    std::printf("tab to pick the nearest thing and step through the rest, v to follow it,\n");
+    std::printf("o to orbit the camera,\n");
     std::printf("t to get on and off the monorail where there is one,\n");
     std::printf("escape to quit\n");
 
@@ -6315,6 +6319,14 @@ constexpr float kGravity = 26.0f;
     /// in a different colour rather than a second way of drawing.
     uint32_t targetId = 0;
     uint32_t hoverId = 0;
+
+    /// Whether the character is walking after whatever is targeted.
+    ///
+    /// Tab steps through what is near, nearest first, and V follows it. The
+    /// target is held by id rather than by index: the entity list is rebuilt
+    /// whenever the server changes it, and an index into it means somebody
+    /// else a moment later.
+    bool following = false;
 
     mh::Mat4 pickProjection{};
     bool havePickProjection = false;
@@ -6963,7 +6975,65 @@ constexpr float kGravity = 26.0f;
                 }
                 else if (event.key.key == SDLK_TAB)
                 {
+                    // Nearest first, and round again from the end. Anything
+                    // further than thirty yalms is not worth cycling past -
+                    // that is beyond where a name is drawn.
+                    std::vector<std::pair<float, uint32_t>> near;
+                    for (const mh::RadarEntity& entity : radarEntities)
+                    {
+                        const float dx = entity.x - characterAt.x;
+                        const float dz = entity.z - characterAt.z;
+                        const float distance = std::sqrt(dx * dx + dz * dz);
+                        if (distance > 0.01f && distance <= 30.0f)
+                        {
+                            near.emplace_back(distance, entity.id);
+                        }
+                    }
+                    std::sort(near.begin(), near.end());
+
+                    if (near.empty())
+                    {
+                        targetId = 0;
+                        following = false;
+                    }
+                    else
+                    {
+                        size_t at = near.size();
+                        for (size_t i = 0; i < near.size(); ++i)
+                        {
+                            if (near[i].second == targetId)
+                            {
+                                at = i;
+                                break;
+                            }
+                        }
+
+                        // Past the last one is nobody, so tab can let go as
+                        // well as take hold.
+                        if (at + 1 < near.size())
+                        {
+                            targetId = near[at + 1].second;
+                        }
+                        else if (at == near.size())
+                        {
+                            targetId = near[0].second;
+                        }
+                        else
+                        {
+                            targetId = 0;
+                            following = false;
+                        }
+                    }
+                }
+                else if (event.key.key == SDLK_O)
+                {
+                    // The camera orbit, which tab used to hold. Tab is worth
+                    // more as a target key: it is what the game uses.
                     camera.orbiting = !camera.orbiting;
+                }
+                else if (event.key.key == SDLK_V)
+                {
+                    following = targetId != 0 && !following;
                 }
                 else if (event.key.key == SDLK_MINUS || event.key.key == SDLK_EQUALS ||
                          event.key.key == SDLK_PLUS)
@@ -7821,8 +7891,51 @@ constexpr float kGravity = 26.0f;
             const mh::Vec3 forward = mh::normalise(mh::Vec3{std::sin(camera.yaw), 0.0f, std::cos(camera.yaw)});
             const mh::Vec3 right = mh::normalise(mh::cross(forward, mh::Vec3{0.0f, 1.0f, 0.0f}));
 
-            const mh::Vec3 wanted{characterAt.x + forward.x * ahead + right.x * side, characterAt.y,
-                                  characterAt.z + forward.z * ahead + right.z * side};
+            mh::Vec3 wanted{characterAt.x + forward.x * ahead + right.x * side, characterAt.y,
+                            characterAt.z + forward.z * ahead + right.z * side};
+
+            // Following, which walks after the target rather than after the
+            // keys. Straight at them and no cleverer than that: it goes
+            // through the same collision as a step, so a wall stops it the way
+            // a wall stops anything, and the fall check below still owns the
+            // height.
+            //
+            // Two yalms is close enough. Walking all the way in leaves the two
+            // bodies inside each other, and the game stops short too.
+            if (following)
+            {
+                constexpr float kFollowGap = 2.0f;
+                const mh::RadarEntity* chased = nullptr;
+                for (const mh::RadarEntity& entity : radarEntities)
+                {
+                    if (entity.id == targetId)
+                    {
+                        chased = &entity;
+                        break;
+                    }
+                }
+
+                if (chased == nullptr)
+                {
+                    // Gone - zoned out, died, walked past the edge of what the
+                    // server tells us about. Stop rather than keep walking at
+                    // where they used to be.
+                    following = false;
+                }
+                else
+                {
+                    const float dx = chased->x - characterAt.x;
+                    const float dz = chased->z - characterAt.z;
+                    const float gap = std::sqrt(dx * dx + dz * dz);
+                    if (gap > kFollowGap)
+                    {
+                        wanted = {characterAt.x + (dx / gap) * speed, characterAt.y,
+                                  characterAt.z + (dz / gap) * speed};
+                        characterFacing = std::atan2(dx, dz);
+                    }
+                }
+            }
+
             if (wanted.x != characterAt.x || wanted.z != characterAt.z)
             {
                 const bool ignoreCollision = collision.empty() || noclip;
