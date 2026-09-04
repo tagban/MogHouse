@@ -31,6 +31,7 @@ endif()
 # executable over a socket - see renderer/viewer.h.
 add_library(moghouse-render STATIC
     music.cpp
+    sounds.cpp
     character.cpp
     collision.cpp
     scene.cpp

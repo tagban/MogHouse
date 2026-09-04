@@ -41,6 +41,7 @@
 #include "sky_shader.h"
 #include "monorail.h"
 #include "music.h"
+#include "sounds.h"
 #include "water_shader.h"
 #include "effect_shader.h"
 #include "zone_shader.h"
@@ -2570,6 +2571,12 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     std::unordered_map<std::string, ffxi::SpriteAnimation> sprites;
     std::vector<mh::SpriteInstance> spriteInstances;
 
+    // Short sounds over the top of the music. Separate from it because they
+    // overlap each other and it does not - and declared up here rather than
+    // beside the music because the body-drawing lambda below plays them, and a
+    // lambda cannot capture something declared after it.
+    mh::Sounds sounds;
+
     // Where the zone's torches stand. Rebuilt with the zone, read every frame.
     std::vector<Lamp> lamps;
 
@@ -4932,6 +4939,8 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             }
         }
 
+        sounds.tick();
+
         // How long this zone has been up. Nothing is seen arriving in the
         // first few moments of one - see emergeOffset.
         // The settle exists because a client clears its tracker on a zone
@@ -4985,10 +4994,37 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             // A worm comes up out of the ground rather than appearing on it.
             // Zero for everything else, and for anything that has been here
             // longer than the effect lasts.
+            const float rise = emergeOffset(entity, grow, sinceZoneSeconds);
+
+            // And makes a noise doing it, on the first frame it is seen to
+            // move. Keyed off the effect itself rather than off a second
+            // window of its own: an earlier attempt fired only within 0.2s of
+            // the entity appearing, and a zone takes longer than that to
+            // finish loading, so the first frame ever drawn was already at
+            // 0.22 and the sound could never play at all.
+            //
+            // Which noise is not known. Nothing read so far says that a given
+            // seNNNNNN is the sound of a worm, and there are 11,862 of them,
+            // so this is a switch to try candidates with rather than a choice:
+            //
+            //   MOGHOUSE_EMERGE_SOUND=.../sound/win/se/se303/se303001.spw
+            static const char* emergeSound = std::getenv("MOGHOUSE_EMERGE_SOUND");
+            if (emergeSound != nullptr && rise != 0.0f)
+            {
+                static std::set<uint32_t> sounded;
+                if (sounded.insert(entity.id).second)
+                {
+                    const bool played = sounds.play(emergeSound);
+                    if (watchSpawns)
+                    {
+                        std::printf("  emerge sound: %s (%zu voices)\n",
+                                    played ? "playing" : "REFUSED", sounds.voices());
+                    }
+                }
+            }
+
             const float body[16] = {bc, 0, -bs, 0, 0, grow, 0, 0, bs, 0, bc, 0,
-                                    entity.x,
-                                    entity.y + emergeOffset(entity, grow, sinceZoneSeconds),
-                                    entity.z, 1};
+                                    entity.x, entity.y + rise, entity.z, 1};
             queue.WriteBuffer(characterInstanceBuffer, sizeof(body) * (drawnBodies + 1), body, sizeof(body));
             ++drawnBodies;
         }
@@ -9792,6 +9828,10 @@ constexpr float kGravity = 26.0f;
     // here while SDL is still up. shutdown() is idempotent; the destructor
     // still runs and finds nothing left to do.
     music.shutdown();
+
+    // Before SDL_Quit for the same reason the music is: destroying an audio
+    // stream after the subsystem has gone locks a mutex that has been freed.
+    sounds.shutdown();
 
     SDL_DestroyWindow(window);
     SDL_Quit();

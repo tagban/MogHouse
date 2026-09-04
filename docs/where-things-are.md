@@ -122,10 +122,16 @@ place needs a rebuild path that does not exist. Which of the four skies each of
 the twenty weathers calls for is also a reading rather than a measurement; see
 `skyForWeather`.
 
-**A seated pose on the train, and sound effects.** Both written up with working
-notes in `docs/windows-handoff.md`. The sitting clips are `si00` through `si21`;
-the sound format is solved and on the wiki, and what is missing is a mixer
-rather than a decoder.
+**Which sound is which.** Sound effects now decode and play - `.spw` is read
+in `renderer/ffxi/spw.cpp`, several at once through `renderer/sounds.cpp`, and
+`ffxi-sounddump` measures whether a decode came out as a waveform rather than
+noise. What is missing is the mapping: nothing read so far says which of the
+11,862 files is the noise a worm makes coming out of the ground.
+`MOGHOUSE_EMERGE_SOUND` plays a chosen file when one does, for trying
+candidates. See `docs/wiki/Audio-Formats.md`.
+
+**A seated pose on the train.** Written up with working notes in
+`docs/windows-handoff.md`; the sitting clips are `si00` through `si21`.
 
 ## Where the rest is written down
 
@@ -134,6 +140,7 @@ rather than a decoder.
 | `docs/macos-handoff.md` | how the Mac build happened, and two wrong theories worth not repeating |
 | `docs/windows-handoff.md` | what is parked for the Windows session, and what blocks deleting Avalonia |
 | `docs/npc-dialogue.md` | talking to NPCs: what works, and why menus need an event-script reader |
+| `docs/wiki/Audio-Formats.md` | `.bgw` and `.spw`: the header, the split sample rate, and how it was checked |
 | `tools/bugs.py` | reading the bug channel `/bug` posts to, and marking reports done |
 | `docs/local-test-server.md` | building and running LandSandBoat here |
 | `docs/networking-handoff.md` | a false lead, kept so nobody pays for it twice |
