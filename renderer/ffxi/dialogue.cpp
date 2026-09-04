@@ -23,6 +23,16 @@ constexpr char kNewline = 0x07;    ///< a line break within one entry
 constexpr char kOptions = 0x0B;    ///< everything after this is a menu
 constexpr char kEnd = 0x7F;        ///< the entry stops here, whatever follows
 
+/// Codes that carry a parameter byte after them. 0x1E and 0x1F are colour
+/// changes and the byte following says which colour; 0x81 and 0x87 lead a
+/// two-byte character, of which only the quotes are wanted in English text.
+/// All four have to step over what follows them or it lands in the text - a
+/// colour code read as one byte leaves a stray letter in front of the line.
+bool takesParameter(uint8_t decoded)
+{
+    return decoded == 0x1E || decoded == 0x1F || decoded == 0x81 || decoded == 0x87;
+}
+
 uint32_t readDword(const std::vector<uint8_t>& data, size_t at)
 {
     uint32_t value = 0;
@@ -52,7 +62,9 @@ std::vector<DialogueEntry> readDialogue(const std::filesystem::path& path)
     {
         return {};
     }
-    const size_t count = firstOffset / 4;
+    // The table starts after the first dword, so its own four bytes come off
+    // before the entries are counted.
+    const size_t count = (firstOffset - 4) / 4;
 
     std::vector<DialogueEntry> entries;
     entries.reserve(count);
@@ -72,7 +84,22 @@ std::vector<DialogueEntry> readDialogue(const std::filesystem::path& path)
         std::string* into = &entry.text;
         for (size_t b = kTableStart + start; b < kTableStart + stop; ++b)
         {
-            const char decoded = static_cast<char>(data[b] ^ kTextMask);
+            const auto raw = static_cast<uint8_t>(data[b] ^ kTextMask);
+            if (takesParameter(raw))
+            {
+                // 0x87 0xB2 and 0x87 0xB3 are the quotes menu names are given
+                // in - "Map", "Markers" - and are worth keeping.
+                const uint8_t next = b + 1 < kTableStart + stop
+                                         ? static_cast<uint8_t>(data[b + 1] ^ kTextMask)
+                                         : 0;
+                if (raw == 0x87 && (next == 0xB2 || next == 0xB3))
+                {
+                    into->push_back('"');
+                }
+                ++b;
+                continue;
+            }
+            const char decoded = static_cast<char>(raw);
             if (decoded == kEnd || decoded == '\0')
             {
                 break;

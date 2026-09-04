@@ -26,17 +26,34 @@ public sealed class FfxiDialogueTable
     public const int DialogueFileIdOffset = 6420;
 
     private readonly string[] _lines;
+    private readonly string[][] _options;
 
-    private FfxiDialogueTable(string[] lines) => _lines = lines;
+    private FfxiDialogueTable(string[] lines, string[][] options)
+    {
+        _lines = lines;
+        _options = options;
+    }
 
     public int Count => _lines.Length;
 
     /// <summary>An empty table, for zones whose file is missing.</summary>
-    public static FfxiDialogueTable Empty { get; } = new([]);
+    public static FfxiDialogueTable Empty { get; } = new([], []);
 
     /// <summary>The line with this id, or null if the zone has no such line.</summary>
     public string? Line(int id) =>
         id >= 0 && id < _lines.Length && _lines[id].Length > 0 ? _lines[id] : null;
+
+    /// <summary>
+    /// The choices offered under a line, or empty when it is only speech.
+    ///
+    /// A menu is not held anywhere separate: 0x0B opens the list inside the
+    /// text itself and each 0x07 after it starts the next choice, so
+    /// "Set this as current home point?" carries its own Yes and No. Before
+    /// this was read they were silently run onto the end of the line, which
+    /// is why some NPC text ended in a stray "Yes.No."
+    /// </summary>
+    public IReadOnlyList<string> Options(int id) =>
+        id >= 0 && id < _options.Length ? _options[id] : [];
 
     public static FfxiDialogueTable Load(FfxiFileTable table, int zoneId)
     {
@@ -67,19 +84,31 @@ public sealed class FfxiDialogueTable
 
         int count = (first - 4) / 4;
         var lines = new string[count];
+        var options = new string[count][];
         for (int i = 0; i < count; i++)
         {
             int offset = (int)BinaryPrimitives.ReadUInt32LittleEndian(plain.AsSpan(4 + i * 4, 4));
-            lines[i] = offset > 0 && offset < plain.Length ? Decode(plain, offset + 4) : "";
+            if (offset > 0 && offset < plain.Length)
+            {
+                (lines[i], options[i]) = Decode(plain, offset + 4);
+            }
+            else
+            {
+                (lines[i], options[i]) = ("", []);
+            }
         }
 
-        return new FfxiDialogueTable(lines);
+        return new FfxiDialogueTable(lines, options);
     }
 
     /// <summary>One entry, from its first byte of text to its terminator.</summary>
-    private static string Decode(byte[] plain, int at)
+    private static (string Text, string[] Options) Decode(byte[] plain, int at)
     {
         var text = new StringBuilder();
+        var options = new List<StringBuilder>();
+
+        // Everything goes into the text until 0x0B says the rest is a menu.
+        StringBuilder into = text;
         for (int i = at; i < plain.Length; i++)
         {
             byte b = plain[i];
@@ -88,10 +117,36 @@ public sealed class FfxiDialogueTable
                 break;
             }
 
+            if (b == 0x0B)
+            {
+                options.Add(new StringBuilder());
+                into = options[^1];
+                continue;
+            }
+
             if (b == 0x07)
             {
-                // A line break inside one entry, not a separator between two.
-                text.Append('\n');
+                // A line break inside the text, but the start of the next
+                // choice once the menu has opened.
+                if (into == text)
+                {
+                    text.Append('\n');
+                }
+                else
+                {
+                    options.Add(new StringBuilder());
+                    into = options[^1];
+                }
+            }
+            else if ((b == 0x1E || b == 0x1F) && i + 1 < plain.Length)
+            {
+                // A colour change, and the byte after it is which colour -
+                // not a letter. Dropping the 0x1F and keeping its parameter
+                // put a stray character in front of every coloured line:
+                // "yYou will be able to use the Assist Channel", where the y
+                // is 0x79 being mistaken for text. The colour itself is not
+                // used yet; both bytes are stepped over so the words are right.
+                ++i;
             }
             else if ((b == 0x81 || b == 0x87) && i + 1 < plain.Length)
             {
@@ -101,15 +156,18 @@ public sealed class FfxiDialogueTable
                 byte pair = plain[++i];
                 if (b == 0x87 && (pair == 0xB2 || pair == 0xB3))
                 {
-                    text.Append('"');
+                    into.Append('"');
                 }
             }
             else if (b >= 0x20)
             {
-                text.Append((char)b);
+                into.Append((char)b);
             }
         }
 
-        return text.ToString();
+        string[] choices = options.Select(o => o.ToString().Trim())
+                                  .Where(o => o.Length > 0)
+                                  .ToArray();
+        return (text.ToString(), choices);
     }
 }
