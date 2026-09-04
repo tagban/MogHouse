@@ -72,30 +72,29 @@ size_t modelFileId(Race race, LookSlot slot, uint16_t modelId)
 
     const SlotWindow& window = kSlotWindow[slotIndex];
 
-    // Tarutaru are the one race whose two sexes share a block, and the split
-    // is inside each equipment window rather than between blocks: the first
-    // 128 ids of a 256-wide window are the male models and the second 128 the
-    // female. Without this a female Tarutaru is drawn from the male's files
-    // and simply looks like one, which is what happened.
+    // A female Tarutaru is still drawn from the male's files, and still looks
+    // like one. What is known, so the next attempt does not repeat this one:
     //
-    // The face window does not split. Faces 0 to 15 and 16 to 31 resolve to
-    // the same files - checked, and they are the same paths, not merely the
-    // same size - so the sex is carried by the body and not by the head.
+    // The upper half of each window is not a second body set. Body 8 and body
+    // 136 are different files, which looked like evidence for 128 male models
+    // and 128 female - but drawing 136 puts the character in an ornate suit of
+    // armour, so the window is one flat list of gear shared by both sexes.
     //
-    // Derived from the file table rather than from a document, and not yet
-    // confirmed against a screen: body 8 and body 136 are different files of
-    // different sizes, which is the evidence for the halving.
-    size_t wanted = modelId;
-    if (race == Race::TarutaruFemale && slot != LookSlot::Face && window.count == 256)
-    {
-        wanted += window.count / 2;
-    }
-
-    if (wanted >= window.count)
+    // The face window does not split either: faces 0 to 15 and 16 to 31
+    // resolve to the same paths, not merely the same sizes.
+    //
+    // There is an eighth face window at 22952, implying a base of 22944, which
+    // is exactly the block nobody has claimed - the other seven line up with
+    // the seven races we do name. But its body slot at the usual offset is a
+    // 2KB file where a body is 36KB, and its hands are 57KB, so whatever sits
+    // there does not use these window offsets. It is the most likely home of
+    // the female Tarutaru head and it needs its own layout worked out rather
+    // than the shared one assumed.
+    if (modelId >= window.count)
     {
         return 0;
     }
-    return base + window.offset + wanted;
+    return base + window.offset + modelId;
 }
 
 std::vector<std::filesystem::path> lookFiles(const FileTable& table, const Look& look)
