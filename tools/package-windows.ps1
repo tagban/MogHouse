@@ -58,7 +58,7 @@ param(
     # The window title is set separately, in kWindowTitle in renderer/viewer.h,
     # and this does not change it - so the two can disagree. They should not:
     # a tester reporting a bug reads the title bar, not the zip they unpacked.
-    [string]$Version = "0.2.0",
+    [string]$Version = "0.2.1",
 
     # Where the staging folder and the zip are written.
     [string]$Output = "dist",

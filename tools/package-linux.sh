@@ -20,7 +20,7 @@
 # satisfies both, which is why this is simpler than the macOS bundle.
 set -euo pipefail
 
-VERSION="0.2.0"
+VERSION="0.2.1"
 OUTPUT="dist/linux-x64"
 RES=""
 ZONEDATA=""

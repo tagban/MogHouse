@@ -95,7 +95,7 @@ struct InteriorLighting
 // Bump with the three packaging scripts, which each carry the version
 // separately. This one was missed for 0.2.0, so the released macOS build
 // says 0.1.2 in its title bar - the first thing anyone reads.
-inline constexpr const char* kWindowTitle = "MogHouse XI - Alpha 0.2.0";
+inline constexpr const char* kWindowTitle = "MogHouse XI - Alpha 0.2.1";
 
 struct ZoneLineMarker
 {

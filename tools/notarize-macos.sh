@@ -22,7 +22,7 @@ set -euo pipefail
 APPLE_ID="tagban@gmail.com"
 TEAM_ID="D36X678376"
 PROFILE="MogHouse"
-VERSION="0.2.0"
+VERSION="0.2.1"
 OUTPUT="dist"
 ARCHES="arm64 x86_64"
 
@@ -31,7 +31,7 @@ usage() {
 Usage: tools/notarize-macos.sh [options]
 
   --arch A            arm64, x86_64, or both (default: both)
-  --version X.Y.Z     which build to notarize (default: 0.2.0)
+  --version X.Y.Z     which build to notarize (default: 0.2.1)
   --output DIR        where package-macos.sh wrote them (default: dist)
   --apple-id ID       Apple ID (default: tagban@gmail.com)
   --team-id ID        team (default: D36X678376)
