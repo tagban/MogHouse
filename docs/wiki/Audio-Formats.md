@@ -105,7 +105,38 @@ boundary and keeps the running history rather than resetting it.
   * **Not in `sound/win/se/_bitInfo.inf`.** Four bytes, `03 00 00 00`, a
     version.
 
-  **The best lead is chunk type 0x07, the Scheduler.** A creature's model DAT
+  **Solved for the sounds a creature owns: chunk type 0x3D.** A DAT declares
+  the sounds it uses, and the chunk's own four-character name says what each
+  one is for.
+
+  | offset | size | field |
+  |---|---|---|
+  | 0x00 | 8 | `SeSep  ` |
+  | 0x08 | 4 | sound id, u32 |
+
+  Past the usual 16-byte chunk header. The id becomes a path by
+  `se{id/1000:03d}/se{id:06d}.spw` - 252003 is `se252/se252003.spw`. All 21 in
+  the worm at model 426 resolve to files that exist.
+
+  The names are a fixed vocabulary, counted across 614 creature models:
+
+  ```
+  idl1 idl2      idle          atk1-atk4  attacking
+  dam1-dam4      taking a hit  swy1-swy3  swaying
+  ded1-ded3      dying         sdam skaz shit  shared, in se006
+  ```
+
+  **No creature declares a spawn sound.** Not one of the 614 has a `pop` or
+  anything like it, which is why a worm's own DAT gives only combat noises.
+  Whatever plays when one comes out of the ground is not the creature's - the
+  next place to look is the zone, where a DAT carries hundreds of these
+  against a creature's twenty: West Ronfaure has 805.
+
+  A creature's own folder is not its family number. Model 426 is a worm and
+  its sounds are in `se252`, while the worm family is 258 - and `se258` exists
+  with sixteen files of its own.
+
+  **The other lead is chunk type 0x07, the Scheduler.** A creature's model DAT
   holds dozens - the worm at model 426 has 38 - and they are named after
   events rather than after anything graphical:
 
@@ -128,9 +159,12 @@ boundary and keeps the running history rather than resetting it.
   will do neither. `dead` and `damg` are better subjects than `pop0` because
   every creature certainly makes a noise for those.
 
-  If that finds nothing, the mapping is compiled into the retail client, which
-  was ordinary for a game of that era. That cannot be derived - but it can be
-  recognised, which is what `ffxi-sounddump --wav` is for: convert a folder
-  and the noise a worm makes is obvious to anyone who has played the game.
-  About 172 of the 393 folders hold exactly sixteen files, which reads as one
-  folder per creature with a fixed set of sounds each.
+  An earlier note here said the mapping was most likely compiled into the
+  client and could not be derived. That was wrong: it is in the DATs, as 0x3D
+  above. Recorded because it was wrong for a specific reason worth avoiding -
+  0x3D was sitting in a chunk histogram already printed, unrecognised, and the
+  conclusion was reached by running out of ideas rather than by looking.
+
+  `ffxi-sounddump --wav` converts a folder so it can be judged by ear, which
+  is still how the last step gets settled. About 172 of the 393 folders hold
+  exactly sixteen files.
