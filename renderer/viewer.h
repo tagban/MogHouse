@@ -597,6 +597,10 @@ public:
             None,
             Equip,
             Drop,
+
+            /// Ask the server to describe us again, which is how a change of
+            /// gear becomes a change of appearance.
+            Refresh,
         };
 
         Kind kind{Kind::None};

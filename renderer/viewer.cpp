@@ -5466,6 +5466,10 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     bool equipmentOpen = std::getenv("MOGHOUSE_EQUIPMENT") != nullptr;
     int equipmentSlot = -1;
 
+    // What was open last frame, so closing either panel can be noticed.
+    bool wasInventoryOpen = false;
+    bool wasEquipmentOpen = false;
+
     /// What order the grid is shown in.
     ///
     /// A view, not a change: the server owns which slot a thing is in, and
@@ -10222,6 +10226,21 @@ constexpr float kGravity = 26.0f;
                         tabs.push_back(i);
                     }
                 }
+
+                // Shutting a panel is when someone has finished changing
+                // their gear, so it is when to ask the server what we now look
+                // like. It sends a look of its own accord, but not dependably
+                // in the same breath as the equip - and standing there in the
+                // old armour is exactly the moment the change is being looked
+                // for.
+                if (link && ((wasInventoryOpen && !inventoryOpen) ||
+                             (wasEquipmentOpen && !equipmentOpen)))
+                {
+                    link->requestInventoryAction(
+                        {mh::ViewerLink::InventoryAction::Kind::Refresh, 0, 0, 0, 0});
+                }
+                wasInventoryOpen = inventoryOpen;
+                wasEquipmentOpen = equipmentOpen;
 
                 inventoryHits.clear();
 

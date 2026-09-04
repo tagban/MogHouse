@@ -283,6 +283,34 @@ public sealed record FfxiEquipment(FfxiEquipSlot Slot, FfxiContainer Container, 
 }
 
 /// <summary>
+/// GP_CLI_COMMAND_CHARREQ (C2S 0x016) - tell me about that entity again.
+///
+/// Sent by the retail client when it wants data for something it cannot draw
+/// yet. Pointed at our own targid it is the protocol's way of asking about
+/// ourselves: the server answers with a full entity update and a status
+/// packet, and the entity update is the only place the equipment model ids
+/// ever come from.
+///
+/// Which makes it the answer to gear that has changed without the character
+/// changing with it. The server does push a look of its own accord, but not
+/// dependably in the same breath as the equip - so rather than wait, ask.
+/// </summary>
+public static class FfxiCharacterRequestPacket
+{
+    public const ushort PacketId = 0x016;
+    public const int PacketSize = 8;
+
+    public static byte[] Build(ushort actIndex, ushort sync)
+    {
+        var packet = new byte[PacketSize];
+        BinaryPrimitives.WriteUInt16LittleEndian(packet.AsSpan(0, 2), FfxiZonePacket.PackIdAndSize(PacketId, PacketSize));
+        BinaryPrimitives.WriteUInt16LittleEndian(packet.AsSpan(2, 2), sync);
+        BinaryPrimitives.WriteUInt16LittleEndian(packet.AsSpan(4, 2), actIndex);
+        return packet;
+    }
+}
+
+/// <summary>
 /// GP_CLI_COMMAND_ITEM_DUMP (C2S 0x028) - throw this away.
 ///
 /// The quantity is the whole stack: the server checks it against what it

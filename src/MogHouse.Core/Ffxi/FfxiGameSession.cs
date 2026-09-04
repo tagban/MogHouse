@@ -1356,6 +1356,24 @@ public sealed class FfxiGameSession : IDisposable
     }
 
     /// <summary>
+    /// Asks the server what we look like now.
+    ///
+    /// Gear changes what a character looks like, and the ids that say so live
+    /// only in the server's entity update. It sends one eventually; this asks
+    /// for it, so closing a bag is not followed by wearing the old thing until
+    /// something else happens to prompt it.
+    /// </summary>
+    public async Task RefreshSelfAsync()
+    {
+        if (_zone is null || _zoneEndpoint is null || ZoneState is null)
+        {
+            return;
+        }
+
+        await _zone.SendCharacterRequestAsync(_zoneEndpoint, ZoneState.ActIndex);
+    }
+
+    /// <summary>
     /// Throws an item away.
     ///
     /// The quantity has to be the whole stack - the server compares it against

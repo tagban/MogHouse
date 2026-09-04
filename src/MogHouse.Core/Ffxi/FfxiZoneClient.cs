@@ -544,6 +544,12 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
         await SendEncryptedAsync(
             zoneServer, FfxiDropPacket.Build(quantity, container, slot, (ushort)(_ownCounter + 1)), ct);
 
+    /// <summary>Asks the server to describe an entity again (GP_CLI_COMMAND_CHARREQ).</summary>
+    public async Task SendCharacterRequestAsync(IPEndPoint zoneServer, ushort actIndex,
+                                                CancellationToken ct = default) =>
+        await SendEncryptedAsync(
+            zoneServer, FfxiCharacterRequestPacket.Build(actIndex, (ushort)(_ownCounter + 1)), ct);
+
     public async Task SendGameOkAsync(IPEndPoint zoneServer, CancellationToken ct = default) =>
         await SendEncryptedAsync(zoneServer, FfxiGameOkPacket.Build((ushort)(_ownCounter + 1)), ct);
 

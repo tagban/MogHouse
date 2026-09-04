@@ -325,6 +325,10 @@ public sealed class WorldLoop
                     _session.DropAsync((FfxiContainer)asked.Container, asked.Slot)
                             .GetAwaiter().GetResult();
                 }
+                else if (asked.Kind == 3)
+                {
+                    _session.RefreshSelfAsync().GetAwaiter().GetResult();
+                }
             }
 
             // Not while a zone is being read. Until it finishes the window is
