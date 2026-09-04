@@ -2203,24 +2203,26 @@ void mh::ViewerLink::chooseLink(Link which) { link_ = static_cast<int>(which); }
 void mh::ViewerLink::applySettings(Settings settings)
 {
     musicVolume_ = settings.musicVolume;
+    soundVolume_ = settings.soundVolume;
     radarTurns_ = settings.radarTurns;
     settingsPending_ = true;
 }
 
 mh::ViewerLink::Settings mh::ViewerLink::settings() const
 {
-    return Settings{musicVolume_.load(), radarTurns_.load()};
+    return Settings{musicVolume_.load(), soundVolume_.load(), radarTurns_.load()};
 }
 
 bool mh::ViewerLink::settingsChanged() { return settingsDirty_.exchange(false); }
 
-bool mh::ViewerLink::takeSettings(float& volume, bool& radarTurns)
+bool mh::ViewerLink::takeSettings(float& volume, float& soundVolume, bool& radarTurns)
 {
     if (!settingsPending_.exchange(false))
     {
         return false;
     }
     volume = musicVolume_.load();
+    soundVolume = soundVolume_.load();
     radarTurns = radarTurns_.load();
     return true;
 }
@@ -2228,6 +2230,7 @@ bool mh::ViewerLink::takeSettings(float& volume, bool& radarTurns)
 void mh::ViewerLink::noteSettings(Settings settings)
 {
     musicVolume_ = settings.musicVolume;
+    soundVolume_ = settings.soundVolume;
     radarTurns_ = settings.radarTurns;
     settingsDirty_ = true;
 }
@@ -6033,12 +6036,16 @@ constexpr float kGravity = 26.0f;
                     music.setVolume(musicVolume);
                     if (link)
                     {
-                        link->noteSettings({musicVolume, radarTurns});
+                        link->noteSettings({musicVolume, soundVolume, radarTurns});
                     }
                 }
                 else if (row == 1)
                 {
                     soundVolume = level;
+                    if (link)
+                    {
+                        link->noteSettings({musicVolume, soundVolume, radarTurns});
+                    }
                 }
                 return;
             }
@@ -6390,6 +6397,10 @@ constexpr float kGravity = 26.0f;
                     if ((SDL_GetModState() & SDL_KMOD_SHIFT) != 0)
                     {
                         soundVolume = std::clamp(soundVolume + step, 0.0f, 1.0f);
+                        if (link)
+                        {
+                            link->noteSettings({musicVolume, soundVolume, radarTurns});
+                        }
                         std::printf("sound volume %.0f%% (ambience %.0f%%)\n", soundVolume * 100.0f,
                                     soundVolume * 30.0f);
                     }
@@ -6399,7 +6410,7 @@ constexpr float kGravity = 26.0f;
                         music.setVolume(musicVolume);
                         if (link)
                         {
-                            link->noteSettings({musicVolume, radarTurns});
+                            link->noteSettings({musicVolume, soundVolume, radarTurns});
                         }
                         std::printf("music volume %.0f%%\n", musicVolume * 100.0f);
                     }
@@ -6409,7 +6420,7 @@ constexpr float kGravity = 26.0f;
                     radarTurns = !radarTurns;
                     if (link)
                     {
-                        link->noteSettings({musicVolume, radarTurns});
+                        link->noteSettings({musicVolume, soundVolume, radarTurns});
                     }
                     std::printf(radarTurns ? "radar turns with you\n" : "radar holds north up\n");
                 }
@@ -7584,7 +7595,7 @@ constexpr float kGravity = 26.0f;
             }
 
             // Preferences the last session left behind, taken once.
-            if (link->takeSettings(musicVolume, radarTurns))
+            if (link->takeSettings(musicVolume, soundVolume, radarTurns))
             {
                 music.setVolume(musicVolume);
             }

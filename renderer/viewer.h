@@ -540,6 +540,9 @@ public:
     struct Settings
     {
         float musicVolume{0.5f};
+        /// Everything that is not music, the way retail has a Sound slider
+        /// beside its Music one. Ambience plays at a fraction of this.
+        float soundVolume{0.5f};
         bool radarTurns{true};
     };
 
@@ -550,7 +553,7 @@ public:
 
     /// Takes settings handed in from outside, once. False when there were
     /// none waiting, which is every frame after the first.
-    bool takeSettings(float& volume, bool& radarTurns);
+    bool takeSettings(float& volume, float& soundVolume, bool& radarTurns);
 
     /// The .bgw the zone wants playing, or empty for silence. Set from the
     /// session, which is the half that hears the server say so.
@@ -730,7 +733,8 @@ private:
     std::atomic<uint8_t> mpPercent_{0};
     std::atomic<bool> vitalsKnown_{false};
     std::atomic<int> link_{0};
-    std::atomic<float> musicVolume_{0.35f};
+    std::atomic<float> musicVolume_{0.5f};
+    std::atomic<float> soundVolume_{0.5f};
     std::atomic<bool> radarTurns_{true};
     std::atomic<bool> settingsDirty_{false};
     std::atomic<bool> settingsPending_{false};

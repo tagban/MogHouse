@@ -21,6 +21,12 @@ public sealed class MogHouseSettings
     [JsonPropertyName("musicVolume")]
     public float MusicVolume { get; set; } = 0.5f;
 
+    /// <summary>
+    /// Everything that is not music - effects and the ambience under them -
+    /// the way retail keeps a Sound slider beside its Music one.
+    /// </summary>
+    public float SoundVolume { get; set; } = 0.5f;
+
     /// <summary>Whether the minimap turns with the player or holds north up.</summary>
     [JsonPropertyName("radarTurnsWithPlayer")]
     public bool RadarTurnsWithPlayer { get; set; } = true;
@@ -74,6 +80,7 @@ public sealed class MogHouseSettings
                 JsonSerializer.Deserialize<MogHouseSettings>(File.ReadAllText(FilePath)) is { } loaded)
             {
                 loaded.MusicVolume = Math.Clamp(loaded.MusicVolume, 0.0f, 1.0f);
+                loaded.SoundVolume = Math.Clamp(loaded.SoundVolume, 0.0f, 1.0f);
                 loaded.BodyDrawDistance = Math.Max(0.0f, loaded.BodyDrawDistance);
                 return loaded;
             }
