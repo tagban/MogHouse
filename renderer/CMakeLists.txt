@@ -90,7 +90,8 @@ add_library(ffxi-dat STATIC
     ffxi/skeleton.cpp
     ffxi/sprite.cpp
     ffxi/texture.cpp
-)
+
+    ffxi/dialogue.cpp)
 target_include_directories(ffxi-dat PUBLIC ffxi)
 
 # The C ABI shim, so the C# client can load the renderer instead of talking to
@@ -103,6 +104,11 @@ target_link_libraries(ffxi-datdump PRIVATE ffxi-dat)
 
 # Decoding a sound needs no GPU either, and "it parsed" is not evidence that
 # the format was read correctly - see the autocorrelation check inside.
+# What the people in a zone say. Needs no GPU, so it gets a CLI like the
+# other readers and can be checked against a retail client by reading it.
+add_executable(ffxi-dialogue ffxi/dialoguedump_main.cpp)
+target_link_libraries(ffxi-dialogue PRIVATE ffxi-dat)
+
 add_executable(ffxi-sounddump ffxi/sounddump_main.cpp ffxi/soundrefs.cpp)
 target_link_libraries(ffxi-sounddump PRIVATE ffxi-dat)
 
