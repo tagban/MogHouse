@@ -527,6 +527,15 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
                                     CancellationToken ct = default) =>
         await SendEncryptedAsync(zoneServer, FfxiJumpPacket.Build(uniqueNo, actIndex, (ushort)(_ownCounter + 1)), ct);
 
+    /// <summary>
+    /// Changes a piece of equipment (GP_CLI_COMMAND_EQUIP_SET). Pass
+    /// <see cref="FfxiEquipment.Empty"/> as the item slot to take something off.
+    /// </summary>
+    public async Task SendEquipAsync(IPEndPoint zoneServer, byte itemSlot, FfxiEquipSlot slot,
+                                     FfxiContainer container, CancellationToken ct = default) =>
+        await SendEncryptedAsync(
+            zoneServer, FfxiEquipPacket.Build(itemSlot, slot, container, (ushort)(_ownCounter + 1)), ct);
+
     public async Task SendGameOkAsync(IPEndPoint zoneServer, CancellationToken ct = default) =>
         await SendEncryptedAsync(zoneServer, FfxiGameOkPacket.Build((ushort)(_ownCounter + 1)), ct);
 

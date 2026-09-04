@@ -59,6 +59,12 @@ public sealed class FfxiGameSession : IDisposable
     public FfxiCharacterHealth? Health { get; private set; }
 
     /// <summary>
+    /// Our bags and what we are wearing, kept up to date from the server's
+    /// one-slot-at-a-time updates.
+    /// </summary>
+    public FfxiInventoryTracker Inventory { get; } = new();
+
+    /// <summary>
     /// Whether the character is dead. Movement is refused while it is true:
     /// the server will not accept it, and walking a corpse around is the
     /// most obvious way for a client to be lying to the person using it.
@@ -816,6 +822,11 @@ public sealed class FfxiGameSession : IDisposable
 
     private void TryLoadZoneLines()
     {
+        // A zone change makes the server resend every bag from scratch, so
+        // drop what we have rather than let a slot emptied on the other side
+        // linger. The window is blank for the length of a loading screen.
+        Inventory.Clear();
+
         ZoneLines = [];
         _zoneLineRequested = null;
 
@@ -1090,6 +1101,39 @@ public sealed class FfxiGameSession : IDisposable
                 }
             }
 
+            // The bags, and what is worn out of them. The server sends these
+            // one slot at a time with no count in front, so the tracker keeps
+            // the running picture and 0x01D says when it is complete.
+            if (FfxiContainerSizes.TryParse(reply.Plaintext.AsSpan(offset, size)) is { } sizes)
+            {
+                Inventory.Apply(sizes);
+            }
+
+            if (FfxiInventoryItem.TryParse(reply.Plaintext.AsSpan(offset, size)) is { } carried)
+            {
+                Inventory.Apply(carried);
+            }
+
+            if (FfxiInventoryItemDetail.TryParse(reply.Plaintext.AsSpan(offset, size)) is { } detailed)
+            {
+                Inventory.Apply(detailed);
+            }
+
+            if (FfxiInventoryCount.TryParse(reply.Plaintext.AsSpan(offset, size)) is { } counted)
+            {
+                Inventory.Apply(counted);
+            }
+
+            if (FfxiInventoryReady.TryParse(reply.Plaintext.AsSpan(offset, size)) is { } ready)
+            {
+                Inventory.Apply(ready);
+            }
+
+            if (FfxiEquipment.TryParse(reply.Plaintext.AsSpan(offset, size)) is { } worn)
+            {
+                Inventory.Apply(worn);
+            }
+
             // Somebody has cast Raise. Nothing about the corpse says so.
             FfxiRaiseOffer? offer = FfxiRaiseOffer.TryParse(reply.Plaintext.AsSpan(offset, size));
             if (offer is not null && offer.UniqueNo == (ZoneState?.UniqueNo ?? 0) &&
@@ -1213,6 +1257,25 @@ public sealed class FfxiGameSession : IDisposable
         }
 
         await _zone.SendJumpAsync(_zoneEndpoint, ZoneState.UniqueNo, ZoneState.ActIndex);
+    }
+
+    /// <summary>
+    /// Wears the item in a bag slot, or takes off what is worn when passed
+    /// <see cref="FfxiEquipment.Empty"/>.
+    ///
+    /// Nothing is applied locally: the server answers with its own 0x050 and
+    /// a fresh look, and a client that moved the gear itself would be showing
+    /// a change the server may well have refused.
+    /// </summary>
+    public async Task EquipAsync(byte itemSlot, FfxiEquipSlot slot,
+                                 FfxiContainer container = FfxiContainer.Inventory)
+    {
+        if (_zone is null || _zoneEndpoint is null || ZoneState is null)
+        {
+            return;
+        }
+
+        await _zone.SendEquipAsync(_zoneEndpoint, itemSlot, slot, container);
     }
 
     /// <summary>

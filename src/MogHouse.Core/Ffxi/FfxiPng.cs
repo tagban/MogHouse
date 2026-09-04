@@ -112,6 +112,40 @@ public static class FfxiPng
         }
     }
 
+    /// <summary>
+    /// Writes straight RGBA out as a PNG with its alpha kept - which is what
+    /// an item icon needs and <see cref="FromBmp"/> cannot give it, a BMP
+    /// having thrown the alpha away before it ever got here.
+    /// </summary>
+    public static void WriteRgba(string path, int width, int height, ReadOnlySpan<byte> rgba)
+    {
+        int rowBytes = width * 4;
+        var raw = new byte[(rowBytes + 1) * height];
+        for (int y = 0; y < height; y++)
+        {
+            raw[y * (rowBytes + 1)] = 0;   // filter: none
+            rgba.Slice(y * rowBytes, rowBytes).CopyTo(raw.AsSpan((y * (rowBytes + 1)) + 1));
+        }
+
+        using var file = File.Create(path);
+        file.Write(Signature);
+
+        var header = new byte[13];
+        BinaryPrimitives.WriteInt32BigEndian(header.AsSpan(0, 4), width);
+        BinaryPrimitives.WriteInt32BigEndian(header.AsSpan(4, 4), height);
+        header[8] = 8;    // bits per channel
+        header[9] = 6;    // colour type: truecolour with alpha
+        WriteChunk(file, "IHDR", header);
+
+        using var squashed = new MemoryStream();
+        using (var deflate = new ZLibStream(squashed, CompressionLevel.Optimal, leaveOpen: true))
+        {
+            deflate.Write(raw);
+        }
+        WriteChunk(file, "IDAT", squashed.ToArray());
+        WriteChunk(file, "IEND", []);
+    }
+
     /// <summary>Length, type, payload, and a CRC over the last two.</summary>
     private static void WriteChunk(Stream into, string type, ReadOnlySpan<byte> payload)
     {

@@ -56,6 +56,9 @@ switch (args[0])
     case "text":
         return Text(ParseFlags(args));
 
+    case "items":
+        return Items(ParseFlags(args));
+
     default:
         PrintUsage();
         return 1;
@@ -75,6 +78,9 @@ static void PrintUsage()
           login --credentials-file <path.json> [--save]
             (file shape: {"host":"...","username":"...","password":"...","name":"...","otp":"..."} -
              avoids the password ever appearing in the command line/shell history)
+          items --id <n> [--icon <out.png>] [--japanese]
+          items --find <substring> [--japanese]
+          items --export <directory> [--japanese]
           create-account --host <host> --username <user> --password <pass> [--auth-port <port>]
           create-account --credentials-file <path.json>
 
@@ -1698,6 +1704,107 @@ static int Text(Dictionary<string, string> flags)
     for (int i = first; i < first + count && i < lines.Count; i++)
     {
         Console.WriteLine($"  [{i}] {Flat(lines.Line(i))}");
+    }
+
+    return 0;
+}
+
+static int Items(Dictionary<string, string> flags)
+{
+    FfxiFileTable? files = OpenFileTable();
+    if (files is null)
+    {
+        return 1;
+    }
+
+    using var items = new FfxiItemTable(files, japanese: flags.ContainsKey("japanese"));
+    if (!items.IsLoaded)
+    {
+        Console.WriteLine("none of the item DATs were found in that install");
+        return 1;
+    }
+
+    if (flags.TryGetValue("export", out string? directory) && directory.Length > 0)
+    {
+        Directory.CreateDirectory(directory);
+        int written = 0;
+        for (int id = 0; id <= ushort.MaxValue; id++)
+        {
+            if (items.Icon((ushort)id) is not { } icon)
+            {
+                continue;
+            }
+
+            // Named by id, because item names collide and contain characters
+            // no filesystem wants. The listing beside them carries the names.
+            FfxiPng.WriteRgba(Path.Combine(directory, $"{id}.png"), icon.Width, icon.Height, icon.Rgba);
+            written++;
+        }
+
+        using (var listing = new StreamWriter(Path.Combine(directory, "items.csv")))
+        {
+            listing.WriteLine("id,name,log_singular,log_plural");
+            for (int id = 0; id <= ushort.MaxValue; id++)
+            {
+                if (items.Item((ushort)id) is { } item && item.Name.Length > 0)
+                {
+                    listing.WriteLine($"{id},\"{item.Name}\",\"{item.LogSingular}\",\"{item.LogPlural}\"");
+                }
+            }
+        }
+
+        Console.WriteLine($"wrote {written} icons and items.csv to {directory}");
+        return 0;
+    }
+
+    if (flags.TryGetValue("find", out string? needle) && needle.Length > 0)
+    {
+        int shown = 0;
+        for (int id = 0; id <= ushort.MaxValue && shown < 40; id++)
+        {
+            if (items.Item((ushort)id) is { } item &&
+                item.Name.Contains(needle, StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine($"  {id,6} 0x{id:X4}  {item.Name}");
+                shown++;
+            }
+        }
+
+        return 0;
+    }
+
+    if (!flags.TryGetValue("id", out string? idText) || !int.TryParse(idText, out int wanted))
+    {
+        Console.WriteLine("items --id <n> | --find <substring> | --export <directory> [--japanese]");
+        return 2;
+    }
+
+    if (items.Item((ushort)wanted) is not { } found)
+    {
+        Console.WriteLine($"no item {wanted}");
+        return 1;
+    }
+
+    Console.WriteLine($"{found.Id} (0x{found.Id:X4})  {found.Name}");
+    Console.WriteLine($"  log      {found.LogSingular} / {found.LogPlural}");
+    Console.WriteLine($"  type     {found.Type}  flags 0x{found.Flags:X4}  stacks {found.StackSize}");
+    if (found.IsEquipment)
+    {
+        Console.WriteLine($"  level    {found.Level}  slots 0x{found.Slots:X4}  races 0x{found.Races:X4}  jobs 0x{found.Jobs:X8}");
+    }
+
+    if (found.Damage > 0 || found.Delay > 0)
+    {
+        Console.WriteLine($"  weapon   dmg {found.Damage}  delay {found.Delay}  skill {found.Skill}");
+    }
+
+    Console.WriteLine($"  {found.Description.Replace("\n", "\n  ")}");
+
+    if (flags.TryGetValue("icon", out string? iconPath) && iconPath.Length > 0 &&
+        items.Icon((ushort)wanted) is { } picture)
+    {
+        FfxiPng.WriteRgba(iconPath, picture.Width, picture.Height, picture.Rgba);
+        Console.WriteLine($"  icon     {picture.Width}x{picture.Height} -> {iconPath}");
     }
 
     return 0;
