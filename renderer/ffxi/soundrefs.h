@@ -33,6 +33,13 @@ struct SoundRef
     /// The sound's number, which is also its path.
     uint32_t id{};
 
+    /// The directory chunks enclosing it, joined with '/' - the same string a
+    /// generator records, and deliberately so. A sound sharing a directory
+    /// with generators is ambience the generators give a position to:
+    /// `f_ro/mode/ligh/taki` holds one sound and fifty-six placements of it,
+    /// and `taki` is Japanese for waterfall.
+    std::string directory;
+
     /// `se{id/1000:03d}/se{id:06d}.spw`, relative to `sound/win`.
     std::filesystem::path file() const;
 };

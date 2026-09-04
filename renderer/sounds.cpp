@@ -50,6 +50,8 @@ const Sounds::Decoded* Sounds::decode(const std::filesystem::path& path)
         into.samples = sound->samples;
         into.sampleRate = sound->sampleRate;
         into.channels = sound->channels;
+        into.loops = sound->loopFrame.has_value();
+        into.loopSample = into.loops ? *sound->loopFrame * static_cast<size_t>(sound->channels) : 0;
         return &into;
     }
 
@@ -110,6 +112,89 @@ bool Sounds::play(const std::filesystem::path& path, float volume)
     return true;
 }
 
+uint32_t Sounds::hold(const std::filesystem::path& path, float volume)
+{
+    std::lock_guard<std::mutex> held{mutex_};
+    if (stopped_)
+    {
+        return 0;
+    }
+
+    const Decoded* sound = decode(path);
+    if (sound == nullptr || !sound->loops)
+    {
+        return 0;
+    }
+
+    SDL_AudioSpec spec{};
+    spec.format = SDL_AUDIO_S16;
+    spec.channels = sound->channels;
+    spec.freq = static_cast<int>(sound->sampleRate);
+
+    SDL_AudioStream* stream =
+        SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+    if (stream == nullptr)
+    {
+        std::printf("sound: no audio stream for %s: %s\n", path.string().c_str(), SDL_GetError());
+        return 0;
+    }
+
+    SDL_SetAudioStreamGain(stream, std::clamp(volume, 0.0f, 1.0f));
+
+    // The first pass is the whole sound; every pass after it starts at the
+    // loop point, which is why refill is not used for this one.
+    const Held voice{stream, sound};
+    if (!SDL_PutAudioStreamData(stream, sound->samples.data(),
+                                static_cast<int>(sound->samples.size() * sizeof(int16_t))))
+    {
+        std::printf("sound: could not queue %s: %s\n", path.string().c_str(), SDL_GetError());
+        SDL_DestroyAudioStream(stream);
+        return 0;
+    }
+    SDL_ResumeAudioStreamDevice(stream);
+
+    const uint32_t handle = nextHandle_++;
+    holding_[handle] = voice;
+    return handle;
+}
+
+int Sounds::channels(const std::filesystem::path& path)
+{
+    std::lock_guard<std::mutex> held{mutex_};
+    if (stopped_)
+    {
+        return 0;
+    }
+    const Decoded* sound = decode(path);
+    return sound != nullptr ? sound->channels : 0;
+}
+
+void Sounds::setVolume(uint32_t handle, float volume)
+{
+    std::lock_guard<std::mutex> held{mutex_};
+    if (auto found = holding_.find(handle); found != holding_.end())
+    {
+        SDL_SetAudioStreamGain(found->second.stream, std::clamp(volume, 0.0f, 1.0f));
+    }
+}
+
+void Sounds::release(uint32_t handle)
+{
+    std::lock_guard<std::mutex> held{mutex_};
+    if (auto found = holding_.find(handle); found != holding_.end())
+    {
+        SDL_DestroyAudioStream(found->second.stream);
+        holding_.erase(found);
+    }
+}
+
+void Sounds::refill(const Held& held)
+{
+    const size_t from = std::min(held.sound->loopSample, held.sound->samples.size());
+    SDL_PutAudioStreamData(held.stream, held.sound->samples.data() + from,
+                           static_cast<int>((held.sound->samples.size() - from) * sizeof(int16_t)));
+}
+
 void Sounds::tick()
 {
     std::lock_guard<std::mutex> held{mutex_};
@@ -129,12 +214,25 @@ void Sounds::tick()
         SDL_DestroyAudioStream(stream);
         return true;
     });
+
+    // A held sound is topped up before it runs dry rather than restarted when
+    // it has: a gap between passes is audible, and half a second in hand is
+    // many frames of slack even if one is slow.
+    for (auto& [handle, voice] : holding_)
+    {
+        const int slack = static_cast<int>(voice.sound->sampleRate) * voice.sound->channels *
+                          static_cast<int>(sizeof(int16_t)) / 2;
+        if (SDL_GetAudioStreamAvailable(voice.stream) < slack)
+        {
+            refill(voice);
+        }
+    }
 }
 
 size_t Sounds::voices() const
 {
     std::lock_guard<std::mutex> held{mutex_};
-    return playing_.size();
+    return playing_.size() + holding_.size();
 }
 
 void Sounds::shutdown()
@@ -145,6 +243,11 @@ void Sounds::shutdown()
         SDL_DestroyAudioStream(stream);
     }
     playing_.clear();
+    for (auto& [handle, voice] : holding_)
+    {
+        SDL_DestroyAudioStream(voice.stream);
+    }
+    holding_.clear();
     stopped_ = true;
 }
 } // namespace mh

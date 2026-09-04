@@ -15,8 +15,29 @@ constexpr size_t kIdOffset = 8;   // past "SeSep  "
 std::vector<SoundRef> collect(const DatFile& dat)
 {
     std::vector<SoundRef> found;
+    // Walked in file order, like parseGenerators, so the directory each sound
+    // sits in is known - which is what links a sound to a place.
+    std::vector<std::string> path;
     for (const Chunk& chunk : dat.chunks())
     {
+        if (chunk.type == 0x00)
+        {
+            if (!path.empty())
+            {
+                path.pop_back();
+            }
+            continue;
+        }
+        if (chunk.type == 0x01)
+        {
+            std::string name(chunk.id, 4);
+            while (!name.empty() && (name.back() == ' ' || name.back() == '\0'))
+            {
+                name.pop_back();
+            }
+            path.push_back(std::move(name));
+            continue;
+        }
         if (chunk.type != 0x3D || chunk.data.size() < kIdOffset + 4)
         {
             continue;
@@ -35,7 +56,13 @@ std::vector<SoundRef> collect(const DatFile& dat)
             name.pop_back();
         }
 
-        found.push_back(SoundRef{std::move(name), id});
+        std::string directory;
+        for (size_t i = 0; i < path.size(); ++i)
+        {
+            directory += (i ? "/" : "") + path[i];
+        }
+
+        found.push_back(SoundRef{std::move(name), id, std::move(directory)});
     }
     return found;
 }

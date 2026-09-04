@@ -126,6 +126,14 @@ this renderer its torches. West Ronfaure:
 
 `taki` is Japanese for waterfall: one sound, fifty-six places to hear it from.
 
+### A chunk outside the vocabulary is named after its sound
+
+`idl1` and `atk1` are mnemonics, but the worm's two extras are named `7024` and
+`7025` - the tail of the sound numbers themselves, 17024 and 17025. So a chunk
+name that looks like digits is the signal that a sound is specific to this one
+model rather than part of what every creature has, and there is no mnemonic to
+look up because there is nothing general to name.
+
 ### Two flags tell you which kind a sound is
 
 Both hold across every sound checked, and they agree with each other:
@@ -139,6 +147,48 @@ Both hold across every sound checked, and they agree with each other:
 Stereo cannot be panned to a cliff edge and mono can, so the channel count is
 not decoration - it says whether a sound has a place. Length agrees too: the
 ambience runs 9 to 18 seconds and the events run about two.
+
+### Reading it back
+
+`ffxi-sounddump --refs <file.DAT>` prints what a model or a zone declares,
+marking anything outside the standard creature set:
+
+```
+  ded3  se/se252/se252016.spw     mimi
+  7024  se/se017/se017024.spw     mimi   <- not the standard set
+  7025  se/se017/se017025.spw     mimi   <- not the standard set
+```
+
+## How the client uses this
+
+`renderer/viewer.cpp` collects a `SoundEmitter` wherever a 0x3D sound and a
+generator share a directory, then each frame holds one voice per distinct
+sound at the distance of its *nearest* placement - not one per emitter, since
+fifty-six copies of one waterfall playing over each other would be both wrong
+and loud. `mh::Sounds::hold` keeps them going by topping the stream up from
+the loop point before it runs dry.
+
+Both rules above are enforced by asking the file rather than by a list:
+`hold` refuses anything that does not loop, and a stereo sound is played at
+full volume everywhere instead of falling off. Loading West Ronfaure:
+
+```
+ambience: 2230 emitters, 15 distinct sounds
+ambience: se001005 held, zone-wide (stereo)
+ambience: se001007 held, zone-wide (stereo)
+ambience: se002024 held, positional (mono)      <- the waterfall
+ambience: se002079 does not loop, not ambience
+...
+```
+
+Fifteen candidates, and the files themselves picked the three that are
+ambience. `MOGHOUSE_AMBIENCE_REACH` sets how far a positional one carries -
+30 units, and a guess worth checking against a retail client.
+
+A zone keeps ambience under all four of its weathers and only one is up, so
+the other three are skipped exactly as their skies are. It changes nothing in
+West Ronfaure, where all four name the same wind, but a zone whose rain sounds
+different from its sunshine would otherwise play both at once.
 
 ## What the folders hold
 
@@ -197,6 +247,13 @@ confirmed as putting one away is 006043, not 006066. Two pairs, then, and
 what separates them is unknown: most likely one belongs to the weapon a
 creature carries and the other to the player's, or they differ by weapon
 type. Watching a few weapons drawn and sheathed in turn would settle it.
+
+### An indoor variant
+
+`weat/<weather>/indo` holds its own sound - 1056 in West Ronfaure, against
+1005 and 1007 outside. Presumably what the weather sounds like heard from
+inside. Not used yet: it needs to be known whether the camera is under a roof,
+and that is not tracked.
 
 ## What is not known
 

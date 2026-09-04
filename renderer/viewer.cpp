@@ -41,6 +41,7 @@
 #include "sky_shader.h"
 #include "monorail.h"
 #include "music.h"
+#include "ffxi/soundrefs.h"
 #include "sounds.h"
 #include "water_shader.h"
 #include "effect_shader.h"
@@ -123,6 +124,21 @@ struct Lamp
     float y{};
     float z{};
     float reach{};
+};
+
+/// A place in the zone that makes a noise, and which noise it makes.
+///
+/// Derived rather than listed. A zone DAT declares its sounds as 0x3D chunks
+/// and its effects as generators, and where the two share a directory the
+/// generators are saying where that sound is heard from - which is how a
+/// waterfall gets fifty-six placements of one looping sound in West Ronfaure's
+/// `mode/ligh/taki`. See docs/wiki/Audio-Formats.md.
+struct SoundEmitter
+{
+    float x{};
+    float y{};
+    float z{};
+    uint32_t sound{};
 };
 
 struct Uniforms
@@ -951,9 +967,10 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
                                      std::unordered_map<std::string, ffxi::IntensityCurve>& curves,
                                      std::unordered_map<std::string, ffxi::SpriteAnimation>& sprites,
                                      std::vector<mh::SpriteInstance>& spriteInstances,
-                                     int weather, std::vector<Lamp>& lamps)
+                                     int weather, std::vector<Lamp>& lamps, std::vector<SoundEmitter>& emitters)
 {
     lamps.clear();
+    emitters.clear();
 
     // How far a torch throws light, as a multiple of the marker's own size.
     // The marker is a disc the artists sized to the lit patch, so its scale is
@@ -1294,6 +1311,50 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
     // yet, and a still school of fish in mid-air is worse than none.
     // MOGHOUSE_ALL_GENERATORS places every one, for finding out what they are.
     const std::vector<ffxi::EffectPlacement> generated = ffxi::parseGenerators(dat);
+
+    // Where the zone makes a noise. A sound and a generator sharing a
+    // directory is the whole of the link: the sound says what is heard and the
+    // generator says where from. Walked separately from the effects below
+    // because whether a thing is drawn has no bearing on whether it is heard -
+    // the waterfall markers are invisible and still audible.
+    {
+        std::unordered_map<std::string, std::vector<uint32_t>> soundsByDirectory;
+        for (const ffxi::SoundRef& sound : ffxi::soundReferences(std::filesystem::path{datPath}))
+        {
+            soundsByDirectory[sound.directory].push_back(sound.id);
+        }
+        for (const ffxi::EffectPlacement& effect : generated)
+        {
+            // A zone keeps ambience for all four of its weathers and only one
+            // of them is up, so the others are passed over the same way their
+            // skies are. It changes nothing in West Ronfaure, where all four
+            // name the same wind, but a zone whose rain sounds different from
+            // its sunshine would otherwise play both at once.
+            if (effect.directory.find("/weat/") != std::string::npos &&
+                effect.directory.find(skyDirectory) == std::string::npos)
+            {
+                continue;
+            }
+
+            const auto found = soundsByDirectory.find(effect.directory);
+            if (found == soundsByDirectory.end())
+            {
+                continue;
+            }
+            for (const uint32_t sound : found->second)
+            {
+                emitters.push_back(SoundEmitter{effect.translate[0], -effect.translate[1],
+                                                -effect.translate[2], sound});
+            }
+        }
+
+        std::set<uint32_t> distinct;
+        for (const SoundEmitter& emitter : emitters)
+        {
+            distinct.insert(emitter.sound);
+        }
+        std::printf("ambience: %zu emitters, %zu distinct sounds\n", emitters.size(), distinct.size());
+    }
     curves = ffxi::parseIntensityCurves(dat);
     static const bool everyGenerator = std::getenv("MOGHOUSE_ALL_GENERATORS") != nullptr;
     std::vector<ffxi::Placement> effectPlacements;
@@ -2579,6 +2640,11 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 
     // Where the zone's torches stand. Rebuilt with the zone, read every frame.
     std::vector<Lamp> lamps;
+    /// Where this zone makes noise, and which of those are sounding now -
+    /// sound id to voice, where a handle of 0 records a sound that was asked
+    /// for once and refused because it does not loop, so it is not asked again.
+    std::vector<SoundEmitter> emitters;
+    std::map<uint32_t, uint32_t> ambienceVoices;
 
     // Scratch for choosing the nearest few, kept out of the frame loop so it is
     // not reallocated sixty times a second.
@@ -2713,7 +2779,16 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             zone = loadZone(currentZonePath.c_str(), keyPath,
                             options.keyTable2Path.empty() ? nullptr : options.keyTable2Path.c_str(), zoneId, textures,
                             lighting, collision, interiors, skyObjects, curves, sprites, spriteInstances,
-                            weatherNow, lamps);
+                            weatherNow, lamps, emitters);
+            // The old zone's waterfall does not follow you into the next one.
+            for (const auto& [sound, handle] : ambienceVoices)
+            {
+                if (handle != 0)
+                {
+                    sounds.release(handle);
+                }
+            }
+            ambienceVoices.clear();
             std::printf("lamps: %zu torches to light by\n", lamps.size());
             zoneLoadedAtMs = SDL_GetTicksNS() / 1000000ull;
 
@@ -4940,6 +5015,95 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         }
 
         sounds.tick();
+
+        // The zone's own noises, held while the listener is near enough to
+        // hear them and let go when they are not.
+        //
+        // One voice per distinct sound, at the distance of its nearest
+        // placement - not one per emitter. West Ronfaure puts the same
+        // waterfall in fifty-six places, and fifty-six copies of it playing
+        // over each other would be both wrong and loud.
+        {
+            static const float ambienceReach = [] {
+                const char* set = std::getenv("MOGHOUSE_AMBIENCE_REACH");
+                return set != nullptr ? static_cast<float>(std::atof(set)) : 30.0f;
+            }();
+            static const std::filesystem::path soundRoot = [] {
+                const std::filesystem::path root = ffxi::defaultInstallRoot();
+                return root.empty() ? root : root / "sound" / "win";
+            }();
+
+            if (!soundRoot.empty() && !emitters.empty())
+            {
+                const mh::Vec3 ear = camera.eye();
+                std::map<uint32_t, float> nearest;
+                for (const SoundEmitter& emitter : emitters)
+                {
+                    const float dx = emitter.x - ear.x;
+                    const float dy = emitter.y - ear.y;
+                    const float dz = emitter.z - ear.z;
+                    const float distance = dx * dx + dy * dy + dz * dz;
+                    const auto [where, added] = nearest.try_emplace(emitter.sound, distance);
+                    if (!added && distance < where->second)
+                    {
+                        where->second = distance;
+                    }
+                }
+
+                for (const auto& [sound, distance] : nearest)
+                {
+                    const std::filesystem::path file =
+                        soundRoot / ffxi::SoundRef{std::string{}, sound, std::string{}}.file();
+
+                    // Stereo means everywhere. A two-channel sound cannot be
+                    // panned to a place, and the ones here are the zone's own
+                    // weather - West Ronfaure's wind sits on the sky
+                    // generators, which are nowhere in particular, so taking
+                    // its distance seriously would have it fade as you walked.
+                    // Mono is the positional kind and does fall off.
+                    const bool everywhere = sounds.channels(file) > 1;
+
+                    // Squared falloff, as the lamps use: linear is too loud too
+                    // far out, and a waterfall audible across half a zone is
+                    // worse than one that fades a little early.
+                    const float reach = 1.0f - std::sqrt(distance) / ambienceReach;
+                    const float volume = everywhere ? 1.0f : (reach > 0.0f ? reach * reach : 0.0f);
+
+                    const auto voice = ambienceVoices.find(sound);
+                    if (volume <= 0.0f)
+                    {
+                        if (voice != ambienceVoices.end() && voice->second != 0)
+                        {
+                            sounds.release(voice->second);
+                            ambienceVoices.erase(voice);
+                        }
+                        continue;
+                    }
+                    if (voice == ambienceVoices.end())
+                    {
+                        // hold() refuses anything that does not loop, so a
+                        // one-shot effect that happens to sit beside a
+                        // generator quietly never becomes ambience. Whether a
+                        // sound is ambience is written in the file itself.
+                        const uint32_t handle = sounds.hold(file, volume);
+                        ambienceVoices[sound] = handle;
+                        // Once per sound, and worth having: it says which of a
+                        // zone's declared sounds are ambience and which were
+                        // refused for not looping - the test that keeps a
+                        // one-shot from being restarted forever.
+                        std::printf("ambience: se%06u %s\n", sound,
+                                    handle == 0    ? "does not loop, not ambience"
+                                    : everywhere   ? "held, zone-wide (stereo)"
+                                                   : "held, positional (mono)");
+                        continue;
+                    }
+                    if (voice->second != 0)
+                    {
+                        sounds.setVolume(voice->second, volume);
+                    }
+                }
+            }
+        }
 
         // How long this zone has been up. Nothing is seen arriving in the
         // first few moments of one - see emergeOffset.

@@ -10,14 +10,20 @@
 //   ffxi-sounddump <file.spw>...
 //   ffxi-sounddump --sweep <directory>     every .spw under it, as a summary
 //   ffxi-sounddump --wav <out-dir> <file.spw>...   so they can be listened to
+//   ffxi-sounddump --refs <file.DAT>...    what a model or zone says it uses
 //
-// The last one exists because which sound belongs to which event is not
-// written down anywhere that has been found - not in the headers, not in the
-// animations, not in the index beside them - and is most likely compiled into
-// the retail client. That cannot be derived, but it can be recognised: turn a
-// folder into .wav and the noise a worm makes is obvious to anyone who has
-// played the game.
+// --refs is the useful one, and the comment here used to say the opposite: it
+// claimed which sound belongs to which event was compiled into the retail
+// client and could not be derived. It is not. A DAT declares its own sounds as
+// 0x3D chunks and names each one, so the creature can simply be asked - see
+// docs/wiki/Audio-Formats.md.
+//
+// --wav is still how a sound gets identified in the first place, since the
+// chunk names what a sound is *for* and not what it sounds like: turn a folder
+// into .wav and the noise a worm makes is obvious to anyone who has played the
+// game. That is how 17024 was found.
 
+#include "soundrefs.h"
 #include "spw.h"
 
 #include <algorithm>
@@ -118,8 +124,29 @@ int main(int argc, char** argv)
     {
         std::printf("usage: ffxi-sounddump <file.spw>...\n"
                     "       ffxi-sounddump --sweep <directory>\n"
-                    "       ffxi-sounddump --wav <out-dir> <file.spw>...\n");
+                    "       ffxi-sounddump --wav <out-dir> <file.spw>...\n"
+                    "       ffxi-sounddump --refs <file.DAT>...\n");
         return 1;
+    }
+
+    if (std::strcmp(argv[1], "--refs") == 0 && argc >= 3)
+    {
+        for (int i = 2; i < argc; ++i)
+        {
+            const std::vector<ffxi::SoundRef> refs = ffxi::soundReferences(std::filesystem::path{argv[i]});
+            std::printf("%s: %zu sounds\n", argv[i], refs.size());
+            for (const ffxi::SoundRef& ref : refs)
+            {
+                // The standard creature vocabulary is marked rather than
+                // hidden, because it is the unmarked ones that are worth
+                // looking at - a creature's whole story is in what it declares
+                // beyond idling, attacking, being hit and dying.
+                std::printf("  %-4s  %-24s  %s%s\n", ref.name.c_str(), ref.file().string().c_str(),
+                            ref.directory.c_str(),
+                            ffxi::isStandardCreatureSound(ref.name) ? "" : "   <- not the standard set");
+            }
+        }
+        return 0;
     }
 
     if (std::strcmp(argv[1], "--wav") == 0 && argc >= 4)

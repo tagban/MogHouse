@@ -103,7 +103,7 @@ target_link_libraries(ffxi-datdump PRIVATE ffxi-dat)
 
 # Decoding a sound needs no GPU either, and "it parsed" is not evidence that
 # the format was read correctly - see the autocorrelation check inside.
-add_executable(ffxi-sounddump ffxi/sounddump_main.cpp)
+add_executable(ffxi-sounddump ffxi/sounddump_main.cpp ffxi/soundrefs.cpp)
 target_link_libraries(ffxi-sounddump PRIVATE ffxi-dat)
 
 # Skinning a character needs no GPU, so it gets its own CLI and can be checked

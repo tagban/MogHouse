@@ -46,6 +46,30 @@ public:
     /// without it the finished streams pile up until the device runs out.
     void tick();
 
+    /// Starts a sound that keeps playing, and returns a handle to it - or 0 if
+    /// it could not be read or does not loop. Ambience, not effects: a
+    /// waterfall does not stop, so it is held rather than played.
+    ///
+    /// Refusing a sound that does not loop is deliberate. A one-shot restarted
+    /// forever is a stutter, and whether a sound is ambience is written in the
+    /// file itself, so there is no need to be told twice.
+    uint32_t hold(const std::filesystem::path& path, float volume);
+
+    /// How many channels a sound has, or 0 if it cannot be read.
+    ///
+    /// Worth asking because it says whether a sound has a place. A stereo file
+    /// cannot be panned to a cliff edge, and FFXI's stereo effects are exactly
+    /// the ones meant to play across a whole zone - the wind in West Ronfaure
+    /// is stereo, the waterfall in it is mono. See docs/wiki/Audio-Formats.md.
+    int channels(const std::filesystem::path& path);
+
+    /// How loud a held sound is now, 0..1. Called every frame as the listener
+    /// moves, so it is cheap and does not restart anything.
+    void setVolume(uint32_t handle, float volume);
+
+    /// Stops a held sound and forgets the handle.
+    void release(uint32_t handle);
+
     /// How many are sounding now, for the log and for tests.
     size_t voices() const;
 
@@ -65,13 +89,29 @@ private:
         std::vector<int16_t> samples;
         uint32_t sampleRate{48000};
         int channels{1};
+        /// Where a loop goes back to, in samples rather than frames - which is
+        /// what an offset into `samples` wants.
+        size_t loopSample{0};
+        bool loops{false};
+    };
+
+    /// A sound that keeps going, and the buffer it is fed from.
+    struct Held
+    {
+        SDL_AudioStream* stream{nullptr};
+        const Decoded* sound{nullptr};
     };
 
     const Decoded* decode(const std::filesystem::path& path);
 
+    /// Pushes one more pass of a held sound, from its loop point.
+    void refill(const Held& held);
+
     mutable std::mutex mutex_;
     std::map<std::string, Decoded> known_;
     std::vector<SDL_AudioStream*> playing_;
+    std::map<uint32_t, Held> holding_;
+    uint32_t nextHandle_{1};
     bool stopped_{false};
 };
 } // namespace mh
