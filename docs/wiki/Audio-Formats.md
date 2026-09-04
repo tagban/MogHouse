@@ -84,6 +84,21 @@ Decoding cannot start anywhere but the beginning, because each sample is a
 difference from the two before it. That is why looping seeks to a block
 boundary and keeps the running history rather than resetting it.
 
+## What the folders hold
+
+Built from watching the retail client and from what the DATs reference. A
+folder is not a mob family - `se258` is bats though 258 is the worm family -
+so this is observation rather than a rule.
+
+| folder | holds |
+|---|---|
+| `se000` | interface and the common player sounds - menus, walking |
+| `se006` | weapons: strikes, drawing and sheathing, a monster falling |
+| `se017` | unknown; the worm at model 426 references two of them |
+| `se100`-`se140` | footsteps by terrain, which is what a zone's hundreds of references are |
+| `se252` | one worm's own set - idle, attack, damage, sway, death |
+| `se258` | bats, despite 258 being the worm family |
+
 ## Sounds identified by watching the retail client
 
 The reliable way to learn what a sound is: run Process Monitor against the
