@@ -357,15 +357,17 @@ public sealed class LiveRadar : IDisposable
             };
             entity.SetName(cast[i].Name);
 
-            // Race and face are all the roster gives; the gear slots take the
-            // same stand-in the player's own look uses, because the server
-            // never sends us what our own characters are wearing.
+            // Race and face are all the roster gives, so the gear is the
+            // starting clothes - the same stand-in the player's own look uses.
+            // Nothing here can know better: the roster is answered before any
+            // zone server has been spoken to, and what a character is wearing
+            // only arrives once it is standing in the world.
             entity.SetLook(new FfxiEntityLook(
                 FfxiLookKind.Equipped, ModelId: 0,
                 Race: (byte)cast[i].Race, Face: (byte)cast[i].Face,
-                Head: FfxiAppearance.UnknownGear, Body: FfxiAppearance.UnknownGear,
-                Hands: FfxiAppearance.UnknownGear, Legs: FfxiAppearance.UnknownGear,
-                Feet: FfxiAppearance.UnknownGear,
+                Head: FfxiAppearance.NothingWorn, Body: FfxiAppearance.StartingClothes,
+                Hands: FfxiAppearance.StartingClothes, Legs: FfxiAppearance.StartingClothes,
+                Feet: FfxiAppearance.StartingClothes,
                 Main: 0, Sub: 0, Ranged: 0));
 
             entities[i] = entity;

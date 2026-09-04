@@ -6,28 +6,43 @@ namespace MogHouse.Core.Ffxi;
 public static class FfxiAppearance
 {
     /// <summary>
-    /// The equipment model id to use when the real one is not known.
+    /// What a character with nothing on is wearing: the starting clothes.
     ///
-    /// Zero, which is what the server itself sends for a slot with nothing in
-    /// it - checked against a live look, where taking the body, hands and legs
-    /// off turned all three to 0 while the feet stayed 8.
-    ///
-    /// It used to be 1, on the grounds that zero drew a character with no hips
-    /// and no hands. One is a whole set of clothes, so a character whose gear
-    /// was unknown was dressed in an outfit nobody chose - which reads as
-    /// wearing the wrong armour, because that is exactly what it is.
-    ///
-    /// This is only ever seen where the gear is genuinely unknown: a character
-    /// being previewed before it exists, and the moment between entering the
-    /// world and the server saying what we look like. That second case used to
-    /// last forever, because the client never read its own look; it now lasts
-    /// until the first entity update.
+    /// Taken from the server's own answer rather than chosen. LandSandBoat's
+    /// char_look defaults a new character to 8 in the body, hands, legs and
+    /// feet and 0 in the head, and that is exactly what somebody who has just
+    /// been created looks like.
     /// </summary>
-    public const ushort UnknownGear = 0;
+    public const ushort StartingClothes = 8;
 
     /// <summary>
-    /// "race,face,head,body,hands,legs,feet" with every unknown slot filled in.
+    /// Nothing worn at all, which the server sends for an empty slot.
+    ///
+    /// Checked against a live look: taking the body, hands and legs off turned
+    /// all three to 0 while the feet stayed 8. Not what to draw when the gear
+    /// is merely unknown, though - see below.
+    /// </summary>
+    public const ushort NothingWorn = 0;
+
+    /// <summary>
+    /// "race,face,head,body,hands,legs,feet" for a character whose gear is not
+    /// known: the one being made on the creation screen, the one picked from
+    /// the roster before the world has been entered.
+    ///
+    /// The starting clothes rather than nothing. Three tries at this:
+    ///
+    /// Model 1 in every slot dressed a character in an outfit nobody chose,
+    /// which reads as wearing the wrong armour because that is what it is.
+    /// Model 0 is honest - it is what the server sends for an empty slot - but
+    /// the character creation screen then draws somebody with no hips and no
+    /// legs, because 0 means "no mesh for this slot" and nothing else supplies
+    /// one. The starting clothes are both: a real appearance, and the one the
+    /// character will actually have when it exists.
+    ///
+    /// In the world this only shows for the moment between arriving and the
+    /// server's first entity update, which now says what we really look like.
     /// </summary>
     public static string LookString(ushort race, ushort face, int size = 1) =>
-        $"{race},{face},{UnknownGear},{UnknownGear},{UnknownGear},{UnknownGear},{UnknownGear},{Math.Clamp(size, 0, 2)}";
+        $"{race},{face},{NothingWorn},{StartingClothes},{StartingClothes},{StartingClothes}," +
+        $"{StartingClothes},{Math.Clamp(size, 0, 2)}";
 }
