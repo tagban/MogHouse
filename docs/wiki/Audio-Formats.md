@@ -92,4 +92,21 @@ boundary and keeps the running history rather than resetting it.
 - **Which sound belongs to which event.** The files are numbered and nothing
   read so far says that `seNNNNNN` is the noise a worm makes coming out of the
   ground. That mapping is the thing standing between a decoder and a game that
-  sounds like one, and it is not in these headers.
+  sounds like one.
+
+  Ruled out on 2026-09-03, so nobody pays for it twice:
+
+  * **Not in these headers.** Every field is accounted for above except a few
+    bytes around +0x28, which are too few to name an event.
+  * **Not in the animations.** An MO2 chunk leaves 6 to 24 bytes unread past
+    the bone tracks, which looks promising and is not - the content is float
+    bit patterns continuing the channel pool and the size tracks the frame
+    count, so it is the pool's tail and padding rather than events.
+  * **Not in `sound/win/se/_bitInfo.inf`.** Four bytes, `03 00 00 00`, a
+    version.
+
+  Most likely it is compiled into the retail client rather than stored as
+  data, which was ordinary for a game of that era. That cannot be derived -
+  but it can be recognised, which is what `ffxi-sounddump --wav` is for:
+  convert a folder and the noise a worm makes is obvious to anyone who has
+  played the game.

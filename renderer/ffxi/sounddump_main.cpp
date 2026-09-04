@@ -9,6 +9,14 @@
 //
 //   ffxi-sounddump <file.spw>...
 //   ffxi-sounddump --sweep <directory>     every .spw under it, as a summary
+//   ffxi-sounddump --wav <out-dir> <file.spw>...   so they can be listened to
+//
+// The last one exists because which sound belongs to which event is not
+// written down anywhere that has been found - not in the headers, not in the
+// animations, not in the index beside them - and is most likely compiled into
+// the retail client. That cannot be derived, but it can be recognised: turn a
+// folder into .wav and the noise a worm makes is obvious to anyone who has
+// played the game.
 
 #include "spw.h"
 
@@ -17,6 +25,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -69,13 +78,71 @@ void report(const std::filesystem::path& path)
 }
 } // namespace
 
+/// A 44-byte RIFF header and the samples. Nothing here needs an encoder: the
+/// decode is already PCM16, which is what a .wav holds.
+bool writeWav(const std::filesystem::path& path, const ffxi::SpwSound& sound)
+{
+    std::ofstream out{path, std::ios::binary};
+    if (!out)
+    {
+        return false;
+    }
+
+    const uint32_t dataBytes = static_cast<uint32_t>(sound.samples.size() * sizeof(int16_t));
+    const uint16_t channels = static_cast<uint16_t>(sound.channels);
+    const uint32_t byteRate = sound.sampleRate * channels * 2;
+    const uint16_t blockAlign = static_cast<uint16_t>(channels * 2);
+
+    auto u32 = [&out](uint32_t v) { out.write(reinterpret_cast<const char*>(&v), 4); };
+    auto u16 = [&out](uint16_t v) { out.write(reinterpret_cast<const char*>(&v), 2); };
+
+    out.write("RIFF", 4);
+    u32(36 + dataBytes);
+    out.write("WAVEfmt ", 8);
+    u32(16);
+    u16(1);                 // PCM
+    u16(channels);
+    u32(sound.sampleRate);
+    u32(byteRate);
+    u16(blockAlign);
+    u16(16);                // bits per sample
+    out.write("data", 4);
+    u32(dataBytes);
+    out.write(reinterpret_cast<const char*>(sound.samples.data()), dataBytes);
+    return static_cast<bool>(out);
+}
+
 int main(int argc, char** argv)
 {
     if (argc < 2)
     {
         std::printf("usage: ffxi-sounddump <file.spw>...\n"
-                    "       ffxi-sounddump --sweep <directory>\n");
+                    "       ffxi-sounddump --sweep <directory>\n"
+                    "       ffxi-sounddump --wav <out-dir> <file.spw>...\n");
         return 1;
+    }
+
+    if (std::strcmp(argv[1], "--wav") == 0 && argc >= 4)
+    {
+        const std::filesystem::path out{argv[2]};
+        std::error_code ignored;
+        std::filesystem::create_directories(out, ignored);
+
+        size_t written = 0;
+        size_t refused = 0;
+        for (int i = 3; i < argc; ++i)
+        {
+            const std::filesystem::path from{argv[i]};
+            const std::optional<ffxi::SpwSound> sound = ffxi::loadSpw(from);
+            if (!sound || !writeWav(out / (from.stem().string() + ".wav"), *sound))
+            {
+                ++refused;
+                continue;
+            }
+            ++written;
+        }
+        std::printf("wrote %zu .wav, refused %zu, into %s\n", written, refused, out.string().c_str());
+        return 0;
     }
 
     if (std::strcmp(argv[1], "--sweep") == 0 && argc >= 3)
