@@ -55,6 +55,27 @@ struct BonePose
     Vec3 scale{1.0f, 1.0f, 1.0f};
 };
 
+/// Which bone is the head, or -1 if the shape does not say.
+///
+/// Found by shape, because the bones carry no names - only a parent - and the
+/// index is different for every race: 52 for a hume male, 30 for a hume
+/// female, 7 for a tarutaru, 40 for a galka. What is the same everywhere is
+/// that a head has eyes, and eyes are a mirrored pair of children at equal and
+/// opposite z. So the head is the bone with such a pair, highest up the body.
+///
+/// That also settles which way to tilt one: the pair sits at plus and minus z,
+/// so z is the ear-to-ear axis and a nod turns about it.
+///
+/// See docs/wiki/Skeletons.md.
+int headBone(const ffxi::Skeleton& skeleton);
+
+/// Tilts the head, and everything hanging off it, to look up or down.
+///
+/// Applied to a pose after it is animated and before it is skinned. The whole
+/// subtree moves with the head, so hair and helmets go with it rather than
+/// staying behind in mid-air.
+void pitchHead(std::vector<BonePose>& pose, const ffxi::Skeleton& skeleton, int head, float radians);
+
 /// The skeleton evaluated into one world pose per bone.
 ///
 /// Animation is the same walk with the local rotations replaced, so nothing

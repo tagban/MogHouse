@@ -86,6 +86,20 @@ int main(int argc, char** argv)
 
         const std::vector<mh::BonePose> pose = mh::bindPose(skeleton);
 
+        // Where every bone sits when nothing is animating it. Printed because
+        // the bones carry no names - only a parent - so anything that wants a
+        // particular one, like a head to turn, has to find it by shape.
+        std::printf("  head bone: %d\n", mh::headBone(skeleton));
+        if (std::getenv("MOGHOUSE_BONES") != nullptr)
+        {
+            for (size_t i = 0; i < pose.size(); ++i)
+            {
+                std::printf("  bone %2zu parent %2u  %7.3f %7.3f %7.3f\n", i,
+                            static_cast<unsigned>(skeleton.bones[i].parent), pose[i].translation.x,
+                            pose[i].translation.y, pose[i].translation.z);
+            }
+        }
+
         // How far the skeleton itself reaches. If this is wrong the mesh has
         // no chance, and it is far easier to read.
         mh::Vec3 low{1e9f, 1e9f, 1e9f};

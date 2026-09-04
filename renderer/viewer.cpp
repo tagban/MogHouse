@@ -7786,9 +7786,49 @@ constexpr float kGravity = 26.0f;
             const float frame = elapsed / state.clip->frameSeconds();
             const float upperFrame = upper ? elapsed / upper->frameSeconds() : 0.0f;
 
-            mh::reskin(state.geometry,
-                       mh::animatedPose(model->loaded.skeleton, *state.clip, frame, upper, upperFrame),
-                       model->loaded.meshes);
+            std::vector<mh::BonePose> posed =
+                mh::animatedPose(model->loaded.skeleton, *state.clip, frame, upper, upperFrame);
+
+            // Whoever is being spoken to also looks up or down. Turning the
+            // body alone leaves a tall galka talking over a tarutaru's head.
+            if (entity.id == facingMe && entity.id != 0)
+            {
+                // Found once per skeleton: headBone walks the whole bind pose
+                // and this runs every frame.
+                static std::map<const ffxi::Skeleton*, int> heads;
+                const ffxi::Skeleton* key = &model->loaded.skeleton;
+                auto found = heads.find(key);
+                if (found == heads.end())
+                {
+                    found = heads.emplace(key, mh::headBone(model->loaded.skeleton)).first;
+                }
+
+                if (found->second >= 0)
+                {
+                    const float dx = characterAt.x - entity.x;
+                    const float dz = characterAt.z - entity.z;
+                    const float flat = std::sqrt(dx * dx + dz * dz);
+
+                    // Eye heights, roughly: the top of each model rather than
+                    // its feet, since that is what is doing the looking.
+                    const float theirs = entity.y + model->loaded.geometry.height() * 0.92f;
+                    const float mine =
+                        characterAt.y + (character ? character->geometry.height() : 1.8f) * 0.92f;
+
+                    // Clamped, because a neck has limits and an NPC folded
+                    // double to look at your boots is worse than one that does
+                    // not quite reach.
+                    static const float sign = [] {
+                        const char* set = std::getenv("MOGHOUSE_HEAD_PITCH");
+                        return set != nullptr ? static_cast<float>(std::atof(set)) : 1.0f;
+                    }();
+                    const float wanted =
+                        std::clamp(std::atan2(mine - theirs, std::max(flat, 0.4f)), -0.5f, 0.5f);
+                    mh::pitchHead(posed, model->loaded.skeleton, found->second, wanted * sign);
+                }
+            }
+
+            mh::reskin(state.geometry, posed, model->loaded.meshes);
             queue.WriteBuffer(state.vertices, 0, state.geometry.vertices.data(),
                               state.geometry.vertices.size() * sizeof(mh::Vertex));
 

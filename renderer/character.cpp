@@ -436,3 +436,102 @@ void reskin(Character& character, const std::vector<BonePose>& pose, const std::
     });
 }
 } // namespace mh
+
+namespace mh
+{
+int headBone(const ffxi::Skeleton& skeleton)
+{
+    const std::vector<BonePose> rest = bindPose(skeleton);
+    if (rest.size() != skeleton.bones.size())
+    {
+        return -1;
+    }
+
+    int best = -1;
+    float highest = 0.0f;
+    for (size_t parent = 0; parent < rest.size(); ++parent)
+    {
+        // Every child of this bone, so they can be checked against each other
+        // for a mirrored pair.
+        std::vector<size_t> children;
+        for (size_t i = 0; i < skeleton.bones.size(); ++i)
+        {
+            if (i != parent && skeleton.bones[i].parent == parent)
+            {
+                children.push_back(i);
+            }
+        }
+
+        bool mirrored = false;
+        for (size_t a = 0; a < children.size() && !mirrored; ++a)
+        {
+            for (size_t b = a + 1; b < children.size(); ++b)
+            {
+                const BonePose& one = rest[children[a]];
+                const BonePose& other = rest[children[b]];
+                // Same height and depth, opposite sides, and far enough apart
+                // to be a pair rather than two bones at the same spot.
+                if (std::fabs(one.translation.z + other.translation.z) < 0.004f &&
+                    std::fabs(one.translation.z) > 0.012f &&
+                    std::fabs(one.translation.y - other.translation.y) < 0.004f &&
+                    std::fabs(one.translation.x - other.translation.x) < 0.004f)
+                {
+                    mirrored = true;
+                    break;
+                }
+            }
+        }
+
+        // Y runs negative upward in this space, so the head is the smallest.
+        if (mirrored && (best < 0 || rest[parent].translation.y < highest))
+        {
+            best = static_cast<int>(parent);
+            highest = rest[parent].translation.y;
+        }
+    }
+    return best;
+}
+
+void pitchHead(std::vector<BonePose>& pose, const ffxi::Skeleton& skeleton, int head, float radians)
+{
+    if (head < 0 || static_cast<size_t>(head) >= pose.size() || pose.size() != skeleton.bones.size())
+    {
+        return;
+    }
+
+    // About z, the ear-to-ear axis - see headBone.
+    const float c = std::cos(radians);
+    const float s = std::sin(radians);
+    Mat4 turn = Mat4::identity();
+    turn.m[0] = c;
+    turn.m[1] = s;
+    turn.m[4] = -s;
+    turn.m[5] = c;
+
+    const Vec3 pivot = pose[static_cast<size_t>(head)].translation;
+    const auto turned = [&](const Vec3& point) {
+        const float x = point.x - pivot.x;
+        const float y = point.y - pivot.y;
+        return Vec3{pivot.x + c * x - s * y, pivot.y + s * x + c * y, point.z};
+    };
+
+    // The head and everything hanging off it. Bones are stored parents-first,
+    // so one pass down the list reaches every descendant.
+    std::vector<bool> moving(pose.size(), false);
+    moving[static_cast<size_t>(head)] = true;
+    for (size_t i = 0; i < pose.size(); ++i)
+    {
+        const uint8_t parent = skeleton.bones[i].parent;
+        if (parent != i && parent < moving.size() && moving[parent])
+        {
+            moving[i] = true;
+        }
+        if (!moving[i])
+        {
+            continue;
+        }
+        pose[i].translation = turned(pose[i].translation);
+        pose[i].rotation = turn * pose[i].rotation;
+    }
+}
+} // namespace mh
