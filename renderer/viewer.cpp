@@ -6181,6 +6181,14 @@ constexpr float kGravity = 26.0f;
     /// How far down to look for the floor while falling.
     constexpr float kFallReach = 500.0f;
 
+    /// How fast a jump leaves the ground, in yalms a second.
+    ///
+    /// Against the gravity above this is a rise of about three quarters of a
+    /// yalm over roughly half a second, which is the shape of the animation:
+    /// the clip is what says how high a jump looks, and the arc should not
+    /// finish long before or long after it does.
+    constexpr float kJumpSpeed = 6.2f;
+
     float fallSpeed = 0.0f;
 
     const float pinnedFrame = options.frame.value_or(-1.0f);
@@ -6598,7 +6606,10 @@ constexpr float kGravity = 26.0f;
                 inventoryPage = 0;
                 contextSlot = -1;
             }
-            else if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_E && !typing)
+            // G rather than E: E already talks to whoever is in front, and
+            // this branch sits ahead of that one, so taking E for a panel
+            // silently stopped anyone being spoken to.
+            else if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_G && !typing)
             {
                 equipmentOpen = !equipmentOpen;
             }
@@ -7033,6 +7044,11 @@ constexpr float kGravity = 26.0f;
                         {
                             playing = jumpClip;
                             animationOffset = now;
+
+                            // Upward is negative here: fallSpeed is how fast
+                            // the ground is being approached, and the fall code
+                            // below integrates it either way.
+                            fallSpeed = -kJumpSpeed;
                         }
 
                         jumpUntil = now + static_cast<float>(jumpClip->frames) * jumpClip->frameSeconds();
@@ -7889,7 +7905,12 @@ constexpr float kGravity = 26.0f;
                 const std::optional<float> ground =
                     collision.groundAt(characterAt.x, characterAt.z, characterAt.y, kFallReach, groundStepUp);
 
-                if (ground && *ground >= characterAt.y - kGroundSnap)
+                // Rising is not standing. Without the speed check the snap
+                // fires on the first frame of a jump - the character is still
+                // on the floor when it leaves it - and puts it straight back
+                // down, which is why the jump played its whole animation
+                // without ever going anywhere.
+                if (ground && fallSpeed >= 0.0f && *ground >= characterAt.y - kGroundSnap)
                 {
                     characterAt.y = *ground;
                     fallSpeed = 0.0f;
@@ -10916,7 +10937,7 @@ constexpr float kGravity = 26.0f;
                         }
                     }
 
-                    write("E to close", panelLeft + padX, panelBottom + eqText * 0.6f, eqText * 0.8f,
+                    write("G to close", panelLeft + padX, panelBottom + eqText * 0.6f, eqText * 0.8f,
                           kHint, 1.0f);
                 }
 
