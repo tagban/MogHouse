@@ -563,25 +563,26 @@ public sealed partial class NativeViewer : IDisposable
     }
 
     /// <summary>Hands the saved preferences to the world window.</summary>
-    public void SetSettings(float musicVolume, float soundVolume, bool radarTurns)
+    public void SetSettings(float musicVolume, float soundVolume, float uiScale, bool radarTurns)
     {
         if (!_disposed && _handle != IntPtr.Zero)
         {
-            mh_viewer_set_settings(_handle, musicVolume, soundVolume, radarTurns ? 1 : 0);
+            mh_viewer_set_settings(_handle, musicVolume, soundVolume, uiScale, radarTurns ? 1 : 0);
         }
     }
 
     /// <summary>
     /// What the player changed in the world window since last asked, or null.
     /// </summary>
-    public (float MusicVolume, float SoundVolume, bool RadarTurns)? TakeSettings()
+    public (float MusicVolume, float SoundVolume, float UiScale, bool RadarTurns)? TakeSettings()
     {
         if (_disposed || _handle == IntPtr.Zero ||
-            mh_viewer_take_settings(_handle, out float volume, out float sound, out int turns) == 0)
+            mh_viewer_take_settings(_handle, out float volume, out float sound, out float scale,
+                                    out int turns) == 0)
         {
             return null;
         }
-        return (volume, sound, turns != 0);
+        return (volume, sound, scale, turns != 0);
     }
 
     /// <summary>
@@ -1019,7 +1020,7 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static partial void mh_viewer_set_settings(IntPtr viewer, float musicVolume, float soundVolume,
-                                                       int radarTurns);
+                                                       float uiScale, int radarTurns);
 
     [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
     private static partial void mh_viewer_load_zone(IntPtr viewer, string datPath, string zoneName,
@@ -1030,7 +1031,8 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static partial int mh_viewer_take_settings(IntPtr viewer, out float musicVolume,
-                                                       out float soundVolume, out int radarTurns);
+                                                       out float soundVolume, out float uiScale,
+                                                       out int radarTurns);
 
     [LibraryImport(LibraryName)]
     private static partial int mh_viewer_take_death_choice(IntPtr viewer);

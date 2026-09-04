@@ -258,16 +258,16 @@ int32_t mh_viewer_is_loading(MhViewerHandle viewer)
     return viewer && viewer->link.loading() ? 1 : 0;
 }
 
-void mh_viewer_set_settings(MhViewerHandle viewer, float music_volume, float sound_volume,
+void mh_viewer_set_settings(MhViewerHandle viewer, float music_volume, float sound_volume, float ui_scale,
                             int32_t radar_turns)
 {
     if (viewer)
     {
-        viewer->link.applySettings({music_volume, sound_volume, radar_turns != 0});
+        viewer->link.applySettings({music_volume, sound_volume, radar_turns != 0, ui_scale});
     }
 }
 
-int32_t mh_viewer_take_settings(MhViewerHandle viewer, float* music_volume, float* sound_volume,
+int32_t mh_viewer_take_settings(MhViewerHandle viewer, float* music_volume, float* sound_volume, float* ui_scale,
                                 int32_t* radar_turns)
 {
     if (!viewer || !viewer->link.settingsChanged())
@@ -282,6 +282,10 @@ int32_t mh_viewer_take_settings(MhViewerHandle viewer, float* music_volume, floa
     if (sound_volume)
     {
         *sound_volume = settings.soundVolume;
+    }
+    if (ui_scale)
+    {
+        *ui_scale = settings.uiScale;
     }
     if (radar_turns)
     {

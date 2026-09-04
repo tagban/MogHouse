@@ -673,12 +673,13 @@ public sealed class LiveRadar : IDisposable
     {
         if (!_closed)
         {
-            _viewer.SetSettings(settings.MusicVolume, settings.SoundVolume, settings.RadarTurnsWithPlayer);
+            _viewer.SetSettings(settings.MusicVolume, settings.SoundVolume, settings.UiScale,
+                                settings.RadarTurnsWithPlayer);
         }
     }
 
     /// <summary>What the player changed in the world window, or null.</summary>
-    public (float MusicVolume, float SoundVolume, bool RadarTurns)? TakeSettings() =>
+    public (float MusicVolume, float SoundVolume, float UiScale, bool RadarTurns)? TakeSettings() =>
         _closed ? null : _viewer.TakeSettings();
 
     /// <summary>The music file the zone wants, or null for silence.</summary>

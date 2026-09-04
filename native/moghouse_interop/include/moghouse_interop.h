@@ -251,9 +251,9 @@ MH_API int32_t mh_viewer_is_loading(MhViewerHandle viewer);
 /// Preferences, both ways. Set once when the world opens; read back after the
 /// keys in the world window change them, so they can be written to disk.
 /// mh_viewer_take_settings returns non-zero when something changed.
-MH_API void mh_viewer_set_settings(MhViewerHandle viewer, float music_volume, float sound_volume,
+MH_API void mh_viewer_set_settings(MhViewerHandle viewer, float music_volume, float sound_volume, float ui_scale,
                                    int32_t radar_turns);
-MH_API int32_t mh_viewer_take_settings(MhViewerHandle viewer, float* music_volume, float* sound_volume,
+MH_API int32_t mh_viewer_take_settings(MhViewerHandle viewer, float* music_volume, float* sound_volume, float* ui_scale,
                                        int32_t* radar_turns);
 
 /// What the player pressed there, as one of MH_DEATH_*, consumed by the read.

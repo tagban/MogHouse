@@ -653,6 +653,11 @@ public:
         /// beside its Music one. Ambience plays at a fraction of this.
         float soundVolume{0.5f};
         bool radarTurns{true};
+
+        /// What the player wants the interface scaled by, or zero to let the
+        /// window decide. Not the display's own pixels-over-points correction,
+        /// which is applied on top of this and is not anyone's preference.
+        float uiScale{0.0f};
     };
 
     void applySettings(Settings settings);
@@ -662,7 +667,7 @@ public:
 
     /// Takes settings handed in from outside, once. False when there were
     /// none waiting, which is every frame after the first.
-    bool takeSettings(float& volume, float& soundVolume, bool& radarTurns);
+    bool takeSettings(float& volume, float& soundVolume, bool& radarTurns, float& uiScale);
 
     /// The .bgw the zone wants playing, or empty for silence. Set from the
     /// session, which is the half that hears the server say so.
@@ -849,6 +854,7 @@ private:
     std::atomic<float> musicVolume_{0.5f};
     std::atomic<float> soundVolume_{0.5f};
     std::atomic<bool> radarTurns_{true};
+    std::atomic<float> uiScale_{0.0f};
     std::atomic<bool> settingsDirty_{false};
     std::atomic<bool> settingsPending_{false};
     std::atomic<bool> loading_{false};

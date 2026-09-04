@@ -27,6 +27,18 @@ public sealed class MogHouseSettings
     /// </summary>
     public float SoundVolume { get; set; } = 0.5f;
 
+    /// <summary>
+    /// How much bigger the interface is drawn, or zero to let the window
+    /// decide - which is 1 on a 1080p monitor and 2 on a 4K one.
+    ///
+    /// This is a preference, not a correction for the display: a retina screen
+    /// is already accounted for separately, by the ratio of its pixels to its
+    /// points. Somebody sitting further from a large monitor wants this on top
+    /// of that, and somebody who is happy wants it left alone.
+    /// </summary>
+    [JsonPropertyName("uiScale")]
+    public float UiScale { get; set; }
+
     /// <summary>Whether the minimap turns with the player or holds north up.</summary>
     [JsonPropertyName("radarTurnsWithPlayer")]
     public bool RadarTurnsWithPlayer { get; set; } = true;
@@ -82,6 +94,10 @@ public sealed class MogHouseSettings
                 loaded.MusicVolume = Math.Clamp(loaded.MusicVolume, 0.0f, 1.0f);
                 loaded.SoundVolume = Math.Clamp(loaded.SoundVolume, 0.0f, 1.0f);
                 loaded.BodyDrawDistance = Math.Max(0.0f, loaded.BodyDrawDistance);
+
+                // Zero stays zero, which is "let the window decide"; anything
+                // else is held inside what the menu can show.
+                loaded.UiScale = loaded.UiScale <= 0.0f ? 0.0f : Math.Clamp(loaded.UiScale, 0.5f, 4.0f);
                 return loaded;
             }
         }

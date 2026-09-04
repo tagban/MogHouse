@@ -297,6 +297,7 @@ public sealed class WorldLoop
                 MogHouseSettings settings = MogHouseSettings.Current;
                 settings.MusicVolume = changed.MusicVolume;
                 settings.SoundVolume = changed.SoundVolume;
+                settings.UiScale = changed.UiScale;
                 settings.RadarTurnsWithPlayer = changed.RadarTurns;
                 settings.Save();
             }
