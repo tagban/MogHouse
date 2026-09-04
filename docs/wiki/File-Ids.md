@@ -64,6 +64,26 @@ skeletons are found by shape, not index - see [Skeletons](Skeletons).
 |---|---|
 | a creature or NPC model | `model + 1300` |
 
+## Items, and the languages they come in
+
+Item data is not per-zone and not per-id-formula: it is a couple of dozen large
+tables, each holding a run of items with **the icon and the text together**.
+Names are obfuscated by rotating every byte right five bits - not XOR, unlike
+the dialogue - and every table contains the marker `icon`, which is how they
+are found at all.
+
+There are 23 of them, 219 MB, and they come one set per language:
+
+| where | size | language |
+|---|---|---|
+| `ROM/0/4-6`, `ROM/118/106-108` | 12-19.5 MB each | English |
+| `ROM/176/101-102` | 12 MB each | German |
+| `ROM/178/41`, `ROM/178/43` | 12-18 MB | French |
+| `ROM/301/114-117` | 4.5 MB each | one per language |
+
+So an item's name, its description and its picture are all in the same record,
+and translating the game means shipping the pictures again with it.
+
 ## Shared by everything
 
 These are not addressed by file id at all. They sit in the install as ordinary

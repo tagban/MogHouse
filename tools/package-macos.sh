@@ -24,7 +24,7 @@
 # player already has.
 set -euo pipefail
 
-VERSION="0.1.2"
+VERSION="0.2.0"
 OUTPUT="dist"
 RES=""                      # LandSandBoat's res/ - compress.dat, decompress.dat
 ZONEDATA=""                 # LandSandBoat's data/zones - optional, zone lines
