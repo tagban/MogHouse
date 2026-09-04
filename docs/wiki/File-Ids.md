@@ -12,12 +12,38 @@ The ids themselves, though, are often arithmetic.
 | what | id | notes |
 |---|---|---|
 | zone model | `100 + zone` | geometry, textures, generators, sounds, zone lines |
-| dialogue | `6420 + zone` | see [Dialogue](Dialogue) |
+| dialogue, English | `6420 + zone` | see [Dialogue](Dialogue) |
+| dialogue, Japanese | `6120 + zone` | the same format and the same entry count |
+| entity names | `6720 + zone` | who is in the zone, and their ids |
 | building interiors | listed in [Object mapping](Object-Mapping) | a city is a shell plus separate files |
 
-There are further per-zone blocks around `6120 + zone` and `6720 + zone` whose
-purpose is not established. `6120 + zone` has the same offset-table shape as
-the dialogue; `6720 + zone` is small and begins with the string `none`.
+`6120` and `6420` are the same table twice, once per language - Southern San
+d'Oria has 16,940 entries in both, the first in Shift-JIS and the second in
+English. So a zone's script is translated by swapping which file is read,
+which is why an NPC speaks the language the client was installed in rather
+than the one the server was built in.
+
+## The entity name table
+
+`6720 + zone` is a flat array of 32-byte records and nothing else - no header,
+no offsets:
+
+| bytes | what |
+|---|---|
+| 0-27 | the name, null padded |
+| 28-31 | the entity's id |
+
+The id is `0x1000000 + (zone << 12) + index`, which is exactly the scheme the
+server numbers its own entities with: Southern San d'Oria's first NPC is
+`0x010E6001`, and `(0x010E6001 - 0x1000000) >> 12` is 230.
+
+That means **the client already knows who is in a zone before the server says
+anything.** Southern San d'Oria lists 451 named entities - Ceraule, Aubejart,
+Rolandienne, Ailevia - and the server need only send an id for one of them to
+be named correctly.
+
+The first record is always `none` with id 0, which is what an index of zero
+resolves to.
 
 **`100 + zone` is only true for the early zones.** It holds long enough to look
 like a rule and then quietly stops - use the file table.

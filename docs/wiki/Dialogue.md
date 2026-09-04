@@ -120,9 +120,10 @@ nothing in the zone.
 Which entry an event shows is chosen by the zone's **event script**, and that
 script has not been found. It is not in the zone model file, whose chunk types
 are all accounted for (`0x20` textures, `0x2E` meshes, `0x36` zone lines,
-`0x05` generators, `0x3D` sounds). The remaining candidates are the per-zone
-blocks at `6120 + zone`, which has the same offset-table shape as this file,
-and `6720 + zone`.
+`0x05` generators, `0x3D` sounds). Both of the neighbouring per-zone blocks have since been identified and
+neither is it: `6120 + zone` is this same table in Japanese, entry for entry,
+and `6720 + zone` is the entity name table - see [File ids](File-Ids). So the
+script is somewhere else again, or not in a per-zone file at all.
 
 ## What already works
 
