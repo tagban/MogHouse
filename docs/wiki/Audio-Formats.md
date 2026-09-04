@@ -84,6 +84,25 @@ Decoding cannot start anywhere but the beginning, because each sample is a
 difference from the two before it. That is why looping seeks to a block
 boundary and keeps the running history rather than resetting it.
 
+## Sounds identified by watching the retail client
+
+The reliable way to learn what a sound is: run Process Monitor against the
+retail client with a filter of `Path contains .spw`, clear the log, do the
+thing, and read the path. The client opens these when it plays them rather
+than caching a zone's worth at load, so the file that appears is the file you
+just heard.
+
+| id | what it is | how it is referenced |
+|---|---|---|
+| 000003 | walking | zone footstep tables |
+| 000011 | menu select | — |
+| 006042 | sword strike | shared, `se006` |
+| 006065 | sword drawn | `sinr`, on 102 creature models |
+
+That last row settles the `s` prefix: `sinr` is unsheathing, not "in" as in
+appearing, which is what it was read as here first. Its pair `sotr` (006066)
+is sheathing.
+
 ## What is not known
 
 - The 145 files in the sample whose payload divides by neither 9, 18, 2 nor 4.
