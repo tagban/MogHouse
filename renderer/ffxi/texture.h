@@ -66,13 +66,26 @@ struct Texture
     /// is binary is a mask, because a blend uses the middle of the range and a
     /// mask has no use for it. Terrain measures 0.39 to 1.00 midway; foliage
     /// measures 0.00.
+    /// A mask also has to have something left to keep. Bastok Markets' floor,
+    /// `s_yuka`, is 96% fully transparent with binary alpha, which satisfied
+    /// the second test exactly - and the alpha test then threw away 96% of the
+    /// paving, leaving the plaza a hole with the harbour showing through it.
+    /// Its doors, planks and awnings are 0.93 to 1.00 the same way.
+    ///
+    /// Their alpha means nothing: those draws are opaque, the base pipeline
+    /// does not blend, and nothing ever read it until this decided they were
+    /// cutouts. The zone's real masks are far away from them - a bubble at
+    /// 0.79, foliage from 0.17 to 0.48, Sel Phiner's tree at 0.37 - so the
+    /// line goes in the gap between 0.79 and 0.93.
     bool isCutoutMask() const
     {
         constexpr float kBlackWhereClear = 0.2f;
         constexpr float kSomeTransparency = 0.02f;
         constexpr float kEssentiallyBinary = 0.05f;
+        constexpr float kNothingLeftToKeep = 0.85f;
         return blackWhereClear > kBlackWhereClear ||
-               (alphaZero > kSomeTransparency && alphaMidway < kEssentiallyBinary);
+               (alphaZero > kSomeTransparency && alphaZero < kNothingLeftToKeep &&
+                alphaMidway < kEssentiallyBinary);
     }
 };
 
