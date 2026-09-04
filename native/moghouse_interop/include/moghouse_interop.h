@@ -169,6 +169,38 @@ typedef struct MhZoneLine
 /// the zone it came from and means nothing on the other side.
 MH_API void mh_viewer_set_zone_lines(MhViewerHandle viewer, const MhZoneLine* lines, int32_t count);
 
+/// One slot the player holds.
+///
+/// Container and slot are the server's own CONTAINER_ID and slot number, so
+/// the pair identifies the same place here as it does in a packet.
+typedef struct MhInventorySlot
+{
+    uint8_t container;
+    uint8_t slot;
+    uint16_t item_id;
+    uint32_t count;
+} MhInventorySlot;
+
+/// Replaces the bags. Wholesale, because the server resends them wholesale.
+///
+/// `sizes` is how many slots each of the 18 containers has, as the server
+/// reported it - not a constant. A character starts with thirty inventory
+/// slots on some servers and quests for the rest, so drawing a fixed eighty
+/// would offer places to put things that do not exist.
+MH_API void mh_viewer_set_inventory(MhViewerHandle viewer,
+                                    const MhInventorySlot* slots, int32_t count,
+                                    const uint16_t* sizes, int32_t size_count);
+
+/// What an item is called and what it looks like.
+///
+/// Sent once per distinct item, not once per slot: a stack of ninety-nine
+/// arrows is one icon. The pixels are RGBA, `width * height * 4` bytes, row
+/// zero at the top. The renderer copies them into its atlas and does not keep
+/// the pointer.
+MH_API void mh_viewer_push_item(MhViewerHandle viewer, uint16_t item_id,
+                                const char* name, const char* description,
+                                const uint8_t* rgba, int32_t width, int32_t height);
+
 /// What a dead player pressed in the box the renderer draws them. Matches
 /// mh::DeathChoice.
 enum

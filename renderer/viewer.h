@@ -504,6 +504,56 @@ public:
     void pushChat(const std::string& line, ChatTone tone = ChatTone::Say);
     std::vector<ChatLine> chat() const;
 
+    /// One slot the player holds.
+    ///
+    /// Container and slot are the server's own numbering, so the same pair
+    /// that identifies a slot in a packet identifies it here - which is what
+    /// lets the renderer say "equip this one" without inventing an id scheme.
+    struct InventorySlot
+    {
+        uint8_t container{};
+        uint8_t slot{};
+        uint16_t itemId{};
+        uint32_t count{};
+    };
+
+    /// What an item is called and what it looks like.
+    ///
+    /// Pushed once per distinct item rather than once per slot: a stack of
+    /// ninety-nine arrows is one icon and one name. The pixels are 32x32 RGBA
+    /// straight from the item DAT, which the client reads because it already
+    /// has the file table open.
+    struct ItemFace
+    {
+        uint16_t itemId{};
+        std::string name;
+        std::string description;
+        int width{};
+        int height{};
+        std::vector<uint8_t> rgba;
+    };
+
+    /// The bags, as the server last described them.
+    ///
+    /// Sizes are per container and come from the server, not from a constant:
+    /// a character starts with thirty slots on some servers and earns the rest,
+    /// so a client that drew eighty would be offering places to put things
+    /// that do not exist.
+    void setInventory(const InventorySlot* slots, int count, const uint16_t* sizes, int sizeCount);
+    std::vector<InventorySlot> inventory() const;
+    std::array<uint16_t, 18> containerSizes() const;
+
+    /// Bumped whenever the bags change, so the panel can rebuild only then.
+    uint64_t inventoryRevision() const { return inventoryRevision_.load(); }
+
+    void pushItemFace(ItemFace face);
+
+    /// Item faces that have arrived since this was last called, and drains
+    /// them: the renderer copies the pixels into its atlas and never needs
+    /// them again, so holding a second copy here would be a megabyte of
+    /// nothing.
+    std::vector<ItemFace> takeItemFaces();
+
     /// Where the character has walked to, posted every frame.
     ///
     /// The client needs this because it, not the renderer, talks to the
@@ -763,6 +813,10 @@ private:
     float placement_[4]{};
     bool havePlacement_{false};
     std::deque<ChatLine> chat_;
+    std::vector<InventorySlot> inventory_;
+    std::array<uint16_t, 18> containerSizes_{};
+    std::atomic<uint64_t> inventoryRevision_{0};
+    std::vector<ItemFace> itemFaces_;
 
     // Two flags rather than one guarded pair: a raise only means anything
     // while the character is down, so the two being read a moment apart says

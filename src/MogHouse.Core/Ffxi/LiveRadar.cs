@@ -448,6 +448,33 @@ public sealed class LiveRadar : IDisposable
     }
 
     /// <summary>
+    /// What is in the bags, and how many slots each one has.
+    ///
+    /// Pushed whole, because the server sends them whole: there is no useful
+    /// "one slot changed" here when the change may equally be a zone's worth
+    /// of new contents.
+    /// </summary>
+    public void ShowInventory(ReadOnlySpan<NativeInventorySlot> slots, ReadOnlySpan<ushort> sizes)
+    {
+        if (!_closed)
+        {
+            _viewer.SetInventory(slots, sizes);
+        }
+    }
+
+    /// <summary>
+    /// What an item is called and what it looks like, for the renderer's own
+    /// atlas. Once per distinct item.
+    /// </summary>
+    public void ShowItem(ushort itemId, string name, string description, FfxiItemIcon icon)
+    {
+        if (!_closed)
+        {
+            _viewer.PushItem(itemId, name, description, icon.Rgba, icon.Width, icon.Height);
+        }
+    }
+
+    /// <summary>
     /// Writes the next frame to a BMP and keeps drawing. A picture of what the
     /// reporter was looking at is worth more than any description of it.
     /// </summary>

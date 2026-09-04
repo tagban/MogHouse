@@ -7,10 +7,14 @@
 
 #include "viewer.h"
 
+#include <cmath>
 #include <cstdio>
+#include <cstdint>
 #include <cstdlib>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace
 {
@@ -165,6 +169,89 @@ ViewerOptions optionsFromEnvironment(int argc, char** argv)
 }
 } // namespace mh
 
+namespace
+{
+/// A set of bags with nothing behind them, for looking at the panel without a
+/// server.
+///
+/// The client is what normally fills these - it reads the item DATs, since it
+/// already has the file table open, and pushes a name and an icon per distinct
+/// item. That leaves the panel itself untestable except by logging in, which
+/// is a slow way to find out a column is one slot too wide.
+///
+/// The icons here are generated rather than real: a flat colour with a lighter
+/// diagonal across it, which is enough to see that a cell landed in the right
+/// place and the right way up. A diagonal catches what a plain square cannot,
+/// because the pixels are flipped twice between the DAT and the screen and two
+/// flips look exactly like none.
+void fillDemoBags(mh::ViewerLink& link)
+{
+    static const uint16_t kSizes[18] = {30, 0, 0, 0, 0, 20, 0, 0, 8, 0, 8, 0, 0, 0, 0, 0, 0, 0};
+
+    std::vector<mh::ViewerLink::InventorySlot> slots;
+    const uint16_t kItems[] = {4096, 4097, 12579, 13952, 17440, 4381, 640, 5, 100, 2, 17441, 12568};
+    for (int i = 0; i < 24; ++i)
+    {
+        const uint16_t item = kItems[i % (sizeof(kItems) / sizeof(kItems[0]))];
+        slots.push_back(mh::ViewerLink::InventorySlot{
+            0, static_cast<uint8_t>(i), item, static_cast<uint32_t>(i % 4 == 0 ? 1 : (i * 7) % 99 + 1)});
+    }
+    for (int i = 0; i < 5; ++i)
+    {
+        slots.push_back(mh::ViewerLink::InventorySlot{
+            5, static_cast<uint8_t>(i * 3), kItems[i], static_cast<uint32_t>(i + 1)});
+    }
+
+    link.setInventory(slots.data(), static_cast<int>(slots.size()), kSizes, 18);
+
+    static const char* kNames[] = {"Ice Crystal", "Wind Crystal", "Scorpion Harness", "Ochiudo's Kote",
+                                   "Kraken Club", "Meat Mithkabob", "Bronze Sword",   "Chocobo Bedding",
+                                   "Okadomatsu",  "Simple Bed",     "Kraken Club +1", "Leather Vest"};
+    for (size_t i = 0; i < sizeof(kItems) / sizeof(kItems[0]); ++i)
+    {
+        mh::ViewerLink::ItemFace face;
+        face.itemId = kItems[i];
+        face.name = kNames[i];
+        face.description = "A stand-in, drawn without reading any file.";
+        face.width = 32;
+        face.height = 32;
+        face.rgba.resize(32 * 32 * 4);
+
+        const float hue = static_cast<float>(i) / 12.0f * 6.0f;
+        const int sector = static_cast<int>(hue) % 6;
+        const float fade = hue - static_cast<float>(static_cast<int>(hue));
+        float rgb[3] = {0.0f, 0.0f, 0.0f};
+        switch (sector)
+        {
+        case 0: rgb[0] = 1.0f; rgb[1] = fade; break;
+        case 1: rgb[0] = 1.0f - fade; rgb[1] = 1.0f; break;
+        case 2: rgb[1] = 1.0f; rgb[2] = fade; break;
+        case 3: rgb[1] = 1.0f - fade; rgb[2] = 1.0f; break;
+        case 4: rgb[2] = 1.0f; rgb[0] = fade; break;
+        default: rgb[2] = 1.0f - fade; rgb[0] = 1.0f; break;
+        }
+
+        for (int y = 0; y < 32; ++y)
+        {
+            for (int x = 0; x < 32; ++x)
+            {
+                // Top left is brightest, and the corner rounds off, so both
+                // the orientation and the cell bounds are visible.
+                const bool onDiagonal = std::abs((31 - y) - x) < 4;
+                const float lift = onDiagonal ? 1.0f : 0.55f;
+                const size_t at = (static_cast<size_t>(y) * 32 + x) * 4;
+                face.rgba[at + 0] = static_cast<uint8_t>(rgb[0] * 255.0f * lift);
+                face.rgba[at + 1] = static_cast<uint8_t>(rgb[1] * 255.0f * lift);
+                face.rgba[at + 2] = static_cast<uint8_t>(rgb[2] * 255.0f * lift);
+                face.rgba[at + 3] = (x + y < 4 || x + y > 58) ? 0 : 255;
+            }
+        }
+
+        link.pushItemFace(std::move(face));
+    }
+}
+} // namespace
+
 int main(int argc, char** argv)
 {
     // A line at a time, so a log being written to a file can be read while the
@@ -174,6 +261,13 @@ int main(int argc, char** argv)
     // the positions only appear once the window is closed. The client's own
     // path already turns buffering off for the same reason.
     std::setvbuf(stdout, nullptr, _IOLBF, 0);
+
+    if (fromEnvironment("MOGHOUSE_INVENTORY_DEMO"))
+    {
+        static mh::ViewerLink demo;
+        fillDemoBags(demo);
+        return mh::runViewer(mh::optionsFromEnvironment(argc, argv), &demo);
+    }
 
     return mh::runViewer(mh::optionsFromEnvironment(argc, argv));
 }

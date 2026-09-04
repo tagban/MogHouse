@@ -11,6 +11,7 @@
 #include <exception>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -317,6 +318,47 @@ void mh_viewer_push_chat(MhViewerHandle viewer, const char* line, int32_t tone)
         return;
     }
     viewer->link.pushChat(std::string{line}, static_cast<mh::ChatTone>(tone));
+}
+
+void mh_viewer_set_inventory(MhViewerHandle viewer, const MhInventorySlot* slots, int32_t count,
+                             const uint16_t* sizes, int32_t size_count)
+{
+    if (!viewer || (count > 0 && !slots))
+    {
+        return;
+    }
+
+    // The two layouts are the same fields in the same order, but they are
+    // separate types on purpose: the C header is the contract and the C++
+    // struct is free to change. Copied field by field rather than cast.
+    std::vector<mh::ViewerLink::InventorySlot> converted;
+    converted.reserve(static_cast<size_t>(count > 0 ? count : 0));
+    for (int32_t i = 0; i < count; ++i)
+    {
+        converted.push_back(mh::ViewerLink::InventorySlot{slots[i].container, slots[i].slot,
+                                                          slots[i].item_id, slots[i].count});
+    }
+
+    viewer->link.setInventory(converted.data(), static_cast<int>(converted.size()),
+                              sizes, sizes ? size_count : 0);
+}
+
+void mh_viewer_push_item(MhViewerHandle viewer, uint16_t item_id, const char* name,
+                         const char* description, const uint8_t* rgba, int32_t width, int32_t height)
+{
+    if (!viewer || width <= 0 || height <= 0 || !rgba)
+    {
+        return;
+    }
+
+    mh::ViewerLink::ItemFace face;
+    face.itemId = item_id;
+    face.name = name ? name : "";
+    face.description = description ? description : "";
+    face.width = width;
+    face.height = height;
+    face.rgba.assign(rgba, rgba + (static_cast<size_t>(width) * static_cast<size_t>(height) * 4));
+    viewer->link.pushItemFace(std::move(face));
 }
 
 int32_t mh_viewer_get_character(MhViewerHandle viewer, float* x, float* y, float* z, float* heading)

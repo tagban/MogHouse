@@ -32,6 +32,7 @@
 #include "chat_shader.h"
 #include "dialog_shader.h"
 #include "hud_shader.h"
+#include "inventory_shader.h"
 #include "nameplate_shader.h"
 #include "zoneline_shader.h"
 #include "textfont.h"
@@ -63,6 +64,7 @@
 #include <optional>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 #include <string>
 #include <fstream>
 #include <set>
@@ -209,6 +211,16 @@ struct HudUniforms
     float glyphs[mh::kHudStrings * mh::kHudChars][4];
     float bars[mh::kHudBars][4];
     float barColours[mh::kHudBars][4];
+};
+
+/// Matches InventoryUniforms in inventory_shader.h.
+struct InventoryUniforms
+{
+    float counts[4];
+    float font[4];
+    float rects[mh::kInventoryQuads][4];
+    float looks[mh::kInventoryQuads][4];
+    float tints[mh::kInventoryQuads][4];
 };
 
 /// Matches NameplateUniforms in nameplate_shader.h.
@@ -2068,6 +2080,45 @@ std::vector<mh::ViewerLink::ChatLine> mh::ViewerLink::chat() const
     return {chat_.begin(), chat_.end()};
 }
 
+void mh::ViewerLink::setInventory(const InventorySlot* slots, int count, const uint16_t* sizes, int sizeCount)
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+    inventory_.assign(slots, slots + std::max(0, count));
+    containerSizes_.fill(0);
+    for (int i = 0; i < sizeCount && i < static_cast<int>(containerSizes_.size()); ++i)
+    {
+        containerSizes_[static_cast<size_t>(i)] = sizes[i];
+    }
+
+    // Bumped last, so a panel that sees a new number is looking at a whole
+    // set of bags rather than half of one.
+    inventoryRevision_.fetch_add(1);
+}
+
+std::vector<mh::ViewerLink::InventorySlot> mh::ViewerLink::inventory() const
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+    return inventory_;
+}
+
+std::array<uint16_t, 18> mh::ViewerLink::containerSizes() const
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+    return containerSizes_;
+}
+
+void mh::ViewerLink::pushItemFace(ItemFace face)
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+    itemFaces_.push_back(std::move(face));
+}
+
+std::vector<mh::ViewerLink::ItemFace> mh::ViewerLink::takeItemFaces()
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+    return std::exchange(itemFaces_, {});
+}
+
 void mh::ViewerLink::setCharacter(float x, float y, float z, float heading)
 {
     const std::lock_guard<std::mutex> guard{mutex_};
@@ -3864,6 +3915,123 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         hudBindGroup = device.CreateBindGroup(&hudBindGroupDescriptor);
     }
 
+    // The bags. Item icons live on an atlas of their own, filled as the client
+    // sends them, and the panel draws quads out of it beside letters from the
+    // font atlas - hence two textures on one pipeline.
+    wgpu::Buffer inventoryUniformBuffer;
+    wgpu::RenderPipeline inventoryPipeline;
+    wgpu::BindGroup inventoryBindGroup;
+    wgpu::Texture iconAtlas;
+    if (fontTexture)
+    {
+        const uint32_t atlasSide = static_cast<uint32_t>(mh::kIconAtlasCells * mh::kIconSize);
+        wgpu::TextureDescriptor atlasDescriptor{
+            .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst,
+            .dimension = wgpu::TextureDimension::e2D,
+            .size = {atlasSide, atlasSide, 1},
+            .format = wgpu::TextureFormat::RGBA8Unorm,
+            .mipLevelCount = 1,
+            .sampleCount = 1};
+        iconAtlas = device.CreateTexture(&atlasDescriptor);
+
+        // Cleared once, so a slot whose icon has not arrived draws nothing
+        // rather than whatever the driver left in the memory.
+        std::vector<uint8_t> blank(static_cast<size_t>(atlasSide) * atlasSide * 4, 0);
+        wgpu::TexelCopyTextureInfo blankTarget{.texture = iconAtlas};
+        wgpu::TexelCopyBufferLayout blankLayout{.bytesPerRow = atlasSide * 4, .rowsPerImage = atlasSide};
+        wgpu::Extent3D blankExtent{atlasSide, atlasSide, 1};
+        queue.WriteTexture(&blankTarget, blank.data(), blank.size(), &blankLayout, &blankExtent);
+
+        wgpu::BufferDescriptor inventoryBufferDescriptor{
+            .usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
+            .size = sizeof(InventoryUniforms)};
+        inventoryUniformBuffer = device.CreateBuffer(&inventoryBufferDescriptor);
+
+        wgpu::ShaderSourceWGSL inventoryWgsl;
+        inventoryWgsl.code = mh::kInventoryShader;
+        wgpu::ShaderModuleDescriptor inventoryModuleDescriptor{.nextInChain = &inventoryWgsl};
+        wgpu::ShaderModule inventoryModule = device.CreateShaderModule(&inventoryModuleDescriptor);
+
+        wgpu::BindGroupLayoutEntry inventoryLayoutEntries[5] = {};
+        inventoryLayoutEntries[0].binding = 0;
+        inventoryLayoutEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+        inventoryLayoutEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
+        inventoryLayoutEntries[1].binding = 1;
+        inventoryLayoutEntries[1].visibility = wgpu::ShaderStage::Fragment;
+        inventoryLayoutEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
+        inventoryLayoutEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+        inventoryLayoutEntries[2].binding = 2;
+        inventoryLayoutEntries[2].visibility = wgpu::ShaderStage::Fragment;
+        inventoryLayoutEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
+        inventoryLayoutEntries[3].binding = 3;
+        inventoryLayoutEntries[3].visibility = wgpu::ShaderStage::Fragment;
+        inventoryLayoutEntries[3].texture.sampleType = wgpu::TextureSampleType::Float;
+        inventoryLayoutEntries[3].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+        inventoryLayoutEntries[4].binding = 4;
+        inventoryLayoutEntries[4].visibility = wgpu::ShaderStage::Fragment;
+        inventoryLayoutEntries[4].sampler.type = wgpu::SamplerBindingType::Filtering;
+
+        wgpu::BindGroupLayoutDescriptor inventoryLayoutDescriptor{.entryCount = 5,
+                                                                  .entries = inventoryLayoutEntries};
+        wgpu::BindGroupLayout inventoryBindGroupLayout = device.CreateBindGroupLayout(&inventoryLayoutDescriptor);
+        wgpu::PipelineLayoutDescriptor inventoryPipelineLayoutDescriptor{
+            .bindGroupLayoutCount = 1, .bindGroupLayouts = &inventoryBindGroupLayout};
+        wgpu::PipelineLayout inventoryPipelineLayout =
+            device.CreatePipelineLayout(&inventoryPipelineLayoutDescriptor);
+
+        // Premultiplied: the shader multiplies colour by alpha so a letter's
+        // black outline does not darken the panel it is drawn over.
+        wgpu::BlendState inventoryBlend{
+            .color = {.operation = wgpu::BlendOperation::Add,
+                      .srcFactor = wgpu::BlendFactor::One,
+                      .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
+            .alpha = {.operation = wgpu::BlendOperation::Add,
+                      .srcFactor = wgpu::BlendFactor::One,
+                      .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha}};
+        wgpu::ColorTargetState inventoryTarget{.format = surfaceFormat, .blend = &inventoryBlend};
+        wgpu::FragmentState inventoryFragment{.module = inventoryModule,
+                                              .entryPoint = "fragmentMain",
+                                              .targetCount = 1,
+                                              .targets = &inventoryTarget};
+        wgpu::DepthStencilState inventoryDepth{.format = kDepthFormat,
+                                               .depthWriteEnabled = wgpu::OptionalBool::False,
+                                               .depthCompare = wgpu::CompareFunction::Always};
+
+        wgpu::RenderPipelineDescriptor inventoryPipelineDescriptor{
+            .layout = inventoryPipelineLayout,
+            .vertex = {.module = inventoryModule, .entryPoint = "vertexMain"},
+            .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
+            .depthStencil = &inventoryDepth,
+            .fragment = &inventoryFragment};
+        inventoryPipeline = device.CreateRenderPipeline(&inventoryPipelineDescriptor);
+
+        wgpu::BindGroupEntry inventoryEntries[5] = {};
+        inventoryEntries[0].binding = 0;
+        inventoryEntries[0].buffer = inventoryUniformBuffer;
+        inventoryEntries[0].size = sizeof(InventoryUniforms);
+        inventoryEntries[1].binding = 1;
+        inventoryEntries[1].textureView = fontTexture.CreateView();
+        inventoryEntries[2].binding = 2;
+        inventoryEntries[2].sampler = fontSampler;
+        inventoryEntries[3].binding = 3;
+        inventoryEntries[3].textureView = iconAtlas.CreateView();
+        inventoryEntries[4].binding = 4;
+        inventoryEntries[4].sampler = fontSampler;
+        wgpu::BindGroupDescriptor inventoryBindGroupDescriptor{
+            .layout = inventoryBindGroupLayout, .entryCount = 5, .entries = inventoryEntries};
+        inventoryBindGroup = device.CreateBindGroup(&inventoryBindGroupDescriptor);
+    }
+
+    /// Which atlas cell each item's icon went into, and what it is called.
+    struct ItemFacing
+    {
+        int cell{-1};
+        std::string name;
+        std::string description;
+    };
+    std::unordered_map<uint16_t, ItemFacing> itemFacing;
+    int nextIconCell = 0;
+
     wgpu::Buffer plateUniformBuffer;
     wgpu::RenderPipeline platePipeline;
     wgpu::BindGroup plateBindGroup;
@@ -5037,6 +5205,17 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     /// MOGHOUSE_OPTIONS=1 starts with it open, which is how it is looked at
     /// without a keyboard - a screenshot run presses nothing.
     bool optionsOpen = std::getenv("MOGHOUSE_OPTIONS") != nullptr;
+
+    // The bags. Closed until asked for - there is nothing to show until the
+    // server has sent them, which it does unprompted on zoning in.
+    //
+    // A tab is a container that has any slots at all, and a page is twenty of
+    // that container's slots. Both are indices into what the server said, not
+    // into a fixed list: an inventory is thirty slots on one server and eighty
+    // on another, and a wardrobe that has not been bought has none.
+    bool inventoryOpen = std::getenv("MOGHOUSE_INVENTORY") != nullptr;
+    int inventoryTab = 0;
+    int inventoryPage = 0;
     float optionsButton[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 
     auto writeCharacterInstance = [&]() {
@@ -6084,6 +6263,33 @@ constexpr float kGravity = 26.0f;
             else if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_KP_MINUS)
             {
                 optionsOpen = !optionsOpen;
+            }
+            // Same reason as the menu above - handled before the form so it
+            // can shut what it opened - but not while a letter is being typed,
+            // where an I belongs in the sentence.
+            else if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_I && !typing)
+            {
+                inventoryOpen = !inventoryOpen;
+                inventoryPage = 0;
+            }
+            else if (event.type == SDL_EVENT_KEY_DOWN && inventoryOpen && !typing &&
+                     (event.key.key == SDLK_LEFT || event.key.key == SDLK_RIGHT ||
+                      event.key.key == SDLK_PAGEUP || event.key.key == SDLK_PAGEDOWN ||
+                      event.key.key == SDLK_ESCAPE))
+            {
+                if (event.key.key == SDLK_ESCAPE)
+                {
+                    inventoryOpen = false;
+                }
+                else if (event.key.key == SDLK_LEFT || event.key.key == SDLK_RIGHT)
+                {
+                    inventoryTab += event.key.key == SDLK_RIGHT ? 1 : -1;
+                    inventoryPage = 0;
+                }
+                else
+                {
+                    inventoryPage += event.key.key == SDLK_PAGEDOWN ? 1 : -1;
+                }
             }
             else if (event.type == SDL_EVENT_KEY_DOWN && formShown)
             {
@@ -9139,6 +9345,301 @@ constexpr float kGravity = 26.0f;
                     pass.SetPipeline(hudPipeline);
                     pass.SetBindGroup(0, hudBindGroup);
                     pass.Draw(3);
+                }
+            }
+
+            // The bags.
+            //
+            // Icons are drained every frame whether the panel is open or not:
+            // the client sends them as the server fills the bags, which is on
+            // zoning in, and holding them back until the panel opens would
+            // only mean opening it twice to see anything.
+            if (inventoryPipeline && link)
+            {
+                for (mh::ViewerLink::ItemFace& face : link->takeItemFaces())
+                {
+                    ItemFacing& facing = itemFacing[face.itemId];
+                    facing.name = face.name;
+                    facing.description = face.description;
+
+                    const size_t expected =
+                        static_cast<size_t>(mh::kIconSize) * mh::kIconSize * 4;
+                    const int cells = mh::kIconAtlasCells * mh::kIconAtlasCells;
+                    if (facing.cell >= 0 || nextIconCell >= cells ||
+                        face.width != mh::kIconSize || face.height != mh::kIconSize ||
+                        face.rgba.size() != expected)
+                    {
+                        continue;
+                    }
+
+                    facing.cell = nextIconCell++;
+                    wgpu::TexelCopyTextureInfo target{
+                        .texture = iconAtlas,
+                        .origin = {static_cast<uint32_t>((facing.cell % mh::kIconAtlasCells) * mh::kIconSize),
+                                   static_cast<uint32_t>((facing.cell / mh::kIconAtlasCells) * mh::kIconSize),
+                                   0}};
+                    wgpu::TexelCopyBufferLayout layout{.bytesPerRow = mh::kIconSize * 4,
+                                                       .rowsPerImage = mh::kIconSize};
+                    wgpu::Extent3D extent{mh::kIconSize, mh::kIconSize, 1};
+                    queue.WriteTexture(&target, face.rgba.data(), face.rgba.size(), &layout, &extent);
+                }
+            }
+
+            if (inventoryOpen && inventoryPipeline && link)
+            {
+                InventoryUniforms inv{};
+                int quads = 0;
+
+                // Its own, rather than the HUD's: that one is scoped to the
+                // block above and this panel is a sibling of it, not a part.
+                const float windowAspect = static_cast<float>(width) / static_cast<float>(height);
+                static const float kHint[3] = {0.42f, 0.46f, 0.56f};
+
+                const auto quad = [&](float left, float bottom, float wide, float high, int mode,
+                                      int cell, const float rgb[3], float alpha)
+                {
+                    if (quads >= mh::kInventoryQuads)
+                    {
+                        return;
+                    }
+                    inv.rects[quads][0] = left;
+                    inv.rects[quads][1] = bottom;
+                    inv.rects[quads][2] = wide;
+                    inv.rects[quads][3] = high;
+                    inv.looks[quads][0] = static_cast<float>(mode);
+                    inv.looks[quads][1] = static_cast<float>(cell);
+                    inv.tints[quads][0] = rgb[0];
+                    inv.tints[quads][1] = rgb[1];
+                    inv.tints[quads][2] = rgb[2];
+                    inv.tints[quads][3] = alpha;
+                    ++quads;
+                };
+
+                // Letters are quads too, one per glyph, walked with the same
+                // advances the HUD uses so a count sits where it would there.
+                const float cellSize = static_cast<float>(textFont.cell);
+                const auto write = [&](const std::string& line, float left, float bottom,
+                                       float high, const float rgb[3], float alpha)
+                {
+                    const float wide = high / windowAspect;
+                    float pen = left;
+                    for (char raw : line)
+                    {
+                        quad(pen, bottom, wide, high, 2, static_cast<int>(textFont.indexOf(raw)), rgb, alpha);
+                        pen += (textFont.advanceOf(raw) / cellSize) * wide;
+                    }
+                    return pen - left;
+                };
+
+                const auto widthOf = [&](const std::string& line, float high)
+                {
+                    const float wide = high / windowAspect;
+                    float pen = 0.0f;
+                    for (char raw : line)
+                    {
+                        pen += (textFont.advanceOf(raw) / cellSize) * wide;
+                    }
+                    return pen;
+                };
+
+                // Only containers the server gave slots to. A wardrobe nobody
+                // has bought has none, and offering an empty tab for it would
+                // be inventing storage.
+                static const char* kContainerNames[18] = {
+                    "Inventory", "Mog Safe", "Storage",   "Temporary", "Mog Locker", "Satchel",
+                    "Sack",      "Case",     "Wardrobe",  "Mog Safe 2", "Wardrobe 2", "Wardrobe 3",
+                    "Wardrobe 4", "Wardrobe 5", "Wardrobe 6", "Wardrobe 7", "Wardrobe 8", "Recycle"};
+
+                const std::array<uint16_t, 18> sizes = link->containerSizes();
+                std::vector<int> tabs;
+                for (int i = 0; i < 18; ++i)
+                {
+                    if (sizes[static_cast<size_t>(i)] > 0)
+                    {
+                        tabs.push_back(i);
+                    }
+                }
+
+                const int columns = 5;
+                const int rows = 4;
+                const int perPage = columns * rows;
+
+                const float slotHigh = 0.13f * uiScale;
+                const float slotWide = slotHigh / windowAspect;
+                const float gap = slotHigh * 0.14f;
+                const float textHigh = slotHigh * 0.34f;
+                const float gridWide = columns * slotWide + (columns - 1) * gap;
+                const float gridHigh = rows * slotHigh + (rows - 1) * gap;
+                const float padX = slotWide * 0.55f;
+                const float padTop = slotHigh * 1.45f;
+                const float padBottom = slotHigh * 1.15f;
+                const float panelWide = gridWide + padX * 2.0f;
+                const float panelHigh = gridHigh + padTop + padBottom;
+                const float panelLeft = -panelWide * 0.5f;
+                const float panelBottom = -panelHigh * 0.5f;
+
+                static const float kPanel[3] = {0.05f, 0.06f, 0.12f};
+                static const float kFrame[3] = {0.20f, 0.22f, 0.34f};
+                static const float kFrameLit[3] = {0.36f, 0.40f, 0.58f};
+                static const float kTabOn[3] = {0.30f, 0.34f, 0.50f};
+
+                quad(panelLeft, panelBottom, panelWide, panelHigh, 0, 0, kPanel, 0.88f);
+
+                if (tabs.empty())
+                {
+                    write("Waiting for the server to send the bags", panelLeft + padX,
+                          panelBottom + panelHigh * 0.5f, textHigh, kHudDim, 1.0f);
+                }
+                else
+                {
+                    inventoryTab = ((inventoryTab % static_cast<int>(tabs.size())) +
+                                    static_cast<int>(tabs.size())) % static_cast<int>(tabs.size());
+                    const int container = tabs[static_cast<size_t>(inventoryTab)];
+                    const int slots = sizes[static_cast<size_t>(container)];
+                    const int pages = std::max(1, (slots + perPage - 1) / perPage);
+                    inventoryPage = ((inventoryPage % pages) + pages) % pages;
+
+                    // What is actually in this container, by slot number.
+                    std::map<int, mh::ViewerLink::InventorySlot> held;
+                    int used = 0;
+                    for (const mh::ViewerLink::InventorySlot& entry : link->inventory())
+                    {
+                        if (entry.container == container)
+                        {
+                            held[entry.slot] = entry;
+                            ++used;
+                        }
+                    }
+
+                    const float titleY = panelBottom + panelHigh - textHigh * 1.5f;
+                    write(std::string{kContainerNames[container]} + "   " + std::to_string(used) + " / " +
+                              std::to_string(slots) +
+                              (pages > 1 ? "   page " + std::to_string(inventoryPage + 1) + " of " +
+                                               std::to_string(pages)
+                                         : std::string{}),
+                          panelLeft + padX, titleY, textHigh, kHudBright, 1.0f);
+
+                    // The tab strip. Left and right walk it; the open one is
+                    // the only one drawn with a background behind the letters.
+                    float tabPen = panelLeft + padX;
+                    const float tabY = titleY - textHigh * 1.6f;
+                    for (size_t i = 0; i < tabs.size(); ++i)
+                    {
+                        const std::string label{kContainerNames[tabs[i]]};
+                        const float wide = widthOf(label, textHigh * 0.9f);
+                        if (tabPen + wide > panelLeft + panelWide - padX)
+                        {
+                            break;
+                        }
+
+                        const bool open = static_cast<int>(i) == inventoryTab;
+                        if (open)
+                        {
+                            quad(tabPen - textHigh * 0.2f / windowAspect, tabY - textHigh * 0.15f,
+                                 wide + textHigh * 0.4f / windowAspect, textHigh * 1.2f, 0, 0, kTabOn, 0.9f);
+                        }
+                        write(label, tabPen, tabY, textHigh * 0.9f, open ? kHudBright : kHudDim, 1.0f);
+                        tabPen += wide + textHigh * 0.8f / windowAspect;
+                    }
+
+                    const float gridLeft = panelLeft + padX;
+                    const float gridTop = panelBottom + panelHigh - padTop;
+
+                    float pointerX = 0.0f;
+                    float pointerY = 0.0f;
+                    float mouseX = 0.0f;
+                    float mouseY = 0.0f;
+                    SDL_GetMouseState(&mouseX, &mouseY);
+                    const bool havePointer = pointerNdc(mouseX, mouseY, pointerX, pointerY);
+
+                    std::string hovered;
+                    std::string hoveredDetail;
+
+                    for (int cellIndex = 0; cellIndex < perPage; ++cellIndex)
+                    {
+                        const int slotNumber = inventoryPage * perPage + cellIndex;
+                        if (slotNumber >= slots)
+                        {
+                            break;
+                        }
+
+                        const int col = cellIndex % columns;
+                        const int row = cellIndex / columns;
+                        const float left = gridLeft + static_cast<float>(col) * (slotWide + gap);
+                        const float bottom = gridTop - slotHigh - static_cast<float>(row) * (slotHigh + gap);
+
+                        const bool under = havePointer && pointerX >= left && pointerX < left + slotWide &&
+                                           pointerY >= bottom && pointerY < bottom + slotHigh;
+                        quad(left, bottom, slotWide, slotHigh, 0, 0, under ? kFrameLit : kFrame, 0.85f);
+
+                        const auto found = held.find(slotNumber);
+                        if (found == held.end())
+                        {
+                            continue;
+                        }
+
+                        const auto facing = itemFacing.find(found->second.itemId);
+                        if (facing != itemFacing.end() && facing->second.cell >= 0)
+                        {
+                            const float inset = slotHigh * 0.08f;
+                            quad(left + inset / windowAspect, bottom + inset,
+                                 slotWide - inset * 2.0f / windowAspect, slotHigh - inset * 2.0f, 1,
+                                 facing->second.cell, kHudBright, 1.0f);
+                        }
+
+                        // The count, in the top right corner of the icon, the
+                        // way every game that stacks anything writes it. A one
+                        // is left off: a single item saying "1" is noise.
+                        if (found->second.count > 1)
+                        {
+                            const std::string count = std::to_string(found->second.count);
+                            const float countHigh = slotHigh * 0.30f;
+                            const float countWide = widthOf(count, countHigh);
+                            write(count, left + slotWide - countWide - slotHigh * 0.06f / windowAspect,
+                                  bottom + slotHigh - countHigh - slotHigh * 0.04f, countHigh, kHudBright, 1.0f);
+                        }
+
+                        if (under && facing != itemFacing.end())
+                        {
+                            hovered = facing->second.name;
+                            hoveredDetail = facing->second.description;
+                            const size_t stop = hoveredDetail.find('\n');
+                            if (stop != std::string::npos)
+                            {
+                                hoveredDetail = hoveredDetail.substr(0, stop);
+                            }
+                        }
+                    }
+
+                    if (!hovered.empty())
+                    {
+                        write(hovered, panelLeft + padX, panelBottom + textHigh * 1.5f, textHigh,
+                              kHudBright, 1.0f);
+                        write(hoveredDetail, panelLeft + padX, panelBottom + textHigh * 0.3f,
+                              textHigh * 0.85f, kHudDim, 1.0f);
+                    }
+                    else
+                    {
+                        write("left and right for bags, page up and down for more, I to close",
+                              panelLeft + padX, panelBottom + textHigh * 0.6f, textHigh * 0.85f,
+                              kHint, 1.0f);
+                    }
+                }
+
+                if (quads > 0)
+                {
+                    inv.counts[0] = static_cast<float>(quads);
+                    inv.counts[1] = windowAspect;
+                    inv.counts[2] = static_cast<float>(mh::kIconAtlasCells);
+                    inv.counts[3] = static_cast<float>(mh::kIconAtlasCells);
+                    inv.font[0] = static_cast<float>(textFont.columns);
+                    inv.font[1] = static_cast<float>(textFont.cell);
+                    inv.font[2] = static_cast<float>(textFont.width);
+                    inv.font[3] = static_cast<float>(textFont.height);
+                    queue.WriteBuffer(inventoryUniformBuffer, 0, &inv, sizeof(inv));
+                    pass.SetPipeline(inventoryPipeline);
+                    pass.SetBindGroup(0, inventoryBindGroup);
+                    pass.Draw(6, static_cast<uint32_t>(quads));
                 }
             }
 

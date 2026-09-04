@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using MogHouse.Core.Ffxi;
 using MogHouse.Core.Interop;
 
@@ -32,6 +33,27 @@ public sealed class WorldLoop
 
     /// Whether the welcome popup is still up and waiting to be dismissed.
     private bool _welcoming;
+
+    /// <summary>
+    /// Set from the session's thread when the bags change, cleared on the one
+    /// that draws. The tracker raises its event as each packet lands, and the
+    /// server sends a hundred of them at once on zoning in - so this coalesces
+    /// the burst into a single push instead of a hundred.
+    /// </summary>
+    private volatile bool _inventoryDirty;
+
+    /// <summary>
+    /// Items already described to the renderer. It keeps the icon on an atlas
+    /// and the name beside it, so sending either twice is wasted work.
+    /// </summary>
+    private readonly HashSet<ushort> _itemsSent = [];
+
+    /// <summary>
+    /// Names and icons, or an empty table where the retail files are not
+    /// installed. Without them the bags still work - a slot knows what it
+    /// holds - they just have nothing to draw or to call it.
+    /// </summary>
+    private FfxiItemTable? _items;
 
     /// <param name="tracker">
     /// What the renderer draws entities from. Handed in rather than made here
@@ -72,6 +94,10 @@ public sealed class WorldLoop
         _world.ShowDeath(_session.IsDead, _session.HasRaiseOffer);
         _world.ShowZoneLines(_session.ZoneLines);
         _world.ShowWeather(_session.CurrentWeather);
+
+        // Whatever the server already sent, before anyone was listening. The
+        // inventory arrives in the zone-in burst like the health packet does.
+        _inventoryDirty = true;
         PlayMusic(_session.CurrentTrack);
         Welcome();
 
@@ -87,6 +113,7 @@ public sealed class WorldLoop
 
     private void Attach()
     {
+        _session.Inventory.Changed += OnInventoryChanged;
         _session.ChatReceived += OnChat;
         _session.EntitiesChanged += OnEntities;
         _session.ZoneChanged += OnZoneChanged;
@@ -99,6 +126,9 @@ public sealed class WorldLoop
 
     private void Detach()
     {
+        _session.Inventory.Changed -= OnInventoryChanged;
+        _items?.Dispose();
+        _items = null;
         _session.ChatReceived -= OnChat;
         _session.EntitiesChanged -= OnEntities;
         _session.ZoneChanged -= OnZoneChanged;
@@ -124,6 +154,76 @@ public sealed class WorldLoop
         _welcoming = true;
     }
 
+    private void OnInventoryChanged() => _inventoryDirty = true;
+
+    /// <summary>
+    /// Sends the bags to the renderer, and the name and icon of anything in
+    /// them it has not been told about yet.
+    ///
+    /// The sizes come from the server rather than from a constant. A character
+    /// starts with thirty inventory slots on some servers and quests for the
+    /// rest, so a client that assumed eighty would draw fifty places to put
+    /// things that cannot be put anywhere.
+    /// </summary>
+    private void ShowInventory()
+    {
+        FfxiInventoryTracker bags = _session.Inventory;
+
+        var slots = new List<NativeInventorySlot>();
+        for (int container = 0; container < FfxiContainerSizes.Containers; container++)
+        {
+            foreach (FfxiInventorySlot held in bags.Contents((FfxiContainer)container))
+            {
+                slots.Add(new NativeInventorySlot
+                {
+                    Container = (byte)container,
+                    Slot = held.Slot,
+                    ItemId = held.ItemId,
+                    Count = held.Quantity,
+                });
+            }
+        }
+
+        var sizes = new ushort[FfxiContainerSizes.Containers];
+        for (int container = 0; container < sizes.Length; container++)
+        {
+            sizes[container] = bags.Size((FfxiContainer)container);
+        }
+
+        _world.ShowInventory(CollectionsMarshal.AsSpan(slots), sizes);
+
+        // Names and icons, once each. Opened on first use rather than in the
+        // constructor: a session that never opens its bags never reads a file.
+        if (_items is null)
+        {
+            try
+            {
+                _items = new FfxiItemTable(new FfxiFileTable(FfxiFileTable.DefaultInstallRoot()));
+            }
+            catch (Exception)
+            {
+                _items = FfxiItemTable.Empty;
+            }
+        }
+
+        foreach (NativeInventorySlot held in slots)
+        {
+            if (!_itemsSent.Add(held.ItemId))
+            {
+                continue;
+            }
+
+            FfxiItem? item = _items.Item(held.ItemId);
+            FfxiItemIcon? icon = _items.Icon(held.ItemId);
+            if (item is null || icon is null)
+            {
+                continue;
+            }
+
+            _world.ShowItem(held.ItemId, item.Name, item.Description, icon);
+        }
+    }
+
     private void Pump()
     {
         while (!_world.Closed && !_leaving)
@@ -134,6 +234,12 @@ public sealed class WorldLoop
             {
                 _welcoming = false;
                 _world.HideForm();
+            }
+
+            if (_inventoryDirty)
+            {
+                _inventoryDirty = false;
+                ShowInventory();
             }
 
             // Not while a zone is being read. Until it finishes the window is

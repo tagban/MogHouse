@@ -24,6 +24,21 @@ public struct NativeZoneLine
     public float Radius;
 }
 
+/// <summary>
+/// One slot the player holds. Matches MhInventorySlot.
+///
+/// Container and slot are the server's own numbering, so the pair identifies
+/// the same place here, in a packet, and in the renderer.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+public struct NativeInventorySlot
+{
+    public byte Container;
+    public byte Slot;
+    public ushort ItemId;
+    public uint Count;
+}
+
 [StructLayout(LayoutKind.Sequential)]
 public struct NativeRadarEntity
 {
@@ -458,6 +473,35 @@ public sealed partial class NativeViewer : IDisposable
             return;
         }
         mh_viewer_set_entities(_handle, entities, entities.Length);
+    }
+
+    /// <summary>
+    /// Replaces the bags. Sizes are the server's, one per container, and are
+    /// what decides how many slots get drawn.
+    /// </summary>
+    public void SetInventory(ReadOnlySpan<NativeInventorySlot> slots, ReadOnlySpan<ushort> sizes)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+        mh_viewer_set_inventory(_handle, slots, slots.Length, sizes, sizes.Length);
+    }
+
+    /// <summary>
+    /// Tells the renderer what an item is called and what it looks like.
+    ///
+    /// Once per distinct item, not once per slot. The pixels are copied out
+    /// before this returns, so the caller can reuse the buffer.
+    /// </summary>
+    public void PushItem(ushort itemId, string name, string description, ReadOnlySpan<byte> rgba,
+                         int width, int height)
+    {
+        if (_disposed || rgba.IsEmpty)
+        {
+            return;
+        }
+        mh_viewer_push_item(_handle, itemId, name, description, rgba, width, height);
     }
 
     /// <summary>Replaces the zone lines drawn in the world.</summary>
@@ -937,6 +981,14 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName)]
     private static partial void mh_viewer_set_zone_lines(IntPtr viewer, ReadOnlySpan<NativeZoneLine> lines, int count);
+
+    [LibraryImport(LibraryName)]
+    private static partial void mh_viewer_set_inventory(IntPtr viewer,
+        ReadOnlySpan<NativeInventorySlot> slots, int count, ReadOnlySpan<ushort> sizes, int sizeCount);
+
+    [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial void mh_viewer_push_item(IntPtr viewer, ushort itemId, string name,
+        string description, ReadOnlySpan<byte> rgba, int width, int height);
 
     [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
     private static partial void mh_viewer_push_chat(IntPtr viewer, string line, int tone);
