@@ -415,6 +415,18 @@ public sealed class FfxiGameSession : IDisposable
             throw new InvalidOperationException("Call LoginAsync first.");
         }
 
+        // Before any of it arrives, not after.
+        //
+        // A zone change makes the server resend every bag from scratch, so
+        // dropping what we have keeps a slot emptied on the other side from
+        // lingering. This used to sit at the end of this method, inside the
+        // zone-line loader, which put it *after* the server's login burst had
+        // already been read - and the equipment list is in that burst and is
+        // sent exactly once. So the bags refilled from the packets that kept
+        // arriving and the equipment did not, which looked like an equip that
+        // never worked rather than a wipe that should not have happened.
+        Inventory.Clear();
+
         Status?.Invoke($"Selecting {character.Name}...");
         Handoff = await _roster.SelectCharacterAsync(character, sessionHash, ct);
 
@@ -834,11 +846,6 @@ public sealed class FfxiGameSession : IDisposable
 
     private void TryLoadZoneLines()
     {
-        // A zone change makes the server resend every bag from scratch, so
-        // drop what we have rather than let a slot emptied on the other side
-        // linger. The window is blank for the length of a loading screen.
-        Inventory.Clear();
-
         ZoneLines = [];
         _zoneLineRequested = null;
 

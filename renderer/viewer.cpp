@@ -10232,6 +10232,10 @@ constexpr float kGravity = 26.0f;
                 static const float kFrame[3] = {0.20f, 0.22f, 0.34f};
                 static const float kFrameLit[3] = {0.36f, 0.40f, 0.58f};
                 static const float kTabOn[3] = {0.30f, 0.34f, 0.50f};
+
+                // Worn, and told apart from merely hovered: a brighter frame
+                // is what says the equip landed.
+                static const float kWorn[3] = {0.30f, 0.52f, 0.36f};
                 static const float kButton[3] = {0.24f, 0.27f, 0.40f};
 
                 const auto button = [&](const std::string& label, float left, float bottom, float high,
@@ -10400,6 +10404,20 @@ constexpr float kGravity = 26.0f;
 
                         contextContainer = container;
 
+                        // Which of these slots is being worn. The equipment
+                        // list names a place, so the same place in the bag is
+                        // the item that is on - no extra data needed, and it
+                        // is the only thing on this screen that says an equip
+                        // actually happened.
+                        std::set<int> equippedHere;
+                        for (const auto& place : link->equipment())
+                        {
+                            if (place.second != 255 && place.first == container)
+                            {
+                                equippedHere.insert(place.second);
+                            }
+                        }
+
                         const int used = static_cast<int>(held.size());
                         const float titleY = panelBottom + panelHigh - textHigh * 1.6f;
                         write(std::string{kContainerNames[container]} + "   " + std::to_string(used) + " / " +
@@ -10550,7 +10568,9 @@ constexpr float kGravity = 26.0f;
 
                             const bool under = havePointer && pointerX >= left && pointerX < left + slotWide &&
                                                pointerY >= bottom && pointerY < bottom + slotHigh;
-                            quad(left, bottom, slotWide, slotHigh, 0, 0, under ? kFrameLit : kFrame, 0.85f);
+                            const bool onYou = equippedHere.count(position) != 0;
+                            quad(left, bottom, slotWide, slotHigh, 0, 0,
+                                 onYou ? kWorn : (under ? kFrameLit : kFrame), 0.85f);
 
                             const mh::ViewerLink::InventorySlot* entry = nullptr;
                             if (inventoryOrder == InventoryOrder::Slot)
