@@ -182,8 +182,20 @@ ambience: se002079 does not loop, not ambience
 ```
 
 Fifteen candidates, and the files themselves picked the three that are
-ambience. `MOGHOUSE_AMBIENCE_REACH` sets how far a positional one carries -
-30 units, and a guess worth checking against a retail client.
+ambience. `MOGHOUSE_AMBIENCE_REACH` sets how far a positional one carries, in
+yalms - the game's coordinates are yalms 1:1, with no conversion anywhere
+between the DAT, the server and the renderer. LandSandBoat divides raw x/y/z
+by a yalms-per-cell constant and compares squared raw distances against
+squared yalm values directly.
+
+It defaults to 30, which is a guess: it is roughly the radius at which the
+server bothers sending action packets. The falloff is squared, so the audible
+part is much tighter than the number suggests - 0.44 at ten yalms, 0.25 at
+fifteen, and effectively silent past twenty.
+
+**One radius for every emitter is the weak part.** A campfire and a waterfall
+are given the same reach. A per-emitter radius may well be in the part of the
+0x3D chunk body that is still unread - see below.
 
 A zone keeps ambience under all four of its weathers and only one is up, so
 the other three are skipped exactly as their skies are. It changes nothing in
