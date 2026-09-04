@@ -8,16 +8,22 @@ public static class FfxiAppearance
     /// <summary>
     /// The equipment model id to use when the real one is not known.
     ///
-    /// Not zero. Zero is a real id pointing at a real file, and for several
-    /// slots that file has nothing in it - a character built from zeroes comes
-    /// out with no hips, no hands and a pair of boots floating where the legs
-    /// should be. One is a whole set of clothes.
+    /// Zero, which is what the server itself sends for a slot with nothing in
+    /// it - checked against a live look, where taking the body, hands and legs
+    /// off turned all three to 0 while the feet stayed 8.
     ///
-    /// This matters wherever gear is unknown rather than empty, which is our
-    /// own character - the server never sends us the entity update it sends
-    /// for everyone else - and any character being previewed before it exists.
+    /// It used to be 1, on the grounds that zero drew a character with no hips
+    /// and no hands. One is a whole set of clothes, so a character whose gear
+    /// was unknown was dressed in an outfit nobody chose - which reads as
+    /// wearing the wrong armour, because that is exactly what it is.
+    ///
+    /// This is only ever seen where the gear is genuinely unknown: a character
+    /// being previewed before it exists, and the moment between entering the
+    /// world and the server saying what we look like. That second case used to
+    /// last forever, because the client never read its own look; it now lasts
+    /// until the first entity update.
     /// </summary>
-    public const ushort UnknownGear = 1;
+    public const ushort UnknownGear = 0;
 
     /// <summary>
     /// "race,face,head,body,hands,legs,feet" with every unknown slot filled in.
