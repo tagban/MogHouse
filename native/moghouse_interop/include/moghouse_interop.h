@@ -169,6 +169,14 @@ typedef struct MhZoneLine
 /// the zone it came from and means nothing on the other side.
 MH_API void mh_viewer_set_zone_lines(MhViewerHandle viewer, const MhZoneLine* lines, int32_t count);
 
+/// Shows a plain message box and waits for it to be dismissed.
+///
+/// Needed before anything is drawn: on a first run there is no window, no
+/// glyph atlas and nothing to render a screen with, so this is the only way to
+/// say anything. Also the only way to explain the folder chooser on macOS,
+/// where a panel's title is not shown to the person looking at it.
+MH_API void mh_show_message(const char* title, const char* body);
+
 /// One slot the player holds.
 ///
 /// Container and slot are the server's own CONTAINER_ID and slot number, so

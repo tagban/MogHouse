@@ -1091,6 +1091,20 @@ public sealed partial class NativeViewer : IDisposable
     /// macOS opens no window of any kind off the main thread.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// A plain message box, shown before anything can be drawn.
+    ///
+    /// Blocks until it is dismissed. Safe before the renderer exists, which is
+    /// the whole point of it.
+    /// </summary>
+    public static void ShowMessage(string title, string body)
+    {
+        mh_show_message(title, body);
+    }
+
+    [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial void mh_show_message(string title, string body);
+
     public static unsafe string? PickFolder(string? defaultLocation = null)
     {
         // No explicit setup call: the static constructor registers the library

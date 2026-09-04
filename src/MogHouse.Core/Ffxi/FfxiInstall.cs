@@ -187,6 +187,21 @@ public static class FfxiInstall
         {
             say?.Invoke("Where is Final Fantasy XI? Pick the folder holding FTABLE.DAT and ROM.");
 
+            // Said out loud, not just written down. The chooser is titled, but
+            // macOS does not show a panel's title to the person looking at it,
+            // so on a Mac the first thing a new player ever sees was a folder
+            // picker with no indication of what it wanted. The log said - and
+            // nobody reads a log they have not been given a reason to open.
+            if (attempt == 0)
+            {
+                MogHouse.Core.Interop.NativeViewer.ShowMessage(
+                    "MogHouse XI",
+                    "MogHouse needs your Final Fantasy XI installation.\n\n" +
+                    "Choose the folder that holds FTABLE.DAT, VTABLE.DAT and the ROM folder. " +
+                    "The ROM folder itself will do.\n\n" +
+                    "This is asked once and then remembered.");
+            }
+
             // Opened at the guess when there is one. Confirmed() deliberately
             // refuses to act on a guess without being shown it, which is right;
             // starting the chooser somewhere else as well only makes the person
@@ -211,6 +226,13 @@ public static class FfxiInstall
 
             say?.Invoke($"{picked} does not look like a Final Fantasy XI installation - " +
                         "it should contain FTABLE.DAT, VTABLE.DAT and a ROM folder.");
+
+            // Told to the person who picked it, for the same reason as above:
+            // otherwise the chooser simply opens again and looks like a bug.
+            MogHouse.Core.Interop.NativeViewer.ShowMessage(
+                "That is not the game folder",
+                $"{picked}\n\ndoes not hold FTABLE.DAT, VTABLE.DAT and a ROM folder.\n\n" +
+                (attempt + 1 < attempts ? "Try again." : "Giving up for now."));
         }
 
         return null;

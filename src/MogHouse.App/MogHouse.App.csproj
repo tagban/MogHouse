@@ -18,4 +18,24 @@
   <ItemGroup>
     <ProjectReference Include="..\MogHouse.Core\MogHouse.Core.csproj" />
   </ItemGroup>
+
+  <!-- The runtime files, staged into the build output in the same shape a
+       packaged build has them.
+
+       Without this a development build opens a window and stops: no key
+       tables means no zone decrypts, so even the sign-in backdrop fails, and
+       the screen that would have said why is drawn into a world that never
+       loaded. Only the packaged app had ever worked, which made every test a
+       full package-and-notarize cycle.
+
+       Both are found relative to the executable, so mirroring the packaged
+       layout here means no search path has to know about a repository. -->
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)..\..\keys\*.bin"
+          Link="keys\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)..\..\renderer\assets\**\*"
+          Link="assets\%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

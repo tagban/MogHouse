@@ -617,6 +617,23 @@ void SDLCALL onFolderChosen(void* userdata, const char* const* filelist, int /*f
 }
 } // namespace
 
+void mh_show_message(const char* title, const char* body)
+{
+    if (!title || !body)
+    {
+        return;
+    }
+
+    // Same reason the chooser starts video: on a first run nothing has yet.
+    if (!SDL_InitSubSystem(SDL_INIT_VIDEO))
+    {
+        std::printf("could not start SDL video for a message: %s\n", SDL_GetError());
+        return;
+    }
+
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, title, body, nullptr);
+}
+
 int32_t mh_pick_folder(const char* default_location, char* out, int32_t out_size)
 {
     if (out == nullptr || out_size <= 0)
