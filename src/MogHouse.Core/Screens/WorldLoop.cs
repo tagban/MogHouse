@@ -177,13 +177,15 @@ public sealed class WorldLoop
     private DateTimeOffset? _leaveAt;
 
     /// <summary>
-    /// Asks to leave, and says so, rather than vanishing mid-sentence.
+    /// Says what is about to happen, before the waiting starts.
     ///
-    /// The wait is the server's, not ours - it holds a character in the world
-    /// for thirty seconds so a logout cannot be used to escape - so this is a
-    /// backstop for the case where the server never gets around to ending the
-    /// session, not the thing doing the timing. A GM leaves at once and the
-    /// server will have gone before this fires.
+    /// LogoutAsync does not return until the server has ended the session, so
+    /// anything said after it is said to a window that is already closing.
+    /// This used to be called afterwards, which is why nothing was ever seen.
+    ///
+    /// The timer it sets is only a backstop for a server that answers and then
+    /// never finishes. The moment LogoutAsync returns, the session is over and
+    /// the caller leaves without waiting for it.
     /// </summary>
     private void BeginLeaving(string what)
     {
@@ -472,13 +474,15 @@ public sealed class WorldLoop
         switch (command.Kind)
         {
             case FfxiClientCommandKind.Logout:
-                Wait(_session.LogoutAsync(FfxiLogoutKind.Logout));
                 BeginLeaving("logged out");
+                Wait(_session.LogoutAsync(FfxiLogoutKind.Logout));
+                _leaving = true;
                 return;
 
             case FfxiClientCommandKind.Shutdown:
-                Wait(_session.LogoutAsync(FfxiLogoutKind.Shutdown));
                 BeginLeaving("shut down");
+                Wait(_session.LogoutAsync(FfxiLogoutKind.Shutdown));
+                _leaving = true;
                 return;
 
             case FfxiClientCommandKind.Bug:
