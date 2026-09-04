@@ -77,6 +77,15 @@ public sealed class FfxiGameSession : IDisposable
     public event Action? JobChanged;
 
     /// <summary>
+    /// What our own character looks like, in the seven numbers the character
+    /// loader takes, or null before the server has said.
+    /// </summary>
+    public string? Look { get; private set; }
+
+    /// <summary>Raised when <see cref="Look"/> changes - which gear does.</summary>
+    public event Action<string>? LookChanged;
+
+    /// <summary>
     /// Whether the character is dead. Movement is refused while it is true:
     /// the server will not accept it, and walking a corpse around is the
     /// most obvious way for a client to be lying to the person using it.
@@ -1229,6 +1238,22 @@ public sealed class FfxiGameSession : IDisposable
                 if (self is not null && IsSelf(self.UniqueNo))
                 {
                     AdoptServerPosition(self);
+
+                    // And what we look like, which is the only place it comes
+                    // from. The equipment model ids are not in the item files
+                    // at all - the server sends them in the look, so a client
+                    // that reads its own bags still cannot tell what the gear
+                    // in them looks like on a body. Only re-announced when it
+                    // changes, because rebuilding the model is not free.
+                    if (self.Look is { IsEquipment: true } look)
+                    {
+                        string wearing = look.ToLookString();
+                        if (wearing != Look)
+                        {
+                            Look = wearing;
+                            LookChanged?.Invoke(wearing);
+                        }
+                    }
                 }
             }
         }

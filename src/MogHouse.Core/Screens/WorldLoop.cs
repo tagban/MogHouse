@@ -119,6 +119,7 @@ public sealed class WorldLoop
     {
         _session.Inventory.Changed += OnInventoryChanged;
         _session.JobChanged += OnJobChanged;
+        _session.LookChanged += OnLookChanged;
         _session.ChatReceived += OnChat;
         _session.EntitiesChanged += OnEntities;
         _session.ZoneChanged += OnZoneChanged;
@@ -133,6 +134,7 @@ public sealed class WorldLoop
     {
         _session.Inventory.Changed -= OnInventoryChanged;
         _session.JobChanged -= OnJobChanged;
+        _session.LookChanged -= OnLookChanged;
         _items?.Dispose();
         _items = null;
         _session.ChatReceived -= OnChat;
@@ -163,6 +165,13 @@ public sealed class WorldLoop
     private void OnInventoryChanged() => _inventoryDirty = true;
 
     private void OnJobChanged() => _statsDirty = true;
+
+    /// <summary>
+    /// What we now look like, gear included. Pushed straight through: the
+    /// renderer rebuilds the model, and doing that on the thread that drew the
+    /// last frame is what it already expects.
+    /// </summary>
+    private void OnLookChanged(string look) => _world.SetPlayer(_who, look);
 
     /// <summary>
     /// Sends the job, level and stats to the renderer.

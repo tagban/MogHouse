@@ -7389,9 +7389,17 @@ constexpr float kGravity = 26.0f;
                         else if (hit.kind == 12 && link)
                         {
                             // Taking something off is the same packet with the
-                            // slot set to the server's own "no slot".
+                            // item slot set to zero.
+                            //
+                            // Not 255. That is the server's "nothing is worn
+                            // here" when it tells *us* what is equipped, and
+                            // the obvious thing to send back - but the handler
+                            // reads any slot above zero as an equip, so 255
+                            // asked it to wear whatever is in slot 255, found
+                            // nothing, and did nothing. The two directions use
+                            // different numbers for the same idea.
                             link->requestInventoryAction(
-                                {mh::ViewerLink::InventoryAction::Kind::Equip, 0, 255,
+                                {mh::ViewerLink::InventoryAction::Kind::Equip, 0, 0,
                                  static_cast<uint8_t>(hit.value), 0});
                         }
                         else if (hit.kind == 8)
@@ -10354,7 +10362,7 @@ constexpr float kGravity = 26.0f;
                                             gap * static_cast<float>(columns - 1))});
                     const float slotWide = slotHigh / windowAspect;
                     const float slotGap = slotHigh * gap;
-                    const float textHigh = std::clamp(slotHigh * 0.30f, 0.026f, 0.042f);
+                    const float textHigh = std::clamp(slotHigh * 0.34f, 0.030f, 0.048f);
                     const float gridWide = columns * slotWide + (columns - 1) * slotGap;
                     const float gridHigh = rowsShown * slotHigh + (rowsShown - 1) * slotGap;
                     const float padX = std::max(slotWide * 0.55f, textHigh);
