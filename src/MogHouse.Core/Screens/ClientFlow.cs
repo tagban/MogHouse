@@ -88,7 +88,18 @@ public static class ClientFlow
 
         // Everything that waits for a person or a server happens over here, so
         // the thread below is free to draw the screen they are waiting on.
-        var session = new Thread(() => RunSession(world, say))
+        // And when the session is over, the window goes with it.
+        //
+        // Without this the client could not be logged out of: the session
+        // thread finished, and the renderer - which is this thread, because a
+        // window has to belong to the main one - carried on drawing an empty
+        // world forever. Everything about the logout worked except the last
+        // step, which nobody owned.
+        var session = new Thread(() =>
+        {
+            RunSession(world, say);
+            world.Stop();
+        })
         {
             IsBackground = true,
             Name = "moghouse-session",

@@ -824,6 +824,21 @@ public sealed class LiveRadar : IDisposable
         _viewer.SetEntities(entities);
     }
 
+    /// <summary>
+    /// Asks the window to close, from whichever thread notices it should.
+    ///
+    /// Not Dispose: on macOS the renderer runs on the main thread and the
+    /// session on another, so the thread that decides the session is over is
+    /// never the thread that owns the window. It can only ask.
+    /// </summary>
+    public void Stop()
+    {
+        if (!_closed)
+        {
+            _viewer.Stop();
+        }
+    }
+
     public void Dispose()
     {
         if (_closed)
@@ -833,7 +848,11 @@ public sealed class LiveRadar : IDisposable
         _closed = true;
 
         _viewer.Stop();
-        _thread.Join(TimeSpan.FromSeconds(5));
+
+        // Null whenever the loop is not ours - which it is not on macOS, where
+        // the window has to belong to the main thread. Joining it there was a
+        // null dereference waiting for the first caller.
+        _thread?.Join(TimeSpan.FromSeconds(5));
         _viewer.Dispose();
     }
 }

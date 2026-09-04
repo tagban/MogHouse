@@ -176,26 +176,73 @@ public sealed class WorldLoop
     /// </summary>
     private DateTimeOffset? _leaveAt;
 
+    /// The logout, once asked for. Started and not waited on: awaiting it
+    /// stops this loop dead, and a loop that is not running cannot count
+    /// anything down or draw anybody kneeling.
+    private Task? _logout;
+
+    /// The last number said out loud, so each one is said once.
+    private int _lastCount;
+
+    private string _leaveWhat = "logged out";
+
     /// <summary>
-    /// Says what is about to happen, before the waiting starts.
+    /// Starts leaving: says so, kneels, and sends the packet without waiting
+    /// for it.
     ///
-    /// LogoutAsync does not return until the server has ended the session, so
-    /// anything said after it is said to a window that is already closing.
-    /// This used to be called afterwards, which is why nothing was ever seen.
-    ///
-    /// The timer it sets is only a backstop for a server that answers and then
-    /// never finishes. The moment LogoutAsync returns, the session is over and
-    /// the caller leaves without waiting for it.
+    /// Thirty seconds, counted at thirty, twenty and ten the way the game
+    /// does. It used to await the logout here, which stopped the world for the
+    /// whole wait - so nothing could be counted, nobody knelt, and the only
+    /// evidence anything had happened was the window vanishing later.
     /// </summary>
-    private void BeginLeaving(string what)
+    private void BeginLeaving(string what, FfxiLogoutKind kind)
     {
-        _leaveAt = DateTimeOffset.UtcNow.AddSeconds(32);
+        if (_logout is not null)
+        {
+            return;   // already going
+        }
+
+        _leaveWhat = what;
+        _leaveAt = DateTimeOffset.UtcNow.AddSeconds(30);
+        _lastCount = 30;
         _say.WriteLine($"leaving: {what}, at {_leaveAt:HH:mm:ss}");
+        _world.Say("", $"You will be {what} in 30 seconds.", FfxiChatMessageType.System1);
 
         // Down on one knee for the wait, which is what the game does. res0 is
         // the clip /heal plays and every race ships it.
         _world.ShowResting(true);
-        _world.Say("", $"You will be {what} in 30 seconds.", FfxiChatMessageType.System1);
+        _logout = _session.LogoutAsync(kind);
+    }
+
+    /// <summary>
+    /// The countdown: a line at thirty, twenty and ten, and then gone.
+    ///
+    /// Timed here rather than by the server. The server has been told and runs
+    /// its own clock; this is what the player sees, and the two only have to
+    /// agree about the end.
+    /// </summary>
+    private void CountDown()
+    {
+        if (_leaveAt is not { } leaveAt)
+        {
+            return;
+        }
+
+        int left = (int)Math.Ceiling((leaveAt - DateTimeOffset.UtcNow).TotalSeconds);
+        foreach (int mark in new[] { 20, 10 })
+        {
+            if (left <= mark && _lastCount > mark)
+            {
+                _lastCount = mark;
+                _world.Say("", $"You will be {_leaveWhat} in {mark} seconds.",
+                           FfxiChatMessageType.System1);
+            }
+        }
+
+        if (left <= 0)
+        {
+            _leaving = true;
+        }
     }
 
     private void OnInventoryChanged() => _inventoryDirty = true;
@@ -335,10 +382,7 @@ public sealed class WorldLoop
     {
         while (!_world.Closed && !_leaving)
         {
-            if (_leaveAt is { } leaveAt && DateTimeOffset.UtcNow >= leaveAt)
-            {
-                _leaving = true;
-            }
+            CountDown();
 
             if (_inventoryDirty)
             {
@@ -478,15 +522,11 @@ public sealed class WorldLoop
         switch (command.Kind)
         {
             case FfxiClientCommandKind.Logout:
-                BeginLeaving("logged out");
-                Wait(_session.LogoutAsync(FfxiLogoutKind.Logout));
-                _leaving = true;
+                BeginLeaving("logged out", FfxiLogoutKind.Logout);
                 return;
 
             case FfxiClientCommandKind.Shutdown:
-                BeginLeaving("shut down");
-                Wait(_session.LogoutAsync(FfxiLogoutKind.Shutdown));
-                _leaving = true;
+                BeginLeaving("shut down", FfxiLogoutKind.Shutdown);
                 return;
 
             case FfxiClientCommandKind.Bug:
