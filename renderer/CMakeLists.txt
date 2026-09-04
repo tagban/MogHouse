@@ -75,6 +75,7 @@ endif()
 add_library(ffxi-dat STATIC
     ffxi/bgw.cpp
     ffxi/spw.cpp
+    ffxi/soundrefs.cpp
     ffxi/dat.cpp
     ffxi/d3m.cpp
     ffxi/filetable.cpp

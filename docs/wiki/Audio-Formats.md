@@ -84,6 +84,62 @@ Decoding cannot start anywhere but the beginning, because each sample is a
 difference from the two before it. That is why looping seeks to a block
 boundary and keeps the running history rather than resetting it.
 
+## How a sound is chosen
+
+There is no table mapping creatures or places to sounds, and none is needed:
+**a DAT declares the sounds it uses**, and the 0x3D chunk's own four-character
+name says what each one is for. The client asks the model. So does this -
+`renderer/ffxi/soundrefs.cpp`.
+
+### A creature says what it can do
+
+Counted across 614 models, every creature carries the same vocabulary:
+
+```
+idl1 idl2   standing about      atk1-atk4  attacking
+dam1-dam4   taking a hit        swy1-swy3  swaying
+ded1-ded3   dying               sdam skaz shit   shared weapon sounds, se006
+```
+
+Anything outside it is worth looking at, and that is how the thing this whole
+search was for turned up. The worm at model 426 has exactly two extras, 17024
+and 17025, and they are it coming out of the ground and going back under -
+confirmed by ear against the retail client.
+
+Which makes the list of creatures that burrow a query rather than a guess:
+the ones that reference those sounds. Models 424 through 427 reference both;
+2413 references only the going-under. An earlier list built from the server's
+mob names was wrong on three of its four entries.
+
+### A place says what can be heard there
+
+Positional ambience is a sound chunk sharing a directory with generators - and
+a generator carries a position, which is how the same directories already give
+this renderer its torches. West Ronfaure:
+
+| directory | sounds | generators |
+|---|---|---|
+| `mode/ligh/taki` | 2024 | 56 |
+| `effe/aose` | 2079-2086 and more | 68 |
+| `effe/aotr` | 2124, 2126, 2146, 2159 | 136 |
+| `weat/{fine,clod,mist,suny}` | 1005, 1007 | 3 each |
+
+`taki` is Japanese for waterfall: one sound, fifty-six places to hear it from.
+
+### Two flags tell you which kind a sound is
+
+Both hold across every sound checked, and they agree with each other:
+
+| | loops | channels |
+|---|---|---|
+| zone-wide ambience (1005, 1007) | yes | **stereo** |
+| positional ambience (2024, a waterfall) | yes | mono |
+| an event (17024, a worm surfacing) | no | mono |
+
+Stereo cannot be panned to a cliff edge and mono can, so the channel count is
+not decoration - it says whether a sound has a place. Length agrees too: the
+ambience runs 9 to 18 seconds and the events run about two.
+
 ## What the folders hold
 
 Built from watching the retail client and from what the DATs reference. A

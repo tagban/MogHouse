@@ -5003,13 +5003,24 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             // finish loading, so the first frame ever drawn was already at
             // 0.22 and the sound could never play at all.
             //
-            // Which noise is not known. Nothing read so far says that a given
-            // seNNNNNN is the sound of a worm, and there are 11,862 of them,
-            // so this is a switch to try candidates with rather than a choice:
+            // se017024, which is a worm coming out of the ground. Not a guess:
+            // the creature's own DAT declares it as a 0x3D sound reference,
+            // and it was identified by ear against the retail client. Its pair
+            // 17025 is going back under, which wants a despawn to hang off and
+            // there is not one yet.
             //
-            //   MOGHOUSE_EMERGE_SOUND=.../sound/win/se/se303/se303001.spw
-            static const char* emergeSound = std::getenv("MOGHOUSE_EMERGE_SOUND");
-            if (emergeSound != nullptr && rise != 0.0f)
+            // MOGHOUSE_EMERGE_SOUND overrides it, which is how it was found.
+            static const std::string emergeSound = [] {
+                if (const char* chosen = std::getenv("MOGHOUSE_EMERGE_SOUND"))
+                {
+                    return std::string{chosen};
+                }
+                const std::filesystem::path root = ffxi::defaultInstallRoot();
+                return root.empty() ? std::string{}
+                                    : (root / "sound" / "win" / "se" / "se017" / "se017024.spw").string();
+            }();
+
+            if (!emergeSound.empty() && rise != 0.0f)
             {
                 static std::set<uint32_t> sounded;
                 if (sounded.insert(entity.id).second)

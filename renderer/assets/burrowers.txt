@@ -11,48 +11,29 @@
 # Where these came from
 # ---------------------
 #
-# A LandSandBoat database, joined from a spawned mob back to its model:
+# Not guessed. A creature's model DAT declares the sounds it uses as 0x3D
+# chunks (see docs/wiki/Audio-Formats.md), and 17024 and 17025 are a worm
+# coming out of the ground and going back under it - identified by ear against
+# the retail client. So the creatures that burrow are exactly the creatures
+# that reference those two sounds, and the list is a query rather than a
+# guess:
 #
-#     SELECT HEX(p.modelid), s.polutils_name, COUNT(*)
-#     FROM mob_spawn_points s
-#     JOIN mob_groups g ON s.groupid = g.groupid
-#                      AND g.zoneid = ((s.mobid >> 12) & 0xFFF)
-#     JOIN mob_pools  p ON g.poolid  = p.poolid
-#     WHERE s.polutils_name REGEXP 'Worm|Eater'
-#     GROUP BY HEX(p.modelid), s.polutils_name;
+#     for every model file, collect its 0x3D sound ids
+#     keep the models that reference 17024 or 17025
 #
-# The model is bytes two and three of mob_pools.modelid, little-endian - that
-# column is a twenty-byte look blob, not a number.
+# An earlier version of this file was built from the server's mob_pools by
+# name, and was wrong on three of its four entries - 2027, 2029 and 3021 are
+# not installed or not worms, and only 426 survived. Names in a database
+# describe what a thing is called; the sound reference describes what it does.
 #
-# Two things about that query are worth keeping, because getting either wrong
-# gives an answer rather than an error:
-#
-#   * groupid is unique per zone, not globally - every zone has a group 1. So
-#     the join needs the zone as well, and the zone is encoded in the mobid
-#     rather than stored on the spawn point: (mobid >> 12) & 0xFFF. Joining on
-#     groupid alone cross-joins every zone and returns fifteen different models
-#     all confidently named "Leujaoam Worm".
-#
-#   * polutils_name is the name a player sees. mobname is the placeholder and
-#     repeats across unrelated mobs.
-#
-# A crawler is not on this list on purpose. Model 396 is the commonest thing
-# the query returns and a crawler stays on the surface - it is a caterpillar,
-# not a worm.
-#
-#
-# What is missing
-# ---------------
-#
-# The database this was read from carries 6,642 spawn points and none at all
-# in zones 100, 101 or 230, so the ordinary worms of the starting areas - the
-# Stone Eaters and their kin - are simply not in it and could not be looked up.
-#
-# MOGHOUSE_SPAWN_WATCH=1 prints the model of everything that appears as it
-# appears. Stand near one, watch it spawn, add the number it prints. That is a
-# ten second job and beats a list assembled by somebody who cannot see it.
+# MOGHOUSE_SPAWN_WATCH=1 still prints the model of anything that appears, for
+# a creature that burrows without saying so.
 
-426    # Leujaoam Worm, Mineral Eater      - spawned, confirmed
-2027   # Lambton Worm, Veiled Sandworm     - spawned, confirmed
-2029   # Veiled Gigaworm                   - spawned, confirmed
-3021   # Iron Eater                        - in mob_pools, never spawned in this database
+424    # references 17024 and 17025 - out and in
+425    # references 17024 and 17025
+426    # references 17024 and 17025 - the worm rendered and checked
+427    # references 17024 and 17025
+
+# 2413 references only 17025, going under without a matching emergence. Left
+# out until something is seen doing it, since half a pair is not evidence of
+# the other half.
