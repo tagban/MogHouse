@@ -92,7 +92,10 @@ struct InteriorLighting
 ///
 /// One place, because it is the name a player sees and a version they will
 /// quote in a bug report.
-inline constexpr const char* kWindowTitle = "MogHouse XI - Alpha 0.1.2";
+// Bump with the three packaging scripts, which each carry the version
+// separately. This one was missed for 0.2.0, so the released macOS build
+// says 0.1.2 in its title bar - the first thing anyone reads.
+inline constexpr const char* kWindowTitle = "MogHouse XI - Alpha 0.2.0";
 
 struct ZoneLineMarker
 {
