@@ -528,6 +528,14 @@ public:
         uint16_t itemId{};
         std::string name;
         std::string description;
+
+        /// The item DAT's own kind - 4 a weapon, 5 armour, 7 usable, and so
+        /// on. Carried so the panel can group by it without asking anyone.
+        uint16_t type{};
+
+        /// Equipment level, or zero for anything that is not worn.
+        uint16_t level{};
+
         int width{};
         int height{};
         std::vector<uint8_t> rgba;

@@ -494,14 +494,14 @@ public sealed partial class NativeViewer : IDisposable
     /// Once per distinct item, not once per slot. The pixels are copied out
     /// before this returns, so the caller can reuse the buffer.
     /// </summary>
-    public void PushItem(ushort itemId, string name, string description, ReadOnlySpan<byte> rgba,
-                         int width, int height)
+    public void PushItem(ushort itemId, string name, string description, ushort type, ushort level,
+                         ReadOnlySpan<byte> rgba, int width, int height)
     {
         if (_disposed || rgba.IsEmpty)
         {
             return;
         }
-        mh_viewer_push_item(_handle, itemId, name, description, rgba, width, height);
+        mh_viewer_push_item(_handle, itemId, name, description, type, level, rgba, width, height);
     }
 
     /// <summary>Replaces the zone lines drawn in the world.</summary>
@@ -988,7 +988,7 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
     private static partial void mh_viewer_push_item(IntPtr viewer, ushort itemId, string name,
-        string description, ReadOnlySpan<byte> rgba, int width, int height);
+        string description, ushort type, ushort level, ReadOnlySpan<byte> rgba, int width, int height);
 
     [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
     private static partial void mh_viewer_push_chat(IntPtr viewer, string line, int tone);

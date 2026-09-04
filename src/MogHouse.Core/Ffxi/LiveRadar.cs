@@ -466,11 +466,12 @@ public sealed class LiveRadar : IDisposable
     /// What an item is called and what it looks like, for the renderer's own
     /// atlas. Once per distinct item.
     /// </summary>
-    public void ShowItem(ushort itemId, string name, string description, FfxiItemIcon icon)
+    public void ShowItem(FfxiItem item, FfxiItemIcon icon)
     {
         if (!_closed)
         {
-            _viewer.PushItem(itemId, name, description, icon.Rgba, icon.Width, icon.Height);
+            _viewer.PushItem(item.Id, item.Name, item.Description, item.Type, item.Level,
+                             icon.Rgba, icon.Width, icon.Height);
         }
     }
 

@@ -344,7 +344,8 @@ void mh_viewer_set_inventory(MhViewerHandle viewer, const MhInventorySlot* slots
 }
 
 void mh_viewer_push_item(MhViewerHandle viewer, uint16_t item_id, const char* name,
-                         const char* description, const uint8_t* rgba, int32_t width, int32_t height)
+                         const char* description, uint16_t type, uint16_t level,
+                         const uint8_t* rgba, int32_t width, int32_t height)
 {
     if (!viewer || width <= 0 || height <= 0 || !rgba)
     {
@@ -355,6 +356,8 @@ void mh_viewer_push_item(MhViewerHandle viewer, uint16_t item_id, const char* na
     face.itemId = item_id;
     face.name = name ? name : "";
     face.description = description ? description : "";
+    face.type = type;
+    face.level = level;
     face.width = width;
     face.height = height;
     face.rgba.assign(rgba, rgba + (static_cast<size_t>(width) * static_cast<size_t>(height) * 4));

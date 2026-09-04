@@ -220,7 +220,7 @@ public sealed class WorldLoop
                 continue;
             }
 
-            _world.ShowItem(held.ItemId, item.Name, item.Description, icon);
+            _world.ShowItem(item, icon);
         }
     }
 

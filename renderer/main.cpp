@@ -213,6 +213,11 @@ void fillDemoBags(mh::ViewerLink& link)
         face.itemId = kItems[i];
         face.name = kNames[i];
         face.description = "A stand-in, drawn without reading any file.";
+
+        // Spread across the kinds and levels so the sort headings have
+        // something to tell apart.
+        face.type = static_cast<uint16_t>((i % 4) + 4);
+        face.level = static_cast<uint16_t>((i * 7) % 75);
         face.width = 32;
         face.height = 32;
         face.rgba.resize(32 * 32 * 4);

@@ -199,6 +199,7 @@ MH_API void mh_viewer_set_inventory(MhViewerHandle viewer,
 /// the pointer.
 MH_API void mh_viewer_push_item(MhViewerHandle viewer, uint16_t item_id,
                                 const char* name, const char* description,
+                                uint16_t type, uint16_t level,
                                 const uint8_t* rgba, int32_t width, int32_t height);
 
 /// What a dead player pressed in the box the renderer draws them. Matches
