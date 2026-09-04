@@ -31,9 +31,6 @@ public sealed class WorldLoop
     private uint _openZone;
     private bool _leaving;
 
-    /// Whether the welcome popup is still up and waiting to be dismissed.
-    private bool _welcoming;
-
     /// <summary>
     /// Set from the session's thread when the bags change, cleared on the one
     /// that draws. The tracker raises its event as each packet lands, and the
@@ -154,13 +151,20 @@ public sealed class WorldLoop
     /// first thing on screen at zone-in is a burst of the server's own
     /// messages, and a line about /bug would scroll past behind them.
     /// </summary>
-    private void Welcome()
-    {
-        _world.ShowForm("MOGHOUSE XI",
-                        "If you find a bug, face it, and type /bug <insert context here> and hit enter.",
-                        new[] { NativeFormRow.Button("Got it") });
-        _welcoming = true;
-    }
+    /// <summary>
+    /// The bug-reporting notice, said rather than asked.
+    ///
+    /// It was a box with a button, which stopped the world until it was
+    /// dismissed - and being a form, it also swallowed the space bar, so a
+    /// character could not jump until it had been clicked away. Neither is
+    /// what a reminder is worth.
+    ///
+    /// A line of chat is how the server itself says this sort of thing, it
+    /// stays in the log to be scrolled back to, and it blocks nothing.
+    /// </summary>
+    private void Welcome() =>
+        _world.Say("", "If you find a bug, face it, and type /bug <insert context here> and hit enter.",
+                   FfxiChatMessageType.System1);
 
     private void OnInventoryChanged() => _inventoryDirty = true;
 
@@ -290,14 +294,6 @@ public sealed class WorldLoop
     {
         while (!_world.Closed && !_leaving)
         {
-            // Dismissed. Only while the welcome is up, so this does not eat the
-            // result of any other form the world puts on screen later.
-            if (_welcoming && _world.TakeFormResult() is not null)
-            {
-                _welcoming = false;
-                _world.HideForm();
-            }
-
             if (_inventoryDirty)
             {
                 _inventoryDirty = false;
