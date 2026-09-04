@@ -536,6 +536,14 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
         await SendEncryptedAsync(
             zoneServer, FfxiEquipPacket.Build(itemSlot, slot, container, (ushort)(_ownCounter + 1)), ct);
 
+    /// <summary>
+    /// Throws an item away (GP_CLI_COMMAND_ITEM_DUMP). There is no undo.
+    /// </summary>
+    public async Task SendDropAsync(IPEndPoint zoneServer, uint quantity, FfxiContainer container,
+                                    byte slot, CancellationToken ct = default) =>
+        await SendEncryptedAsync(
+            zoneServer, FfxiDropPacket.Build(quantity, container, slot, (ushort)(_ownCounter + 1)), ct);
+
     public async Task SendGameOkAsync(IPEndPoint zoneServer, CancellationToken ct = default) =>
         await SendEncryptedAsync(zoneServer, FfxiGameOkPacket.Build((ushort)(_ownCounter + 1)), ct);
 

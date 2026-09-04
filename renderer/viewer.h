@@ -536,6 +536,11 @@ public:
         /// Equipment level, or zero for anything that is not worn.
         uint16_t level{};
 
+        /// Which equipment slots will take this, as a bitmask - bit 0 the main
+        /// hand, bit 15 the back. Zero for anything that is not worn at all,
+        /// which is how the menu knows whether to offer to equip it.
+        uint16_t slots{};
+
         int width{};
         int height{};
         std::vector<uint8_t> rgba;
@@ -553,6 +558,33 @@ public:
 
     /// Bumped whenever the bags change, so the panel can rebuild only then.
     uint64_t inventoryRevision() const { return inventoryRevision_.load(); }
+
+    /// Something the player asked to do with one slot.
+    ///
+    /// The renderer has no socket, so it can only ask. Taken once, like every
+    /// other crossing here, and applied by whoever is holding the connection.
+    struct InventoryAction
+    {
+        enum class Kind
+        {
+            None,
+            Equip,
+            Drop,
+        };
+
+        Kind kind{Kind::None};
+        uint8_t container{};
+        uint8_t slot{};
+
+        /// Which equipment slot to put it in, for Equip. SLOTTYPE numbering.
+        uint8_t equipSlot{};
+
+        /// How many there are, for Drop - the server wants the whole quantity.
+        uint32_t count{};
+    };
+
+    void requestInventoryAction(InventoryAction action);
+    bool takeInventoryAction(InventoryAction& action);
 
     void pushItemFace(ItemFace face);
 
@@ -830,6 +862,7 @@ private:
     std::array<uint16_t, 18> containerSizes_{};
     std::atomic<uint64_t> inventoryRevision_{0};
     std::vector<ItemFace> itemFaces_;
+    std::deque<InventoryAction> inventoryActions_;
 
     // Two flags rather than one guarded pair: a raise only means anything
     // while the character is down, so the two being read a moment apart says

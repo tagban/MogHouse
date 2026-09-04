@@ -495,13 +495,13 @@ public sealed partial class NativeViewer : IDisposable
     /// before this returns, so the caller can reuse the buffer.
     /// </summary>
     public void PushItem(ushort itemId, string name, string description, ushort type, ushort level,
-                         ReadOnlySpan<byte> rgba, int width, int height)
+                         ushort slots, ReadOnlySpan<byte> rgba, int width, int height)
     {
         if (_disposed || rgba.IsEmpty)
         {
             return;
         }
-        mh_viewer_push_item(_handle, itemId, name, description, type, level, rgba, width, height);
+        mh_viewer_push_item(_handle, itemId, name, description, type, level, slots, rgba, width, height);
     }
 
     /// <summary>Replaces the zone lines drawn in the world.</summary>
@@ -989,7 +989,8 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
     private static partial void mh_viewer_push_item(IntPtr viewer, ushort itemId, string name,
-        string description, ushort type, ushort level, ReadOnlySpan<byte> rgba, int width, int height);
+        string description, ushort type, ushort level, ushort slots, ReadOnlySpan<byte> rgba,
+        int width, int height);
 
     [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
     private static partial void mh_viewer_push_chat(IntPtr viewer, string line, int tone);
@@ -1104,6 +1105,27 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
     private static partial void mh_show_message(string title, string body);
+
+    /// <summary>
+    /// What the player asked to do with one inventory slot, or null.
+    ///
+    /// Kind 1 equips and 2 drops. Everything else is the server's numbering
+    /// and goes straight into a packet.
+    /// </summary>
+    public (int Kind, byte Container, byte Slot, byte EquipSlot, uint Count)? TakeInventoryAction()
+    {
+        if (_disposed || _handle == IntPtr.Zero ||
+            mh_viewer_take_inventory_action(_handle, out int kind, out int container, out int slot,
+                                            out int equipSlot, out uint count) == 0)
+        {
+            return null;
+        }
+        return (kind, (byte)container, (byte)slot, (byte)equipSlot, count);
+    }
+
+    [LibraryImport(LibraryName)]
+    private static partial int mh_viewer_take_inventory_action(IntPtr viewer, out int kind,
+        out int container, out int slot, out int equipSlot, out uint count);
 
     public static unsafe string? PickFolder(string? defaultLocation = null)
     {

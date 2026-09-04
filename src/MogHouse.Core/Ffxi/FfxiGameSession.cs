@@ -1279,6 +1279,29 @@ public sealed class FfxiGameSession : IDisposable
     }
 
     /// <summary>
+    /// Throws an item away.
+    ///
+    /// The quantity has to be the whole stack - the server compares it against
+    /// what it holds and refuses anything else - so this is taken from the
+    /// tracker rather than from the caller, which cannot be out of step with
+    /// what the server last said.
+    /// </summary>
+    public async Task DropAsync(FfxiContainer container, byte slot)
+    {
+        if (_zone is null || _zoneEndpoint is null || ZoneState is null)
+        {
+            return;
+        }
+
+        if (Inventory.At(container, slot) is not { } held)
+        {
+            return;
+        }
+
+        await _zone.SendDropAsync(_zoneEndpoint, held.Quantity, container, slot);
+    }
+
+    /// <summary>
     /// Takes the raise somebody has offered, which is the other way up.
     ///
     /// The server drops this unless it has already sent the offer, so it is

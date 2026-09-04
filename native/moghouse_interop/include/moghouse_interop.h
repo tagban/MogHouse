@@ -177,6 +177,14 @@ MH_API void mh_viewer_set_zone_lines(MhViewerHandle viewer, const MhZoneLine* li
 /// where a panel's title is not shown to the person looking at it.
 MH_API void mh_show_message(const char* title, const char* body);
 
+/// What the player asked to do with one slot, taken once.
+///
+/// Returns 0 when nothing is waiting. `kind` is 1 to equip and 2 to drop; the
+/// rest are the server's own numbering, so they can go straight into a packet.
+MH_API int32_t mh_viewer_take_inventory_action(MhViewerHandle viewer, int32_t* kind,
+                                               int32_t* container, int32_t* slot,
+                                               int32_t* equip_slot, uint32_t* count);
+
 /// One slot the player holds.
 ///
 /// Container and slot are the server's own CONTAINER_ID and slot number, so
@@ -207,7 +215,7 @@ MH_API void mh_viewer_set_inventory(MhViewerHandle viewer,
 /// the pointer.
 MH_API void mh_viewer_push_item(MhViewerHandle viewer, uint16_t item_id,
                                 const char* name, const char* description,
-                                uint16_t type, uint16_t level,
+                                uint16_t type, uint16_t level, uint16_t slots,
                                 const uint8_t* rgba, int32_t width, int32_t height);
 
 /// What a dead player pressed in the box the renderer draws them. Matches

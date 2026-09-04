@@ -202,6 +202,11 @@ void fillDemoBags(mh::ViewerLink& link)
             5, static_cast<uint8_t>(i * 3), kItems[i], static_cast<uint32_t>(i + 1)});
     }
 
+    // Slot zero of the inventory is the gil, as it is on a real server: item
+    // 65535, which no item DAT holds. Here so the panel is exercised against
+    // the thing that looked like a bug - a count with nothing under it.
+    slots.push_back(mh::ViewerLink::InventorySlot{0, 0, 65535, 4821});
+
     link.setInventory(slots.data(), static_cast<int>(slots.size()), kSizes, 18);
 
     static const char* kNames[] = {"Ice Crystal", "Wind Crystal", "Scorpion Harness", "Ochiudo's Kote",
@@ -212,12 +217,18 @@ void fillDemoBags(mh::ViewerLink& link)
         mh::ViewerLink::ItemFace face;
         face.itemId = kItems[i];
         face.name = kNames[i];
-        face.description = "A stand-in, drawn without reading any file.";
+        face.description = "A stand-in, drawn without reading any file.\n"
+                           "It has two lines so the tooltip has to wrap.\n"
+                           "DEF:12 Ice-20 Dark+15";
 
         // Spread across the kinds and levels so the sort headings have
         // something to tell apart.
         face.type = static_cast<uint16_t>((i % 4) + 4);
         face.level = static_cast<uint16_t>((i * 7) % 75);
+
+        // Every third one is wearable, so the right click menu is exercised
+        // both with an Equip on it and without.
+        face.slots = i % 3 == 0 ? static_cast<uint16_t>(1 << (i % 16)) : 0;
         face.width = 32;
         face.height = 32;
         face.rgba.resize(32 * 32 * 4);

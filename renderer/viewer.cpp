@@ -2224,6 +2224,28 @@ std::array<uint16_t, 18> mh::ViewerLink::containerSizes() const
     return containerSizes_;
 }
 
+void mh::ViewerLink::requestInventoryAction(InventoryAction action)
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+
+    // Queued rather than replaced: equipping four pieces in four clicks is one
+    // click each, and a single slot would drop three of them.
+    inventoryActions_.push_back(action);
+}
+
+bool mh::ViewerLink::takeInventoryAction(InventoryAction& action)
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+    if (inventoryActions_.empty())
+    {
+        return false;
+    }
+
+    action = inventoryActions_.front();
+    inventoryActions_.pop_front();
+    return true;
+}
+
 void mh::ViewerLink::pushItemFace(ItemFace face)
 {
     const std::lock_guard<std::mutex> guard{mutex_};
@@ -4150,6 +4172,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         std::string description;
         uint16_t type{};
         uint16_t level{};
+        uint16_t slots{};
     };
     std::unordered_map<uint16_t, ItemFacing> itemFacing;
 
@@ -5385,6 +5408,16 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         }
     };
     std::vector<InventoryHit> inventoryHits;
+
+    // The right click menu: which slot it belongs to, and whether the drop has
+    // been asked about once already. Closed when the slot is -1.
+    //
+    // Only the slot is kept. What is in it - the name, the count, whether it
+    // can be worn - is looked up again as the menu is drawn, so the menu can
+    // never describe an item the server has since taken away.
+    int contextSlot = -1;
+    int contextContainer = 0;
+    bool contextConfirmDrop = false;
 
     /// What order the grid is shown in.
     ///
@@ -7147,6 +7180,32 @@ constexpr float kGravity = 26.0f;
                 // cursor happened to land on.
                 float upX = 0.0f;
                 float upY = 0.0f;
+                // A right click is the menu, and nothing else: it does not
+                // reach the world, and it does not act on what it opens.
+                if (event.button.button == SDL_BUTTON_RIGHT)
+                {
+                    contextSlot = -1;
+                    contextConfirmDrop = false;
+                    if (!dragMoved && inventoryOpen &&
+                        pointerNdc(event.button.x, event.button.y, upX, upY))
+                    {
+                        for (const InventoryHit& hit : inventoryHits)
+                        {
+                            if (hit.kind == 8 && hit.holds(upX, upY))
+                            {
+                                contextSlot = hit.value;
+                                break;
+                            }
+                        }
+                    }
+                    dragging = false;
+
+                    // On to the next event rather than out of the loop: the
+                    // queue is drained once a frame, and leaving early would
+                    // hold every event behind this one until the next.
+                    continue;
+                }
+
                 // The bags first, and only what they were drawn over: a
                 // click that lands on the panel belongs to the panel, not to
                 // whatever is standing behind it in the world.
@@ -7180,10 +7239,52 @@ constexpr float kGravity = 26.0f;
                         else if (hit.kind == 3)
                         {
                             inventoryOpen = !inventoryOpen;
+                            contextSlot = -1;
                         }
-                        else
+                        else if (hit.kind == 4)
                         {
                             optionsOpen = !optionsOpen;
+                        }
+                        else if (hit.kind == 5 && link && contextSlot >= 0)
+                        {
+                            link->requestInventoryAction(
+                                {mh::ViewerLink::InventoryAction::Kind::Equip,
+                                 static_cast<uint8_t>(contextContainer),
+                                 static_cast<uint8_t>(contextSlot),
+                                 static_cast<uint8_t>(hit.value), 0});
+                            contextSlot = -1;
+                            contextConfirmDrop = false;
+                        }
+                        else if (hit.kind == 6 && link && contextSlot >= 0)
+                        {
+                            // The first press only asks. Nothing is sent until
+                            // the second one, because the server destroys the
+                            // item the moment the packet lands.
+                            if (!contextConfirmDrop)
+                            {
+                                contextConfirmDrop = true;
+                            }
+                            else
+                            {
+                                link->requestInventoryAction(
+                                    {mh::ViewerLink::InventoryAction::Kind::Drop,
+                                     static_cast<uint8_t>(contextContainer),
+                                     static_cast<uint8_t>(contextSlot), 0, 0});
+                                contextSlot = -1;
+                                contextConfirmDrop = false;
+                            }
+                        }
+                        else if (hit.kind == 7)
+                        {
+                            contextSlot = -1;
+                            contextConfirmDrop = false;
+                        }
+                        else if (hit.kind == 8)
+                        {
+                            // A left click on a slot closes the menu rather
+                            // than acting: the menu is what acts.
+                            contextSlot = -1;
+                            contextConfirmDrop = false;
                         }
 
                         tookClick = true;
@@ -9653,6 +9754,7 @@ constexpr float kGravity = 26.0f;
                     facing.description = face.description;
                     facing.type = face.type;
                     facing.level = face.level;
+                    facing.slots = face.slots;
 
                     const size_t expected =
                         static_cast<size_t>(mh::kIconSize) * mh::kIconSize * 4;
@@ -9677,461 +9779,6 @@ constexpr float kGravity = 26.0f;
                 }
             }
 
-            if (inventoryPipeline && link && showHud)
-            {
-                InventoryUniforms inv{};
-                int quads = 0;
-
-                // Its own, rather than the HUD's: that one is scoped to the
-                // block above and this panel is a sibling of it, not a part.
-                const float windowAspect = static_cast<float>(width) / static_cast<float>(height);
-                static const float kHint[3] = {0.42f, 0.46f, 0.56f};
-
-                const auto quad = [&](float left, float bottom, float wide, float high, int mode,
-                                      int cell, const float rgb[3], float alpha)
-                {
-                    if (quads >= mh::kInventoryQuads)
-                    {
-                        return;
-                    }
-                    inv.rects[quads][0] = left;
-                    inv.rects[quads][1] = bottom;
-                    inv.rects[quads][2] = wide;
-                    inv.rects[quads][3] = high;
-                    inv.looks[quads][0] = static_cast<float>(mode);
-                    inv.looks[quads][1] = static_cast<float>(cell);
-                    inv.tints[quads][0] = rgb[0];
-                    inv.tints[quads][1] = rgb[1];
-                    inv.tints[quads][2] = rgb[2];
-                    inv.tints[quads][3] = alpha;
-                    ++quads;
-                };
-
-                // Letters are quads too, one per glyph, walked with the same
-                // advances the HUD uses so a count sits where it would there.
-                const float cellSize = static_cast<float>(textFont.cell);
-                const auto write = [&](const std::string& line, float left, float bottom,
-                                       float high, const float rgb[3], float alpha)
-                {
-                    const float wide = high / windowAspect;
-                    float pen = left;
-                    for (char raw : line)
-                    {
-                        quad(pen, bottom, wide, high, 2, static_cast<int>(textFont.indexOf(raw)), rgb, alpha);
-                        pen += (textFont.advanceOf(raw) / cellSize) * wide;
-                    }
-                    return pen - left;
-                };
-
-                const auto widthOf = [&](const std::string& line, float high)
-                {
-                    const float wide = high / windowAspect;
-                    float pen = 0.0f;
-                    for (char raw : line)
-                    {
-                        pen += (textFont.advanceOf(raw) / cellSize) * wide;
-                    }
-                    return pen;
-                };
-
-                // Only containers the server gave slots to. A wardrobe nobody
-                // has bought has none, and offering an empty tab for it would
-                // be inventing storage.
-                static const char* kContainerNames[18] = {
-                    "Inventory", "Mog Safe", "Storage",   "Temporary", "Mog Locker", "Satchel",
-                    "Sack",      "Case",     "Wardrobe",  "Mog Safe 2", "Wardrobe 2", "Wardrobe 3",
-                    "Wardrobe 4", "Wardrobe 5", "Wardrobe 6", "Wardrobe 7", "Wardrobe 8", "Recycle"};
-
-                const std::array<uint16_t, 18> sizes = link->containerSizes();
-                std::vector<int> tabs;
-                for (int i = 0; i < 18; ++i)
-                {
-                    if (sizes[static_cast<size_t>(i)] > 0)
-                    {
-                        tabs.push_back(i);
-                    }
-                }
-
-                inventoryHits.clear();
-
-                float pointerX = 0.0f;
-                float pointerY = 0.0f;
-                float mouseX = 0.0f;
-                float mouseY = 0.0f;
-                SDL_GetMouseState(&mouseX, &mouseY);
-                const bool havePointer = pointerNdc(mouseX, mouseY, pointerX, pointerY);
-
-                // A label with a box behind it that can be clicked. Returns
-                // where it ended so a row of them can be laid out.
-                static const float kPanel[3] = {0.05f, 0.06f, 0.12f};
-                static const float kFrame[3] = {0.20f, 0.22f, 0.34f};
-                static const float kFrameLit[3] = {0.36f, 0.40f, 0.58f};
-                static const float kTabOn[3] = {0.30f, 0.34f, 0.50f};
-                static const float kButton[3] = {0.24f, 0.27f, 0.40f};
-
-                const auto button = [&](const std::string& label, float left, float bottom, float high,
-                                        bool lit, int kind, int value)
-                {
-                    const float wide = widthOf(label, high);
-                    const float padding = high * 0.45f / windowAspect;
-                    const float boxLeft = left - padding;
-                    const float boxWide = wide + padding * 2.0f;
-                    const float boxHigh = high * 1.5f;
-                    const float boxBottom = bottom - high * 0.22f;
-                    const bool under = havePointer && pointerX >= boxLeft && pointerX < boxLeft + boxWide &&
-                                       pointerY >= boxBottom && pointerY < boxBottom + boxHigh;
-
-                    quad(boxLeft, boxBottom, boxWide, boxHigh, 0, 0, lit ? kTabOn : kButton,
-                         lit ? 0.95f : (under ? 0.85f : 0.55f));
-                    write(label, left, bottom, high, lit || under ? kHudBright : kHudDim, 1.0f);
-                    inventoryHits.push_back(InventoryHit{boxLeft, boxBottom, boxWide, boxHigh, kind, value});
-                    return boxLeft + boxWide;
-                };
-
-
-                // The toolbar, above the vitals and always on.
-                //
-                // Placed from the same numbers the vitals are: three bars from
-                // -0.95 upward, so the row sits clear of them whatever the
-                // interface is scaled to rather than at a constant somebody
-                // has to keep in step.
-                const float vitalLine =
-                    static_cast<float>(textFont.cell) * 2.0f * uiScale / static_cast<float>(height);
-                const float vitalText = vitalLine * 0.62f;
-                const float vitalBar = vitalText * 1.45f;
-                const float vitalGap = vitalText * 0.22f;
-                const float vitalsTop = -0.95f + 3.0f * (vitalBar + vitalGap);
-
-                const float toolHigh = vitalBar * 1.10f;
-                const float toolWide = toolHigh / windowAspect;
-                const float toolGap = toolWide * 0.30f;
-                const float toolBottom = vitalsTop + vitalGap;
-
-                const auto tool = [&](int cell, float left, bool lit, int kind)
-                {
-                    const bool under = havePointer && pointerX >= left && pointerX < left + toolWide &&
-                                       pointerY >= toolBottom && pointerY < toolBottom + toolHigh;
-                    quad(left, toolBottom, toolWide, toolHigh, 0, 0, lit ? kTabOn : kButton,
-                         lit ? 0.90f : (under ? 0.75f : 0.45f));
-
-                    const float inset = toolHigh * 0.16f;
-                    quad(left + inset / windowAspect, toolBottom + inset,
-                         toolWide - inset * 2.0f / windowAspect, toolHigh - inset * 2.0f, 1, cell,
-                         kHudBright, lit || under ? 1.0f : 0.75f);
-                    inventoryHits.push_back(
-                        InventoryHit{left, toolBottom, toolWide, toolHigh, kind, 0});
-                };
-
-                // Rightmost first, so the row grows leftward from the vitals'
-                // own right edge and the two line up.
-                float toolPen = 0.97f - toolWide;
-                tool(kCogIconCell, toolPen, optionsOpen, 4);
-                toolPen -= toolWide + toolGap;
-                tool(kBagIconCell, toolPen, inventoryOpen, 3);
-
-                if (inventoryOpen)
-                {
-                    const auto wrap = [](int value, int count)
-                    { return count <= 0 ? 0 : ((value % count) + count) % count; };
-
-                    // The bag is resolved before any geometry, because how many
-                    // slots it has decides how tall the grid is.
-                    int container = -1;
-                    int slots = 0;
-                    if (!tabs.empty())
-                    {
-                        inventoryTab = wrap(inventoryTab, static_cast<int>(tabs.size()));
-                        container = tabs[static_cast<size_t>(inventoryTab)];
-                        slots = sizes[static_cast<size_t>(container)];
-                    }
-
-                    // Eight across, and as many rows down as the bag needs.
-                    //
-                    // The tab is already the bag, so paging inside one is a second
-                    // axis that neither this game nor the one the layout is
-                    // borrowed from has. The slot shrinks to fit instead, and only
-                    // a container too tall for the window still pages - which for
-                    // an eighty-slot inventory it never does.
-                    const int columns = 8;
-                    const int rowsNeeded = std::max(1, (slots + columns - 1) / columns);
-                    const int rowsShown = std::min(rowsNeeded, 12);
-                    const int perPage = columns * rowsShown;
-                    const int pages = std::max(1, (rowsNeeded + rowsShown - 1) / rowsShown);
-                    inventoryPage = wrap(inventoryPage, pages);
-
-                    // How big a slot can be and still leave the grid inside the
-                    // window, across and down.
-                    //
-                    // Not scaled by uiScale, which is not a "make it bigger" knob:
-                    // it is the setting multiplied by pixels over points, so it is
-                    // 2 on a retina display and 1 on an ordinary one. Multiplying
-                    // a measurement that is already in normalised device
-                    // coordinates by it made the panel take half the screen here
-                    // and a quarter of it on a machine without the doubling - the
-                    // same code, two different panels.
-                    const float gap = 0.14f;
-                    const float widest = 0.96f;
-                    const float tallest = 1.22f;
-                    const float slotHigh =
-                        std::min(tallest / (static_cast<float>(rowsShown) * (1.0f + gap)),
-                                 widest / (static_cast<float>(columns) / windowAspect +
-                                           gap * static_cast<float>(columns - 1)));
-                    const float slotWide = slotHigh / windowAspect;
-                    const float slotGap = slotHigh * gap;
-                    const float textHigh = std::clamp(slotHigh * 0.30f, 0.026f, 0.042f);
-                    const float gridWide = columns * slotWide + (columns - 1) * slotGap;
-                    const float gridHigh = rowsShown * slotHigh + (rowsShown - 1) * slotGap;
-                    const float padX = std::max(slotWide * 0.55f, textHigh);
-                    const float padTop = textHigh * 4.2f;
-                    const float padBottom = textHigh * 3.0f;
-                    const float panelWide = gridWide + padX * 2.0f;
-                    const float panelHigh = gridHigh + padTop + padBottom;
-                    const float panelLeft = -panelWide * 0.5f;
-                    const float panelBottom = -panelHigh * 0.5f;
-
-                    quad(panelLeft, panelBottom, panelWide, panelHigh, 0, 0, kPanel, 0.90f);
-
-                    if (tabs.empty())
-                    {
-                        write("Waiting for the server to send the bags", panelLeft + padX,
-                              panelBottom + panelHigh * 0.5f, textHigh, kHudDim, 1.0f);
-                    }
-                    else
-                    {
-                        // What is actually in this bag, by slot number.
-                        std::map<int, mh::ViewerLink::InventorySlot> held;
-                        for (const mh::ViewerLink::InventorySlot& entry : link->inventory())
-                        {
-                            if (entry.container == container)
-                            {
-                                held[entry.slot] = entry;
-                            }
-                        }
-
-                        const int used = static_cast<int>(held.size());
-                        const float titleY = panelBottom + panelHigh - textHigh * 1.6f;
-                        write(std::string{kContainerNames[container]} + "   " + std::to_string(used) + " / " +
-                                  std::to_string(slots),
-                              panelLeft + padX, titleY, textHigh, kHudBright, 1.0f);
-
-                        // Page arrows, on the right of the title, and only when
-                        // there is a page to go to. A bag that fits shows none.
-                        if (pages > 1)
-                        {
-                            const std::string counter =
-                                std::to_string(inventoryPage + 1) + " / " + std::to_string(pages);
-                            const float counterWide = widthOf(counter, textHigh);
-                            const float arrowWide = widthOf(">", textHigh) + textHigh * 0.9f / windowAspect;
-                            const float rightEdge = panelLeft + panelWide - padX;
-                            const float leftEdge =
-                                rightEdge - (arrowWide * 2.0f + counterWide + textHigh * 1.2f / windowAspect);
-
-                            const float afterPrev = button("<", leftEdge, titleY, textHigh, false, 1, -1);
-                            write(counter, afterPrev + textHigh * 0.4f / windowAspect, titleY, textHigh,
-                                  kHudDim, 1.0f);
-                            button(">", afterPrev + textHigh * 0.4f / windowAspect + counterWide +
-                                            textHigh * 0.5f / windowAspect,
-                                   titleY, textHigh, false, 1, 1);
-                        }
-
-                        // The bag tabs, each one clickable.
-                        const float tabY = titleY - textHigh * 2.0f;
-                        float tabPen = panelLeft + padX;
-                        for (size_t i = 0; i < tabs.size(); ++i)
-                        {
-                            const std::string label{kContainerNames[tabs[i]]};
-                            const float wide = widthOf(label, textHigh);
-                            if (tabPen + wide > panelLeft + panelWide - padX)
-                            {
-                                break;
-                            }
-
-                            tabPen = button(label, tabPen, tabY, textHigh, static_cast<int>(i) == inventoryTab,
-                                            0, static_cast<int>(i)) +
-                                     textHigh * 0.5f / windowAspect;
-                        }
-
-                        // The order the grid is shown in. One button that cycles,
-                        // because five of them along the top would take more room
-                        // than the tabs.
-                        static const char* kOrderNames[5] = {"Slot", "Name", "Type", "Amount", "Level"};
-                        const int order = static_cast<int>(inventoryOrder);
-                        const std::string orderLabel = std::string{"Sort: "} + kOrderNames[order];
-                        button(orderLabel,
-                               panelLeft + panelWide - padX - widthOf(orderLabel, textHigh), tabY, textHigh,
-                               order != 0, 2, 0);
-
-                        // In slot order the grid is the bag as the server laid it
-                        // out, gaps and all. In any other the items are packed to
-                        // the front and the leftover slots trail behind - sorting
-                        // around holes would show an order nobody asked for.
-                        std::vector<mh::ViewerLink::InventorySlot> shown;
-                        if (inventoryOrder != InventoryOrder::Slot)
-                        {
-                            for (const auto& entry : held)
-                            {
-                                shown.push_back(entry.second);
-                            }
-
-                            const auto facingOf = [&](uint16_t itemId) -> const ItemFacing*
-                            {
-                                const auto found = itemFacing.find(itemId);
-                                return found == itemFacing.end() ? nullptr : &found->second;
-                            };
-
-                            std::stable_sort(
-                                shown.begin(), shown.end(),
-                                [&](const mh::ViewerLink::InventorySlot& a,
-                                    const mh::ViewerLink::InventorySlot& b)
-                                {
-                                    const ItemFacing* left = facingOf(a.itemId);
-                                    const ItemFacing* right = facingOf(b.itemId);
-
-                                    // Anything the client has not described yet
-                                    // sinks, rather than sorting as a blank name
-                                    // and taking the front.
-                                    if ((left != nullptr) != (right != nullptr))
-                                    {
-                                        return left != nullptr;
-                                    }
-                                    if (!left)
-                                    {
-                                        return a.slot < b.slot;
-                                    }
-
-                                    switch (inventoryOrder)
-                                    {
-                                    case InventoryOrder::Type:
-                                        if (left->type != right->type)
-                                        {
-                                            return left->type < right->type;
-                                        }
-                                        break;
-                                    case InventoryOrder::Amount:
-                                        if (a.count != b.count)
-                                        {
-                                            return a.count > b.count;
-                                        }
-                                        break;
-                                    case InventoryOrder::Level:
-                                        if (left->level != right->level)
-                                        {
-                                            return left->level > right->level;
-                                        }
-                                        break;
-                                    default:
-                                        break;
-                                    }
-
-                                    return left->name < right->name;
-                                });
-                        }
-
-                        const float gridLeft = panelLeft + padX;
-                        const float gridTop = panelBottom + panelHigh - padTop;
-
-                        std::string hovered;
-                        std::string hoveredDetail;
-
-                        for (int cellIndex = 0; cellIndex < perPage; ++cellIndex)
-                        {
-                            const int position = inventoryPage * perPage + cellIndex;
-                            if (position >= slots)
-                            {
-                                break;
-                            }
-
-                            const int col = cellIndex % columns;
-                            const int row = cellIndex / columns;
-                            const float left = gridLeft + static_cast<float>(col) * (slotWide + slotGap);
-                            const float bottom = gridTop - slotHigh - static_cast<float>(row) * (slotHigh + slotGap);
-
-                            const bool under = havePointer && pointerX >= left && pointerX < left + slotWide &&
-                                               pointerY >= bottom && pointerY < bottom + slotHigh;
-                            quad(left, bottom, slotWide, slotHigh, 0, 0, under ? kFrameLit : kFrame, 0.85f);
-
-                            const mh::ViewerLink::InventorySlot* entry = nullptr;
-                            if (inventoryOrder == InventoryOrder::Slot)
-                            {
-                                const auto found = held.find(position);
-                                entry = found == held.end() ? nullptr : &found->second;
-                            }
-                            else if (position < static_cast<int>(shown.size()))
-                            {
-                                entry = &shown[static_cast<size_t>(position)];
-                            }
-
-                            if (!entry)
-                            {
-                                continue;
-                            }
-
-                            const auto facing = itemFacing.find(entry->itemId);
-                            if (facing != itemFacing.end() && facing->second.cell >= 0)
-                            {
-                                const float inset = slotHigh * 0.08f;
-                                quad(left + inset / windowAspect, bottom + inset,
-                                     slotWide - inset * 2.0f / windowAspect, slotHigh - inset * 2.0f, 1,
-                                     facing->second.cell, kHudBright, 1.0f);
-                            }
-
-                            // The count, in the top right corner of the icon, the
-                            // way every game that stacks anything writes it. A one
-                            // is left off: a single item saying "1" is noise.
-                            if (entry->count > 1)
-                            {
-                                const std::string count = std::to_string(entry->count);
-                                const float countHigh = slotHigh * 0.30f;
-                                const float countWide = widthOf(count, countHigh);
-                                write(count, left + slotWide - countWide - slotHigh * 0.06f / windowAspect,
-                                      bottom + slotHigh - countHigh - slotHigh * 0.04f, countHigh, kHudBright,
-                                      1.0f);
-                            }
-
-                            if (under && facing != itemFacing.end())
-                            {
-                                hovered = facing->second.name;
-                                hoveredDetail = facing->second.description;
-                                const size_t stop = hoveredDetail.find('\n');
-                                if (stop != std::string::npos)
-                                {
-                                    hoveredDetail = hoveredDetail.substr(0, stop);
-                                }
-                            }
-                        }
-
-                        if (!hovered.empty())
-                        {
-                            write(hovered, panelLeft + padX, panelBottom + textHigh * 1.6f, textHigh,
-                                  kHudBright, 1.0f);
-                            write(hoveredDetail, panelLeft + padX, panelBottom + textHigh * 0.4f,
-                                  textHigh * 0.85f, kHudDim, 1.0f);
-                        }
-                        else
-                        {
-                            write("click a bag or a heading, or press I to close", panelLeft + padX,
-                                  panelBottom + textHigh * 0.8f, textHigh * 0.85f, kHint, 1.0f);
-                        }
-                    }
-
-                }
-
-                if (quads > 0)
-                {
-                    inv.counts[0] = static_cast<float>(quads);
-                    inv.counts[1] = windowAspect;
-                    inv.counts[2] = static_cast<float>(mh::kIconAtlasCells);
-                    inv.counts[3] = static_cast<float>(mh::kIconAtlasCells);
-                    inv.font[0] = static_cast<float>(textFont.columns);
-                    inv.font[1] = static_cast<float>(textFont.cell);
-                    inv.font[2] = static_cast<float>(textFont.width);
-                    inv.font[3] = static_cast<float>(textFont.height);
-                    queue.WriteBuffer(inventoryUniformBuffer, 0, &inv, sizeof(inv));
-                    pass.SetPipeline(inventoryPipeline);
-                    pass.SetBindGroup(0, inventoryBindGroup);
-                    pass.Draw(6, static_cast<uint32_t>(quads));
-                }
-            }
 
             // Not gated on there being entities. Our own nameplate is laid out
             // in here before the entity loop, and it does not come from the
@@ -10361,6 +10008,599 @@ constexpr float kGravity = 26.0f;
             }
 
         }
+
+            // The bags, drawn after the nameplates rather than before.
+            //
+            // Every one of these passes writes no depth and compares
+            // Always, so what is on top is decided purely by the order
+            // they are issued in. Drawn first, the panel had names
+            // punching through it - a nameplate belongs to the world and
+            // the world is what a panel is covering.
+
+            // Recomputed rather than carried: the flag above belongs to the
+            // block that draws the world, and this now sits outside it.
+            const bool panelHud = link ? link->hud() : true;
+            if (inventoryPipeline && link && panelHud)
+            {
+                InventoryUniforms inv{};
+                int quads = 0;
+
+                // Its own, rather than the HUD's: that one is scoped to the
+                // block above and this panel is a sibling of it, not a part.
+                const float windowAspect = static_cast<float>(width) / static_cast<float>(height);
+                static const float kHint[3] = {0.42f, 0.46f, 0.56f};
+
+                const auto quad = [&](float left, float bottom, float wide, float high, int mode,
+                                      int cell, const float rgb[3], float alpha)
+                {
+                    if (quads >= mh::kInventoryQuads)
+                    {
+                        return;
+                    }
+                    inv.rects[quads][0] = left;
+                    inv.rects[quads][1] = bottom;
+                    inv.rects[quads][2] = wide;
+                    inv.rects[quads][3] = high;
+                    inv.looks[quads][0] = static_cast<float>(mode);
+                    inv.looks[quads][1] = static_cast<float>(cell);
+                    inv.tints[quads][0] = rgb[0];
+                    inv.tints[quads][1] = rgb[1];
+                    inv.tints[quads][2] = rgb[2];
+                    inv.tints[quads][3] = alpha;
+                    ++quads;
+                };
+
+                // Letters are quads too, one per glyph, walked with the same
+                // advances the HUD uses so a count sits where it would there.
+                const float cellSize = static_cast<float>(textFont.cell);
+                const auto write = [&](const std::string& line, float left, float bottom,
+                                       float high, const float rgb[3], float alpha)
+                {
+                    const float wide = high / windowAspect;
+                    float pen = left;
+                    for (char raw : line)
+                    {
+                        quad(pen, bottom, wide, high, 2, static_cast<int>(textFont.indexOf(raw)), rgb, alpha);
+                        pen += (textFont.advanceOf(raw) / cellSize) * wide;
+                    }
+                    return pen - left;
+                };
+
+                const auto widthOf = [&](const std::string& line, float high)
+                {
+                    const float wide = high / windowAspect;
+                    float pen = 0.0f;
+                    for (char raw : line)
+                    {
+                        pen += (textFont.advanceOf(raw) / cellSize) * wide;
+                    }
+                    return pen;
+                };
+
+                // Only containers the server gave slots to. A wardrobe nobody
+                // has bought has none, and offering an empty tab for it would
+                // be inventing storage.
+                static const char* kContainerNames[18] = {
+                    "Inventory", "Mog Safe", "Storage",   "Temporary", "Mog Locker", "Satchel",
+                    "Sack",      "Case",     "Wardrobe",  "Mog Safe 2", "Wardrobe 2", "Wardrobe 3",
+                    "Wardrobe 4", "Wardrobe 5", "Wardrobe 6", "Wardrobe 7", "Wardrobe 8", "Recycle"};
+
+                const std::array<uint16_t, 18> sizes = link->containerSizes();
+                std::vector<int> tabs;
+                for (int i = 0; i < 18; ++i)
+                {
+                    if (sizes[static_cast<size_t>(i)] > 0)
+                    {
+                        tabs.push_back(i);
+                    }
+                }
+
+                inventoryHits.clear();
+
+                float pointerX = 0.0f;
+                float pointerY = 0.0f;
+                float mouseX = 0.0f;
+                float mouseY = 0.0f;
+                SDL_GetMouseState(&mouseX, &mouseY);
+                const bool havePointer = pointerNdc(mouseX, mouseY, pointerX, pointerY);
+
+                // A label with a box behind it that can be clicked. Returns
+                // where it ended so a row of them can be laid out.
+                static const float kPanel[3] = {0.05f, 0.06f, 0.12f};
+                static const float kFrame[3] = {0.20f, 0.22f, 0.34f};
+                static const float kFrameLit[3] = {0.36f, 0.40f, 0.58f};
+                static const float kTabOn[3] = {0.30f, 0.34f, 0.50f};
+                static const float kButton[3] = {0.24f, 0.27f, 0.40f};
+
+                const auto button = [&](const std::string& label, float left, float bottom, float high,
+                                        bool lit, int kind, int value)
+                {
+                    const float wide = widthOf(label, high);
+                    const float padding = high * 0.45f / windowAspect;
+                    const float boxLeft = left - padding;
+                    const float boxWide = wide + padding * 2.0f;
+                    const float boxHigh = high * 1.5f;
+                    const float boxBottom = bottom - high * 0.22f;
+                    const bool under = havePointer && pointerX >= boxLeft && pointerX < boxLeft + boxWide &&
+                                       pointerY >= boxBottom && pointerY < boxBottom + boxHigh;
+
+                    quad(boxLeft, boxBottom, boxWide, boxHigh, 0, 0, lit ? kTabOn : kButton,
+                         lit ? 0.95f : (under ? 0.85f : 0.55f));
+                    write(label, left, bottom, high, lit || under ? kHudBright : kHudDim, 1.0f);
+                    inventoryHits.push_back(InventoryHit{boxLeft, boxBottom, boxWide, boxHigh, kind, value});
+                    return boxLeft + boxWide;
+                };
+
+
+                // The toolbar, above the vitals and always on.
+                //
+                // Placed from the same numbers the vitals are: three bars from
+                // -0.95 upward, so the row sits clear of them whatever the
+                // interface is scaled to rather than at a constant somebody
+                // has to keep in step.
+                const float vitalLine =
+                    static_cast<float>(textFont.cell) * 2.0f * uiScale / static_cast<float>(height);
+                const float vitalText = vitalLine * 0.62f;
+                const float vitalBar = vitalText * 1.45f;
+                const float vitalGap = vitalText * 0.22f;
+                const float vitalsTop = -0.95f + 3.0f * (vitalBar + vitalGap);
+
+                const float toolHigh = vitalBar * 1.10f;
+                const float toolWide = toolHigh / windowAspect;
+                const float toolGap = toolWide * 0.30f;
+                const float toolBottom = vitalsTop + vitalGap;
+
+                const auto tool = [&](int cell, float left, bool lit, int kind)
+                {
+                    const bool under = havePointer && pointerX >= left && pointerX < left + toolWide &&
+                                       pointerY >= toolBottom && pointerY < toolBottom + toolHigh;
+                    quad(left, toolBottom, toolWide, toolHigh, 0, 0, lit ? kTabOn : kButton,
+                         lit ? 0.90f : (under ? 0.75f : 0.45f));
+
+                    const float inset = toolHigh * 0.16f;
+                    quad(left + inset / windowAspect, toolBottom + inset,
+                         toolWide - inset * 2.0f / windowAspect, toolHigh - inset * 2.0f, 1, cell,
+                         kHudBright, lit || under ? 1.0f : 0.75f);
+                    inventoryHits.push_back(
+                        InventoryHit{left, toolBottom, toolWide, toolHigh, kind, 0});
+                };
+
+                // Rightmost first, so the row grows leftward from the vitals'
+                // own right edge and the two line up.
+                float toolPen = 0.97f - toolWide;
+                tool(kCogIconCell, toolPen, optionsOpen, 4);
+                toolPen -= toolWide + toolGap;
+                tool(kBagIconCell, toolPen, inventoryOpen, 3);
+
+                if (inventoryOpen)
+                {
+                    const auto wrap = [](int value, int count)
+                    { return count <= 0 ? 0 : ((value % count) + count) % count; };
+
+                    // The bag is resolved before any geometry, because how many
+                    // slots it has decides how tall the grid is.
+                    int container = -1;
+                    int slots = 0;
+                    if (!tabs.empty())
+                    {
+                        inventoryTab = wrap(inventoryTab, static_cast<int>(tabs.size()));
+                        container = tabs[static_cast<size_t>(inventoryTab)];
+                        slots = sizes[static_cast<size_t>(container)];
+                    }
+
+                    // Eight across, and as many rows down as the bag needs.
+                    //
+                    // The tab is already the bag, so paging inside one is a second
+                    // axis that neither this game nor the one the layout is
+                    // borrowed from has. The slot shrinks to fit instead, and only
+                    // a container too tall for the window still pages - which for
+                    // an eighty-slot inventory it never does.
+                    const int columns = 8;
+                    const int rowsNeeded = std::max(1, (slots + columns - 1) / columns);
+                    const int rowsShown = std::min(rowsNeeded, 12);
+                    const int perPage = columns * rowsShown;
+                    const int pages = std::max(1, (rowsNeeded + rowsShown - 1) / rowsShown);
+                    inventoryPage = wrap(inventoryPage, pages);
+
+                    // How big a slot can be and still leave the grid inside the
+                    // window, across and down.
+                    //
+                    // Not scaled by uiScale, which is not a "make it bigger" knob:
+                    // it is the setting multiplied by pixels over points, so it is
+                    // 2 on a retina display and 1 on an ordinary one. Multiplying
+                    // a measurement that is already in normalised device
+                    // coordinates by it made the panel take half the screen here
+                    // and a quarter of it on a machine without the doubling - the
+                    // same code, two different panels.
+                    const float gap = 0.14f;
+                    const float widest = 0.80f;
+                    const float tallest = 1.05f;
+
+                    // Three limits, and the smallest wins: what fits across,
+                    // what fits down, and how big a slot is worth being.
+                    // Without the last one a bag of thirty gets enormous slots
+                    // purely because there is room for them.
+                    const float roomiest = 0.098f;
+                    const float slotHigh =
+                        std::min({roomiest,
+                                  tallest / (static_cast<float>(rowsShown) * (1.0f + gap)),
+                                  widest / (static_cast<float>(columns) / windowAspect +
+                                            gap * static_cast<float>(columns - 1))});
+                    const float slotWide = slotHigh / windowAspect;
+                    const float slotGap = slotHigh * gap;
+                    const float textHigh = std::clamp(slotHigh * 0.30f, 0.026f, 0.042f);
+                    const float gridWide = columns * slotWide + (columns - 1) * slotGap;
+                    const float gridHigh = rowsShown * slotHigh + (rowsShown - 1) * slotGap;
+                    const float padX = std::max(slotWide * 0.55f, textHigh);
+                    const float padTop = textHigh * 4.2f;
+                    const float padBottom = textHigh * 8.2f;
+                    const float panelWide = gridWide + padX * 2.0f;
+                    const float panelHigh = gridHigh + padTop + padBottom;
+                    const float panelLeft = -panelWide * 0.5f;
+                    const float panelBottom = -panelHigh * 0.5f;
+
+                    quad(panelLeft, panelBottom, panelWide, panelHigh, 0, 0, kPanel, 0.90f);
+
+                    if (tabs.empty())
+                    {
+                        write("Waiting for the server to send the bags", panelLeft + padX,
+                              panelBottom + panelHigh * 0.5f, textHigh, kHudDim, 1.0f);
+                    }
+                    else
+                    {
+                        // What is actually in this bag, by slot number.
+                        //
+                        // Except the gil, which is not a thing in a bag even
+                        // though the server keeps it in one: item 65535 in
+                        // inventory slot zero, which is exactly where getGil
+                        // reads it from. No item DAT holds it - they stop at
+                        // 0x59FF - so it can never have an icon, and drawing it
+                        // as a slot gives a count with an empty square under
+                        // it. Retail puts it in a box of its own; so does this.
+                        constexpr uint16_t kGilItem = 65535;
+                        std::map<int, mh::ViewerLink::InventorySlot> held;
+                        uint32_t gil = 0;
+                        for (const mh::ViewerLink::InventorySlot& entry : link->inventory())
+                        {
+                            if (entry.itemId == kGilItem)
+                            {
+                                gil = entry.count;
+                                continue;
+                            }
+
+                            if (entry.container == container)
+                            {
+                                held[entry.slot] = entry;
+                            }
+                        }
+
+                        contextContainer = container;
+
+                        const int used = static_cast<int>(held.size());
+                        const float titleY = panelBottom + panelHigh - textHigh * 1.6f;
+                        write(std::string{kContainerNames[container]} + "   " + std::to_string(used) + " / " +
+                                  std::to_string(slots),
+                              panelLeft + padX, titleY, textHigh, kHudBright, 1.0f);
+
+                        // Page arrows, on the right of the title, and only when
+                        // there is a page to go to. A bag that fits shows none.
+                        if (pages > 1)
+                        {
+                            const std::string counter =
+                                std::to_string(inventoryPage + 1) + " / " + std::to_string(pages);
+                            const float counterWide = widthOf(counter, textHigh);
+                            const float arrowWide = widthOf(">", textHigh) + textHigh * 0.9f / windowAspect;
+                            const float rightEdge = panelLeft + panelWide - padX;
+                            const float leftEdge =
+                                rightEdge - (arrowWide * 2.0f + counterWide + textHigh * 1.2f / windowAspect);
+
+                            const float afterPrev = button("<", leftEdge, titleY, textHigh, false, 1, -1);
+                            write(counter, afterPrev + textHigh * 0.4f / windowAspect, titleY, textHigh,
+                                  kHudDim, 1.0f);
+                            button(">", afterPrev + textHigh * 0.4f / windowAspect + counterWide +
+                                            textHigh * 0.5f / windowAspect,
+                                   titleY, textHigh, false, 1, 1);
+                        }
+
+                        // The bag tabs, each one clickable.
+                        const float tabY = titleY - textHigh * 2.0f;
+                        float tabPen = panelLeft + padX;
+                        for (size_t i = 0; i < tabs.size(); ++i)
+                        {
+                            const std::string label{kContainerNames[tabs[i]]};
+                            const float wide = widthOf(label, textHigh);
+                            if (tabPen + wide > panelLeft + panelWide - padX)
+                            {
+                                break;
+                            }
+
+                            tabPen = button(label, tabPen, tabY, textHigh, static_cast<int>(i) == inventoryTab,
+                                            0, static_cast<int>(i)) +
+                                     textHigh * 0.5f / windowAspect;
+                        }
+
+                        // The order the grid is shown in. One button that cycles,
+                        // because five of them along the top would take more room
+                        // than the tabs.
+                        static const char* kOrderNames[5] = {"Slot", "Name", "Type", "Amount", "Level"};
+                        const int order = static_cast<int>(inventoryOrder);
+                        const std::string orderLabel = std::string{"Sort: "} + kOrderNames[order];
+                        button(orderLabel,
+                               panelLeft + panelWide - padX - widthOf(orderLabel, textHigh), tabY, textHigh,
+                               order != 0, 2, 0);
+
+                        // In slot order the grid is the bag as the server laid it
+                        // out, gaps and all. In any other the items are packed to
+                        // the front and the leftover slots trail behind - sorting
+                        // around holes would show an order nobody asked for.
+                        std::vector<mh::ViewerLink::InventorySlot> shown;
+                        if (inventoryOrder != InventoryOrder::Slot)
+                        {
+                            for (const auto& entry : held)
+                            {
+                                shown.push_back(entry.second);
+                            }
+
+                            const auto facingOf = [&](uint16_t itemId) -> const ItemFacing*
+                            {
+                                const auto found = itemFacing.find(itemId);
+                                return found == itemFacing.end() ? nullptr : &found->second;
+                            };
+
+                            std::stable_sort(
+                                shown.begin(), shown.end(),
+                                [&](const mh::ViewerLink::InventorySlot& a,
+                                    const mh::ViewerLink::InventorySlot& b)
+                                {
+                                    const ItemFacing* left = facingOf(a.itemId);
+                                    const ItemFacing* right = facingOf(b.itemId);
+
+                                    // Anything the client has not described yet
+                                    // sinks, rather than sorting as a blank name
+                                    // and taking the front.
+                                    if ((left != nullptr) != (right != nullptr))
+                                    {
+                                        return left != nullptr;
+                                    }
+                                    if (!left)
+                                    {
+                                        return a.slot < b.slot;
+                                    }
+
+                                    switch (inventoryOrder)
+                                    {
+                                    case InventoryOrder::Type:
+                                        if (left->type != right->type)
+                                        {
+                                            return left->type < right->type;
+                                        }
+                                        break;
+                                    case InventoryOrder::Amount:
+                                        if (a.count != b.count)
+                                        {
+                                            return a.count > b.count;
+                                        }
+                                        break;
+                                    case InventoryOrder::Level:
+                                        if (left->level != right->level)
+                                        {
+                                            return left->level > right->level;
+                                        }
+                                        break;
+                                    default:
+                                        break;
+                                    }
+
+                                    return left->name < right->name;
+                                });
+                        }
+
+                        const float gridLeft = panelLeft + padX;
+                        const float gridTop = panelBottom + panelHigh - padTop;
+
+                        // Where the right click menu goes, and what it is
+                        // about. Filled by the grid below; the menu is drawn
+                        // after it so it lands on top of the slots.
+                        float contextLeft = 0.0f;
+                        float contextBottom = 0.0f;
+                        uint16_t contextItem = 0;
+
+                        std::string hovered;
+                        std::vector<std::string> hoveredDetail;
+                        int hoveredLevel = 0;
+                        int hoveredSlots = 0;
+                        int hoveredAt = -1;
+
+                        for (int cellIndex = 0; cellIndex < perPage; ++cellIndex)
+                        {
+                            const int position = inventoryPage * perPage + cellIndex;
+                            if (position >= slots)
+                            {
+                                break;
+                            }
+
+                            const int col = cellIndex % columns;
+                            const int row = cellIndex / columns;
+                            const float left = gridLeft + static_cast<float>(col) * (slotWide + slotGap);
+                            const float bottom = gridTop - slotHigh - static_cast<float>(row) * (slotHigh + slotGap);
+
+                            const bool under = havePointer && pointerX >= left && pointerX < left + slotWide &&
+                                               pointerY >= bottom && pointerY < bottom + slotHigh;
+                            quad(left, bottom, slotWide, slotHigh, 0, 0, under ? kFrameLit : kFrame, 0.85f);
+
+                            const mh::ViewerLink::InventorySlot* entry = nullptr;
+                            if (inventoryOrder == InventoryOrder::Slot)
+                            {
+                                const auto found = held.find(position);
+                                entry = found == held.end() ? nullptr : &found->second;
+                            }
+                            else if (position < static_cast<int>(shown.size()))
+                            {
+                                entry = &shown[static_cast<size_t>(position)];
+                            }
+
+                            if (!entry)
+                            {
+                                continue;
+                            }
+
+                            inventoryHits.push_back(
+                                InventoryHit{left, bottom, slotWide, slotHigh, 8, entry->slot});
+                            if (entry->slot == contextSlot)
+                            {
+                                contextLeft = left;
+                                contextBottom = bottom;
+                                contextItem = entry->itemId;
+                            }
+
+                            const auto facing = itemFacing.find(entry->itemId);
+                            if (facing != itemFacing.end() && facing->second.cell >= 0)
+                            {
+                                const float inset = slotHigh * 0.08f;
+                                quad(left + inset / windowAspect, bottom + inset,
+                                     slotWide - inset * 2.0f / windowAspect, slotHigh - inset * 2.0f, 1,
+                                     facing->second.cell, kHudBright, 1.0f);
+                            }
+
+                            // The count, in the top right corner of the icon, the
+                            // way every game that stacks anything writes it. A one
+                            // is left off: a single item saying "1" is noise.
+                            if (entry->count > 1)
+                            {
+                                const std::string count = std::to_string(entry->count);
+                                const float countHigh = slotHigh * 0.30f;
+                                const float countWide = widthOf(count, countHigh);
+                                write(count, left + slotWide - countWide - slotHigh * 0.06f / windowAspect,
+                                      bottom + slotHigh - countHigh - slotHigh * 0.04f, countHigh, kHudBright,
+                                      1.0f);
+                            }
+
+                            if (under && facing != itemFacing.end())
+                            {
+                                hovered = facing->second.name;
+                                hoveredLevel = facing->second.level;
+                                hoveredSlots = facing->second.slots;
+                                hoveredAt = entry->slot;
+
+                                hoveredDetail.clear();
+                                const std::string& whole = facing->second.description;
+                                size_t from = 0;
+                                while (from <= whole.size())
+                                {
+                                    const size_t stop = whole.find('\n', from);
+                                    hoveredDetail.push_back(whole.substr(
+                                        from, stop == std::string::npos ? std::string::npos : stop - from));
+                                    if (stop == std::string::npos)
+                                    {
+                                        break;
+                                    }
+                                    from = stop + 1;
+                                }
+                            }
+                        }
+
+                        // The right click menu, over the slots rather than
+                        // under them.
+                        //
+                        // What it offers is decided from the item every frame,
+                        // not from what was true when it opened: an item the
+                        // server has since taken away leaves nothing to look
+                        // up, and the menu closes rather than offering to equip
+                        // something that is gone.
+                        if (contextSlot >= 0 && contextItem != 0)
+                        {
+                            const auto facing = itemFacing.find(contextItem);
+                            const bool wearable = facing != itemFacing.end() && facing->second.slots != 0;
+
+                            float menuY = contextBottom - textHigh * 1.5f;
+                            const float menuX = contextLeft + slotWide * 0.35f;
+
+                            if (wearable)
+                            {
+                                // The lowest slot the item will go in. A ring
+                                // names two and either will do; the server
+                                // decides whether the one asked for is free.
+                                int equipSlot = 0;
+                                while (equipSlot < 16 &&
+                                       (facing->second.slots & (1 << equipSlot)) == 0)
+                                {
+                                    ++equipSlot;
+                                }
+
+                                button("Equip", menuX, menuY, textHigh, false, 5, equipSlot);
+                                menuY -= textHigh * 1.8f;
+                            }
+
+                            // Asked twice, because there is no undo and no
+                            // confirmation anywhere on the wire: the server
+                            // destroys the item the moment the packet lands.
+                            button(contextConfirmDrop ? "Really drop?" : "Drop", menuX, menuY, textHigh,
+                                   contextConfirmDrop, 6, 0);
+                            menuY -= textHigh * 1.8f;
+                            button("Cancel", menuX, menuY, textHigh, false, 7, 0);
+                        }
+                        else if (contextSlot >= 0)
+                        {
+                            contextSlot = -1;
+                            contextConfirmDrop = false;
+                        }
+
+                        // The whole description, not its first line. The DAT
+                        // writes its own breaks and the retail tooltip keeps
+                        // them, so the lines are already the length the text
+                        // was written for.
+                        if (!hovered.empty())
+                        {
+                            float lineY = panelBottom + padBottom - textHigh * 1.5f;
+                            write(hovered, panelLeft + padX, lineY, textHigh, kHudBright, 1.0f);
+                            lineY -= textHigh * 1.35f;
+
+                            if (hoveredLevel > 0)
+                            {
+                                write("Lv" + std::to_string(hoveredLevel), panelLeft + padX, lineY,
+                                      textHigh * 0.85f, kHudDim, 1.0f);
+                                lineY -= textHigh * 1.15f;
+                            }
+
+                            for (const std::string& detail : hoveredDetail)
+                            {
+                                if (lineY < panelBottom + textHigh * 0.2f)
+                                {
+                                    break;
+                                }
+                                write(detail, panelLeft + padX, lineY, textHigh * 0.85f, kHudDim, 1.0f);
+                                lineY -= textHigh * 1.15f;
+                            }
+                        }
+                        else
+                        {
+                            write(gil > 0 ? std::to_string(gil) + " gil" : std::string{"No gil"},
+                                  panelLeft + padX, panelBottom + padBottom - textHigh * 1.5f, textHigh,
+                                  kHudBright, 1.0f);
+                            write("right click an item to equip or drop it, I to close",
+                                  panelLeft + padX, panelBottom + padBottom - textHigh * 2.9f,
+                                  textHigh * 0.85f, kHint, 1.0f);
+                        }
+                    }
+
+                }
+
+                if (quads > 0)
+                {
+                    inv.counts[0] = static_cast<float>(quads);
+                    inv.counts[1] = windowAspect;
+                    inv.counts[2] = static_cast<float>(mh::kIconAtlasCells);
+                    inv.counts[3] = static_cast<float>(mh::kIconAtlasCells);
+                    inv.font[0] = static_cast<float>(textFont.columns);
+                    inv.font[1] = static_cast<float>(textFont.cell);
+                    inv.font[2] = static_cast<float>(textFont.width);
+                    inv.font[3] = static_cast<float>(textFont.height);
+                    queue.WriteBuffer(inventoryUniformBuffer, 0, &inv, sizeof(inv));
+                    pass.SetPipeline(inventoryPipeline);
+                    pass.SetBindGroup(0, inventoryBindGroup);
+                    pass.Draw(6, static_cast<uint32_t>(quads));
+                }
+            }
 
         // The box a dead character gets, drawn over everything else.
         //

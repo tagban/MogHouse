@@ -347,8 +347,40 @@ void mh_viewer_set_inventory(MhViewerHandle viewer, const MhInventorySlot* slots
                               sizes, sizes ? size_count : 0);
 }
 
+int32_t mh_viewer_take_inventory_action(MhViewerHandle viewer, int32_t* kind, int32_t* container,
+                                        int32_t* slot, int32_t* equip_slot, uint32_t* count)
+{
+    mh::ViewerLink::InventoryAction action;
+    if (!viewer || !viewer->link.takeInventoryAction(action))
+    {
+        return 0;
+    }
+
+    if (kind)
+    {
+        *kind = static_cast<int32_t>(action.kind);
+    }
+    if (container)
+    {
+        *container = action.container;
+    }
+    if (slot)
+    {
+        *slot = action.slot;
+    }
+    if (equip_slot)
+    {
+        *equip_slot = action.equipSlot;
+    }
+    if (count)
+    {
+        *count = action.count;
+    }
+    return 1;
+}
+
 void mh_viewer_push_item(MhViewerHandle viewer, uint16_t item_id, const char* name,
-                         const char* description, uint16_t type, uint16_t level,
+                         const char* description, uint16_t type, uint16_t level, uint16_t slots,
                          const uint8_t* rgba, int32_t width, int32_t height)
 {
     if (!viewer || width <= 0 || height <= 0 || !rgba)
@@ -362,6 +394,7 @@ void mh_viewer_push_item(MhViewerHandle viewer, uint16_t item_id, const char* na
     face.description = description ? description : "";
     face.type = type;
     face.level = level;
+    face.slots = slots;
     face.width = width;
     face.height = height;
     face.rgba.assign(rgba, rgba + (static_cast<size_t>(width) * static_cast<size_t>(height) * 4));

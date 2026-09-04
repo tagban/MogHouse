@@ -283,6 +283,35 @@ public sealed record FfxiEquipment(FfxiEquipSlot Slot, FfxiContainer Container, 
 }
 
 /// <summary>
+/// GP_CLI_COMMAND_ITEM_DUMP (C2S 0x028) - throw this away.
+///
+/// The quantity is the whole stack: the server checks it against what it
+/// thinks is in the slot and refuses the packet if they disagree, so this
+/// cannot be used to drop part of one.
+///
+/// There is no undo and no confirmation on the wire. Retail asks before
+/// sending it, and so should anything that builds this.
+/// </summary>
+public static class FfxiDropPacket
+{
+    public const ushort PacketId = 0x028;
+
+    /// <summary>Six bytes of body, rounded up to the four the header counts in.</summary>
+    public const int PacketSize = 12;
+
+    public static byte[] Build(uint quantity, FfxiContainer container, byte slot, ushort sync)
+    {
+        var packet = new byte[PacketSize];
+        BinaryPrimitives.WriteUInt16LittleEndian(packet.AsSpan(0, 2), FfxiZonePacket.PackIdAndSize(PacketId, PacketSize));
+        BinaryPrimitives.WriteUInt16LittleEndian(packet.AsSpan(2, 2), sync);
+        BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(4, 4), quantity);
+        packet[8] = (byte)container;
+        packet[9] = slot;
+        return packet;
+    }
+}
+
+/// <summary>
 /// GP_CLI_COMMAND_EQUIP_SET (C2S 0x050) - wear this, or take it off.
 ///
 /// Three bytes: where the item is, and which slot to put it in. There is no

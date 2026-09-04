@@ -462,6 +462,10 @@ public sealed class LiveRadar : IDisposable
         }
     }
 
+    /// <summary>What the player asked to do with one inventory slot, or null.</summary>
+    public (int Kind, byte Container, byte Slot, byte EquipSlot, uint Count)? TakeInventoryAction() =>
+        _closed ? null : _viewer.TakeInventoryAction();
+
     /// <summary>
     /// What an item is called and what it looks like, for the renderer's own
     /// atlas. Once per distinct item.
@@ -470,7 +474,7 @@ public sealed class LiveRadar : IDisposable
     {
         if (!_closed)
         {
-            _viewer.PushItem(item.Id, item.Name, item.Description, item.Type, item.Level,
+            _viewer.PushItem(item.Id, item.Name, item.Description, item.Type, item.Level, item.Slots,
                              icon.Rgba, icon.Width, icon.Height);
         }
     }

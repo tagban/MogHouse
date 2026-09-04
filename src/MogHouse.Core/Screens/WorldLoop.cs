@@ -242,6 +242,23 @@ public sealed class WorldLoop
                 ShowInventory();
             }
 
+            // What was clicked in the bags. Nothing is applied locally: the
+            // server answers with its own packets, and a client that moved the
+            // gear itself would be showing a change that may well be refused.
+            while (_world.TakeInventoryAction() is { } asked)
+            {
+                if (asked.Kind == 1)
+                {
+                    _session.EquipAsync(asked.Slot, (FfxiEquipSlot)asked.EquipSlot,
+                                        (FfxiContainer)asked.Container).GetAwaiter().GetResult();
+                }
+                else if (asked.Kind == 2)
+                {
+                    _session.DropAsync((FfxiContainer)asked.Container, asked.Slot)
+                            .GetAwaiter().GetResult();
+                }
+            }
+
             // Not while a zone is being read. Until it finishes the window is
             // still holding the position it had in the zone being left, and
             // telling the server that is how one zone change becomes several -
