@@ -5018,6 +5018,15 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         soundVolume = std::clamp(static_cast<float>(std::atof(volume)), 0.0f, 1.0f);
     }
 
+    /// Who was last spoken to, and how far round they have turned to answer.
+    ///
+    /// An NPC that stares at a wall while talking to you reads as broken even
+    /// when every word is right, and the server never says to turn - retail's
+    /// client does this itself.
+    uint32_t facingMe = 0;
+    float facingMeAngle = 0.0f;
+    bool facingMeStarted = false;
+
     /// Whether the options menu is up, and where its button sits so a click can
     /// find it. The rect is written while drawing and read by the events of the
     /// next frame, which is a frame behind and does not matter for a button
@@ -5242,7 +5251,47 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             {
                 break;
             }
-            const float bodyTurn = entity.heading - 1.57079633f;
+            float facing = entity.heading;
+            if (entity.id == facingMe && entity.id != 0)
+            {
+                const float dx = characterAt.x - entity.x;
+                const float dz = characterAt.z - entity.z;
+                const float away = dx * dx + dz * dz;
+
+                // Let go once they are out of talking distance, so an NPC does
+                // not track you across the zone like a portrait.
+                if (away > 12.0f * 12.0f)
+                {
+                    facingMe = 0;
+                    facingMeStarted = false;
+                }
+                else if (away > 0.01f)
+                {
+                    // Heading is 0 along +z, the convention RadarEntity states
+                    // and the player's own movement uses.
+                    const float wanted = std::atan2(dx, dz);
+                    if (!facingMeStarted)
+                    {
+                        facingMeAngle = entity.heading;
+                        facingMeStarted = true;
+                    }
+
+                    // The short way round, so turning from just west of north
+                    // to just east of it is a nudge and not a full circle.
+                    float delta = wanted - facingMeAngle;
+                    while (delta > 3.14159265f)
+                    {
+                        delta -= 6.28318531f;
+                    }
+                    while (delta < -3.14159265f)
+                    {
+                        delta += 6.28318531f;
+                    }
+                    facingMeAngle += delta * 0.25f;
+                    facing = facingMeAngle;
+                }
+            }
+            const float bodyTurn = facing - 1.57079633f;
             const float grow = mh::bodyScale(entity.size) * (mh::isChildRace(entity.look[0]) ? mh::kChildScale : 1.0f);
             const float bc = std::cos(bodyTurn) * grow;
             const float bs = std::sin(bodyTurn) * grow;
@@ -6495,6 +6544,8 @@ constexpr float kGravity = 26.0f;
                     if (chosen != 0)
                     {
                         link->requestTalk(chosen);
+                        facingMe = chosen;
+                        facingMeStarted = false;
                     }
                 }
                 else if (event.key.key == SDLK_KP_MULTIPLY)
@@ -6661,6 +6712,8 @@ constexpr float kGravity = 26.0f;
                     {
                         targetId = clicked;
                         link->requestTalk(clicked);
+                        facingMe = clicked;
+                        facingMeStarted = false;
                     }
                     else
                     {
