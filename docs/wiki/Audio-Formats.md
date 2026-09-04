@@ -126,11 +126,32 @@ boundary and keeps the running history rather than resetting it.
   ded1-ded3      dying         sdam skaz shit  shared, in se006
   ```
 
-  **No creature declares a spawn sound.** Not one of the 614 has a `pop` or
-  anything like it, which is why a worm's own DAT gives only combat noises.
-  Whatever plays when one comes out of the ground is not the creature's - the
-  next place to look is the zone, where a DAT carries hundreds of these
-  against a creature's twenty: West Ronfaure has 805.
+  The `s` names are a shared set in `se006` and the prefix is the giveaway -
+  they are weapon and movement sounds, not creature ones. `sdam`, `shit` and
+  `skaz` are sword damage and hits; `sinr` and `sotr`, which pair to
+  consecutive ids on 102 models and look like "in" and "out", are sheathe and
+  unsheathe. Confirmed by ear: they are swords and footsteps.
+
+  **No creature declares a spawn sound.** Not one of 614 has a `pop` or
+  anything like it, and a sweep of every non-standard name across 3,200 model
+  slots turns up nothing that could be one. So whatever plays when a worm
+  comes out of the ground is not the creature's.
+
+  Where it is not, each checked rather than assumed:
+
+  | | |
+  |---|---|
+  | the creature's own DAT | only idle, attack, damage, sway, death |
+  | zone DATs | 805 in West Ronfaure, all footsteps by terrain - folders 100-140 |
+  | the shared effects file | 98 refs, generic, numeric names in folders 0, 5, 7, 21, 32, 35 |
+  | `se252` | the worm's own combat set |
+  | `se258` | bats, despite 258 being the worm family - so a sound folder is not a family |
+  | `se006` | swords and walking |
+
+  What is left is the effect. A worm surfacing throws up dirt, that dirt is a
+  VFX, and an effect DAT carries sound references at its keyframes the same
+  way these do. Finding which effect DAT is the emerge is the remaining step,
+  and it is a search rather than a lookup.
 
   A creature's own folder is not its family number. Model 426 is a worm and
   its sounds are in `se252`, while the worm family is 258 - and `se258` exists
