@@ -91,6 +91,49 @@ no skeletons and why recoloured monsters get files of their own.
 `0x2000` body, `0x3000` hands, `0x4000` legs, `0x5000` feet - and the model id
 is the low twelve bits.
 
+### Player characters: one block per race, 3176 apart
+
+A playable race's files sit in a block that begins with its skeleton, and the
+blocks are evenly spaced:
+
+| race | base | race | base |
+|---|---|---|---|
+| Hume male | 7072 | Hume female | 10248 |
+| Elvaan male | 13424 | Elvaan female | 16600 |
+| Tarutaru male | 19776 | Tarutaru female | *see below* |
+| Mithra | 23176 | Galka | 26352 |
+
+Every step is **3176** files. Within a block, each slot has a window measured
+from the base:
+
+| slot | offset | ids |
+|---|---|---|
+| face and hair | 8 | 32 |
+| headgear | 40 | 256 |
+| body | 296 | 256 |
+| hands | 552 | 256 |
+| legs | 808 | 256 |
+| feet | 1064 | 256 |
+
+**The two Tarutaru share a block, except for their heads.** The step from
+Tarutaru to Mithra is 3400, not 3176, and that extra 224 is what the female
+gets: exactly 3176 past the Tarutaru base is a window of 32 face-sized files,
+every one a different file from the male's. At 32 the sizes jump from forty
+kilobytes to four hundred, so the window ends there rather than running on.
+
+So a female Tarutaru is the male's skeleton, the male's gear windows, and her
+own faces at offset 3176. Reading the sexes as sharing *everything* draws her
+as a man, which is what happened.
+
+The equipment windows are one flat list for both sexes. Their upper half looks
+like a second body set - body 8 and body 136 are different files of different
+sizes - and it is not: drawing from it puts the character in an ornate suit of
+armour.
+
+**Model 0 is nothing worn**, and the server sends it for an empty slot. It is
+not the naked body: LandSandBoat gives a new character 8 in body, hands, legs
+and feet, which is the starting clothing, and 0 in the head.
+
 **Zones are a table, not a formula.** Model file = `100 + zone` holds for the
 early zones and stops being true after them; files 525-528 would be "zones"
 425-428, and two of those do not exist. Do not extend the arithmetic.
