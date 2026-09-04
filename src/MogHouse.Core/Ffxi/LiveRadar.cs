@@ -464,6 +464,15 @@ public sealed class LiveRadar : IDisposable
         }
     }
 
+    /// <summary>Whether the character is kneeling, as a logout makes it.</summary>
+    public void ShowResting(bool resting)
+    {
+        if (!_closed)
+        {
+            _viewer.SetResting(resting);
+        }
+    }
+
     /// <summary>The character's job, level and stats.</summary>
     public void ShowCharacterStats(NativeCharacterStats stats)
     {

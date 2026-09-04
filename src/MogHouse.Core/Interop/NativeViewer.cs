@@ -507,6 +507,18 @@ public sealed partial class NativeViewer : IDisposable
         mh_viewer_set_inventory(_handle, slots, slots.Length, sizes, sizes.Length);
     }
 
+    /// <summary>Whether the character is kneeling, as a logout makes it.</summary>
+    public void SetResting(bool resting)
+    {
+        if (!_disposed && _handle != IntPtr.Zero)
+        {
+            mh_viewer_set_resting(_handle, resting ? 1 : 0);
+        }
+    }
+
+    [LibraryImport(LibraryName)]
+    private static partial void mh_viewer_set_resting(IntPtr viewer, int resting);
+
     /// <summary>The character's job, level and stats, for the equipment screen.</summary>
     public void SetCharacterStats(NativeCharacterStats stats)
     {

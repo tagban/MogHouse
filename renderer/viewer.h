@@ -805,6 +805,11 @@ public:
     /// Set after the window exists rather than when it is made: the client now
     /// opens the window first and draws its sign-in inside it, so at the moment
     /// the renderer starts there is no character yet and no name to give it.
+    /// Whether the character is resting - the pose a logout puts you in
+    /// while the server counts down, and the one /heal uses.
+    void setResting(bool resting);
+    bool resting() const;
+
     void setPlayerName(std::string name);
     std::string playerName() const;
 
@@ -936,6 +941,7 @@ private:
     // read every frame the character is drawn, so it is copied out rather than
     // held by reference.
     std::string playerName_;
+    std::atomic<bool> resting_{false};
     std::string look_;
     bool lookChanged_{false};
     std::atomic<bool> lineup_{false};

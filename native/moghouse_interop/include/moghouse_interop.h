@@ -207,6 +207,10 @@ MH_API void mh_viewer_set_inventory(MhViewerHandle viewer,
                                     const MhInventorySlot* slots, int32_t count,
                                     const uint16_t* sizes, int32_t size_count);
 
+/// Whether the character is kneeling - what a logout does while the server
+/// counts down, and what /heal looks like.
+MH_API void mh_viewer_set_resting(MhViewerHandle viewer, int32_t resting);
+
 /// The character's job, level and stats, for the equipment screen.
 ///
 /// Stats are STR, DEX, VIT, AGI, INT, MND, CHR in that order: the base from

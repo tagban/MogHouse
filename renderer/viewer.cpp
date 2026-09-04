@@ -2578,6 +2578,10 @@ bool mh::ViewerLink::takeFormResult(int& button, std::vector<std::string>& value
     return true;
 }
 
+void mh::ViewerLink::setResting(bool resting) { resting_ = resting; }
+
+bool mh::ViewerLink::resting() const { return resting_; }
+
 void mh::ViewerLink::setPlayerName(std::string name)
 {
     std::lock_guard<std::mutex> guard(mutex_);
@@ -6020,6 +6024,10 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     const ffxi::Animation* walkClip = nullptr;
     const ffxi::Animation* runClip = nullptr;
     const ffxi::Animation* jumpClip = nullptr;
+
+    // Kneeling. Every race ships res0 beside idl0 and wlk0; it is what /heal
+    // plays, and what a character does while a logout counts down.
+    const ffxi::Animation* restClip = nullptr;
     const ffxi::Animation* deadClip = nullptr;
     // When the jump finishes, on the same clock animationOffset is measured
     // against. Idle, walk and run are chosen every frame from what the
@@ -6046,6 +6054,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             return found == character->animations.end() ? nullptr : &found->second;
         };
         idleClip = find("idl0");
+        restClip = find("res0");
         walkClip = find("wlk0");
         runClip = find("run0");
         jumpClip = find("jmp0");
@@ -8041,7 +8050,12 @@ constexpr float kGravity = 26.0f;
             {
                 moving = walking ? runClip : walkClip;   // whichever the model has
             }
-            const ffxi::Animation* wanted = moved > 1e-4f ? moving : idleClip;
+            // Resting wins over standing still, and over walking: the
+            // server does not let a resting character go anywhere, so if both
+            // look true the rest is the honest one.
+            const ffxi::Animation* wanted = link && link->resting() && restClip
+                                                ? restClip
+                                                : (moved > 1e-4f ? moving : idleClip);
             if (wanted && wanted != playing)
             {
                 playing = wanted;

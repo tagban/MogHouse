@@ -379,6 +379,14 @@ int32_t mh_viewer_take_inventory_action(MhViewerHandle viewer, int32_t* kind, in
     return 1;
 }
 
+void mh_viewer_set_resting(MhViewerHandle viewer, int32_t resting)
+{
+    if (viewer)
+    {
+        viewer->link.setResting(resting != 0);
+    }
+}
+
 void mh_viewer_set_character_stats(MhViewerHandle viewer, const MhCharacterStats* stats)
 {
     if (!viewer || !stats)

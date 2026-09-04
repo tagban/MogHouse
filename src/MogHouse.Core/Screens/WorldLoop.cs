@@ -191,6 +191,10 @@ public sealed class WorldLoop
     {
         _leaveAt = DateTimeOffset.UtcNow.AddSeconds(32);
         _say.WriteLine($"leaving: {what}, at {_leaveAt:HH:mm:ss}");
+
+        // Down on one knee for the wait, which is what the game does. res0 is
+        // the clip /heal plays and every race ships it.
+        _world.ShowResting(true);
         _world.Say("", $"You will be {what} in 30 seconds.", FfxiChatMessageType.System1);
     }
 
