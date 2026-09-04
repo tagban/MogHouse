@@ -94,10 +94,26 @@ so this is observation rather than a rule.
 |---|---|
 | `se000` | interface and the common player sounds - menus, walking |
 | `se006` | weapons: strikes, drawing and sheathing, a monster falling |
+| `se001` | a zone's ambience - wind and the like, on a clock |
+| `se002` | more zone sound, referenced by id rather than by a name |
 | `se017` | unknown; the worm at model 426 references two of them |
 | `se100`-`se140` | footsteps by terrain, which is what a zone's hundreds of references are |
 | `se252` | one worm's own set - idle, attack, damage, sway, death |
 | `se258` | bats, despite 258 being the worm family |
+
+### A zone's ambience is on a clock
+
+The zone references into `se001` are named for the hour they belong to. West
+Ronfaure's three read `0600`, `1800` and `0000` - dawn, dusk and midnight -
+and what plays is wind, confirmed by ear against the retail client.
+
+That is the whole scheme for ambience: the name is when, the id is what. It
+also means ambient sound is buildable now rather than blocked, since the
+pieces are already here - the loop point in a `.spw` header, and a mixer that
+holds twenty-four voices.
+
+Southern San d'Oria's are named for their own ids instead, which is a
+different arrangement in the same folder and is not understood.
 
 ## Sounds identified by watching the retail client
 
