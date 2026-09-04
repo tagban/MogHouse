@@ -166,6 +166,31 @@ public sealed class WorldLoop
         _world.Say("", "If you find a bug, face it, and type /bug <insert context here> and hit enter.",
                    FfxiChatMessageType.System1);
 
+    /// <summary>
+    /// When the world stops, once the server has had its countdown.
+    ///
+    /// Null until a logout is asked for. The client used to leave the instant
+    /// it sent the packet, which is why nothing was ever seen of the thirty
+    /// seconds the server spends counting: it applies a Leavegame effect
+    /// rather than disconnecting, and we were gone before any of it happened.
+    /// </summary>
+    private DateTimeOffset? _leaveAt;
+
+    /// <summary>
+    /// Asks to leave, and says so, rather than vanishing mid-sentence.
+    ///
+    /// The wait is the server's, not ours - it holds a character in the world
+    /// for thirty seconds so a logout cannot be used to escape - so this is a
+    /// backstop for the case where the server never gets around to ending the
+    /// session, not the thing doing the timing. A GM leaves at once and the
+    /// server will have gone before this fires.
+    /// </summary>
+    private void BeginLeaving(string what)
+    {
+        _leaveAt = DateTimeOffset.UtcNow.AddSeconds(32);
+        _world.Say("", $"You will be {what} in 30 seconds.", FfxiChatMessageType.System1);
+    }
+
     private void OnInventoryChanged() => _inventoryDirty = true;
 
     private void OnJobChanged() => _statsDirty = true;
@@ -175,7 +200,16 @@ public sealed class WorldLoop
     /// renderer rebuilds the model, and doing that on the thread that drew the
     /// last frame is what it already expects.
     /// </summary>
-    private void OnLookChanged(string look) => _world.SetPlayer(_who, look);
+    private void OnLookChanged(string look)
+    {
+        // Logged, because what a naked character is supposed to look like is
+        // still an open question: the fallback uses model 1 for every slot,
+        // which is a whole set of clothes and reads as armour on a Tarutaru
+        // who is wearing nothing. Knowing what the server actually sends for
+        // an empty slot is what settles it.
+        _say.WriteLine($"look: {look}");
+        _world.SetPlayer(_who, look);
+    }
 
     /// <summary>
     /// Sends the job, level and stats to the renderer.
@@ -294,6 +328,11 @@ public sealed class WorldLoop
     {
         while (!_world.Closed && !_leaving)
         {
+            if (_leaveAt is { } leaveAt && DateTimeOffset.UtcNow >= leaveAt)
+            {
+                _leaving = true;
+            }
+
             if (_inventoryDirty)
             {
                 _inventoryDirty = false;
@@ -428,12 +467,12 @@ public sealed class WorldLoop
         {
             case FfxiClientCommandKind.Logout:
                 Wait(_session.LogoutAsync(FfxiLogoutKind.Logout));
-                _leaving = true;
+                BeginLeaving("logged out");
                 return;
 
             case FfxiClientCommandKind.Shutdown:
                 Wait(_session.LogoutAsync(FfxiLogoutKind.Shutdown));
-                _leaving = true;
+                BeginLeaving("shut down");
                 return;
 
             case FfxiClientCommandKind.Bug:
