@@ -21,7 +21,12 @@ inline constexpr int kHudChars = 48;
 
 /// Filled rectangles drawn under the labels: the HP, MP and TP bars, and
 /// whatever else wants a meter rather than a number.
-inline constexpr int kHudBars = 8;
+inline constexpr int kHudBars = 12;
+
+/// Six go to the vitals - a track and a fill each for HP, MP and TP - and
+/// three to the menu icon, which is drawn rather than lettered because the
+/// atlas is a typeface and a hamburger is a picture.
+static_assert(kHudBars == 12, "hud_shader.h WGSL hardcodes 12 bars");
 
 inline constexpr const char* kHudShader = R"(
 struct HudUniforms {
@@ -36,9 +41,9 @@ struct HudUniforms {
     // Per glyph: atlas cell index, x offset in cells, advance in cells.
     glyphs : array<vec4<f32>, 1152>,
     // Per bar: left, bottom, width, height in NDC. Width zero is no bar.
-    bars : array<vec4<f32>, 8>,
+    bars : array<vec4<f32>, 12>,
     // Per bar: colour, then how opaque it is.
-    barColours : array<vec4<f32>, 8>,
+    barColours : array<vec4<f32>, 12>,
 };
 
 const kChars = 48;
@@ -81,7 +86,7 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
 
     // Bars first, so a label placed over one draws on top of it: the text
     // reads off the bar rather than the bar painting over the text.
-    for (var bar = 0; bar < 8; bar = bar + 1) {
+    for (var bar = 0; bar < 12; bar = bar + 1) {
         let rect = hud.bars[bar];
         if (rect.z <= 0.0) {
             continue;

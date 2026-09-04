@@ -6230,11 +6230,23 @@ constexpr float kGravity = 26.0f;
                 float ndcY = 0.0f;
                 if (formPressed >= 0 && static_cast<size_t>(formPressed) < formButtons.size() &&
                     pointerNdc(event.button.x, event.button.y, ndcX, ndcY) &&
-                    formButtons[static_cast<size_t>(formPressed)].holds(ndcX, ndcY) && link)
+                    formButtons[static_cast<size_t>(formPressed)].holds(ndcX, ndcY))
                 {
                     // Pressed and released on the same button, the way a button
                     // is meant to work - a press that slides off is not a click.
-                    link->submitForm(formButtonRow[static_cast<size_t>(formPressed)], formValues);
+                    //
+                    // The options menu is answered here, not sent: it is the
+                    // renderer's own form. This used to require a link, so its
+                    // CLOSE did nothing at all - and nothing at all in the
+                    // standalone viewer, which never has one.
+                    if (optionsOpen)
+                    {
+                        optionsOpen = false;
+                    }
+                    else if (link)
+                    {
+                        link->submitForm(formButtonRow[static_cast<size_t>(formPressed)], formValues);
+                    }
                 }
                 formPressed = -1;
             }
@@ -8459,6 +8471,7 @@ constexpr float kGravity = 26.0f;
                 hud.atlas[3] = static_cast<float>(textFont.height);
 
                 int labels = 0;
+                int bar = 0;
 
                 // Laid out around the radar rather than at fixed corners, so
                 // the two stay together if the radar ever moves.
@@ -8552,6 +8565,40 @@ constexpr float kGravity = 26.0f;
                 std::snprintf(clock, sizeof(clock), "%02d:%02d", clockMinutes / 60, clockMinutes % 60);
                 const float clockBottom = above + gap * 2.0f + line * 1.5f;
                 label(clock, radarCentreX, clockBottom, 0.85f, kHudBright, 0.55f);
+
+                // The way into the options, right of the clock. Three bars
+                // rather than a word: a hamburger is a picture, and the text
+                // atlas is a typeface with no glyph for one - but the HUD can
+                // already draw rectangles, which is all a hamburger is.
+                {
+                    const float clockWide = measure(clock, 0.85f);
+                    const float high = line * 0.62f;
+                    const float wide = high / windowAspect;
+                    const float left = radarCentreX + clockWide * 0.5f + gap * 3.4f;
+                    const float bottom = clockBottom + line * 0.1f;
+
+                    const float* tint = optionsOpen ? kHudBright : kHudDim;
+                    const float rung = high * 0.2f;
+                    for (int i = 0; i < 3 && bar < mh::kHudBars; ++i, ++bar)
+                    {
+                        hud.bars[bar][0] = left;
+                        hud.bars[bar][1] = bottom + static_cast<float>(i) * high * 0.38f;
+                        hud.bars[bar][2] = wide;
+                        hud.bars[bar][3] = rung;
+                        hud.barColours[bar][0] = tint[0];
+                        hud.barColours[bar][1] = tint[1];
+                        hud.barColours[bar][2] = tint[2];
+                        hud.barColours[bar][3] = 0.95f;
+                    }
+
+                    // Generous around the icon: it is small, and a menu button
+                    // that has to be hit exactly is worse than one that catches
+                    // a near miss.
+                    optionsButton[0] = left - gap * 0.5f;
+                    optionsButton[1] = bottom - gap * 0.5f;
+                    optionsButton[2] = wide + gap;
+                    optionsButton[3] = high * 0.76f + rung + gap;
+                }
 
                 if (vanaSeconds > 0)
                 {
@@ -8654,29 +8701,6 @@ constexpr float kGravity = 26.0f;
                     }
                 }
 
-                // The way into the options, at the bottom right - left of the
-                // vitals, which already hold the corner itself. Retail opens
-                // the same menu with the numpad minus, and so does this.
-                //
-                // Lettered rather than a gear: the atlas is a typeface, and a
-                // gear is a picture. One can be added, but a button labelled
-                // with a wrong-looking glyph is worse than one that says what
-                // it does.
-                {
-                    constexpr float kOptionsScale = 0.7f;
-                    const std::string caption = "OPTIONS";
-                    const float width = measure(caption, kOptionsScale);
-                    const float high = line * kOptionsScale + gap * 0.6f;
-                    const float left = 0.63f - gap * 2.0f - width;
-                    const float bottom = -0.95f;
-                    place(caption, left, bottom, kOptionsScale, optionsOpen ? kHudBright : kHudDim, 0.55f,
-                          false);
-
-                    optionsButton[0] = left;
-                    optionsButton[1] = bottom;
-                    optionsButton[2] = width;
-                    optionsButton[3] = high;
-                }
 
                 // HP, MP and TP as three bars in the bottom right corner,
                 // with the numbers written on them.
@@ -8722,7 +8746,6 @@ constexpr float kGravity = 26.0f;
                         const bool dead = vitals.hp == 0;
                         const float* hpFill = dead ? kHpGone : (vitals.hpPercent <= 25 ? kHpLow : kHpFull);
 
-                        int bar = 0;
                         const auto meter = [&](const std::string& text, float bottom, float fraction,
                                                const float* fill) {
                             if (bar + 2 > mh::kHudBars)
