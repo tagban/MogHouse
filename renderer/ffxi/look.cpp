@@ -71,11 +71,31 @@ size_t modelFileId(Race race, LookSlot slot, uint16_t modelId)
     }
 
     const SlotWindow& window = kSlotWindow[slotIndex];
-    if (modelId >= window.count)
+
+    // Tarutaru are the one race whose two sexes share a block, and the split
+    // is inside each equipment window rather than between blocks: the first
+    // 128 ids of a 256-wide window are the male models and the second 128 the
+    // female. Without this a female Tarutaru is drawn from the male's files
+    // and simply looks like one, which is what happened.
+    //
+    // The face window does not split. Faces 0 to 15 and 16 to 31 resolve to
+    // the same files - checked, and they are the same paths, not merely the
+    // same size - so the sex is carried by the body and not by the head.
+    //
+    // Derived from the file table rather than from a document, and not yet
+    // confirmed against a screen: body 8 and body 136 are different files of
+    // different sizes, which is the evidence for the halving.
+    size_t wanted = modelId;
+    if (race == Race::TarutaruFemale && slot != LookSlot::Face && window.count == 256)
+    {
+        wanted += window.count / 2;
+    }
+
+    if (wanted >= window.count)
     {
         return 0;
     }
-    return base + window.offset + modelId;
+    return base + window.offset + wanted;
 }
 
 std::vector<std::filesystem::path> lookFiles(const FileTable& table, const Look& look)
