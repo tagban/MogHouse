@@ -12008,6 +12008,38 @@ constexpr float kGravity = 26.0f;
             link->setLoading(false);
             loadingZone.clear();
         }
+
+        // A change of gear, with no zone change to carry it.
+        //
+        // The look was read only while a zone was loading, so putting armour
+        // on showed up the next time you zoned and never before: the client
+        // asked the server what it looked like, the server answered, the
+        // answer was correct, and it sat in the link until something else
+        // happened to want it.
+        //
+        // Rebuilt in place, which is what the retail client appears to do -
+        // the character is taken away and put back rather than altered. The
+        // clips have to be rebound because they point into the old skeleton,
+        // and nothing is left playing: the next frame picks idle, walk or run
+        // from what the body is actually doing.
+        if (!pendingZone && link && character)
+        {
+            std::string wanted;
+            if (link->takeLook(wanted) && !wanted.empty() && wanted != currentLook)
+            {
+                if (auto rebuilt = buildFromLook(wanted.c_str()))
+                {
+                    currentLook = wanted;
+                    characterScale = scaleOfLook(currentLook);
+                    character = std::move(rebuilt);
+                    makeGhost();
+                    uploadCharacter();
+                    bindClips();
+                    playing = nullptr;
+                    std::printf("rebuilt the character as %s\n", currentLook.c_str());
+                }
+            }
+        }
         instance.ProcessEvents();
 
         if (takingShot)
