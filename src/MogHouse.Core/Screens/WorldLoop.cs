@@ -42,6 +42,9 @@ public sealed class WorldLoop
     /// </summary>
     private volatile bool _inventoryDirty;
 
+    /// <summary>Set when the server sends new job or stat numbers.</summary>
+    private volatile bool _statsDirty;
+
     /// <summary>
     /// Items already described to the renderer. It keeps the icon on an atlas
     /// and the name beside it, so sending either twice is wasted work.
@@ -98,6 +101,7 @@ public sealed class WorldLoop
         // Whatever the server already sent, before anyone was listening. The
         // inventory arrives in the zone-in burst like the health packet does.
         _inventoryDirty = true;
+        _statsDirty = true;
         PlayMusic(_session.CurrentTrack);
         Welcome();
 
@@ -114,6 +118,7 @@ public sealed class WorldLoop
     private void Attach()
     {
         _session.Inventory.Changed += OnInventoryChanged;
+        _session.JobChanged += OnJobChanged;
         _session.ChatReceived += OnChat;
         _session.EntitiesChanged += OnEntities;
         _session.ZoneChanged += OnZoneChanged;
@@ -127,6 +132,7 @@ public sealed class WorldLoop
     private void Detach()
     {
         _session.Inventory.Changed -= OnInventoryChanged;
+        _session.JobChanged -= OnJobChanged;
         _items?.Dispose();
         _items = null;
         _session.ChatReceived -= OnChat;
@@ -155,6 +161,40 @@ public sealed class WorldLoop
     }
 
     private void OnInventoryChanged() => _inventoryDirty = true;
+
+    private void OnJobChanged() => _statsDirty = true;
+
+    /// <summary>
+    /// Sends the job, level and stats to the renderer.
+    ///
+    /// The sub job's level is not a field of its own - the packet carries a
+    /// level for every job at once, so the sub's is looked up by its number.
+    /// </summary>
+    private unsafe void ShowStats()
+    {
+        if (_session.Job is not { } job)
+        {
+            return;
+        }
+
+        var stats = new NativeCharacterStats
+        {
+            MainJob = job.MainJob,
+            SubJob = job.SubJob,
+            MainLevel = job.MainJobLevel,
+            SubLevel = job.SubJob < job.JobLevels.Count ? job.JobLevels[job.SubJob] : (byte)0,
+            MaxHp = job.MaxHp,
+            MaxMp = job.MaxMp,
+        };
+
+        for (int i = 0; i < FfxiJobInfo.StatCount; i++)
+        {
+            stats.BaseStats[i] = job.BaseStats[i];
+            stats.StatModifiers[i] = job.StatModifiers[i];
+        }
+
+        _world.ShowCharacterStats(stats);
+    }
 
     /// <summary>
     /// Sends the bags to the renderer, and the name and icon of anything in
@@ -191,6 +231,19 @@ public sealed class WorldLoop
         }
 
         _world.ShowInventory(CollectionsMarshal.AsSpan(slots), sizes);
+
+        // What is worn, as places rather than things: the server names a
+        // container and a slot, and what is in it is the answer.
+        var wornContainers = new byte[16];
+        var wornSlots = new byte[16];
+        for (int slot = 0; slot < 16; slot++)
+        {
+            (FfxiContainer Container, byte Slot)? at = bags.Equipped((FfxiEquipSlot)slot);
+            wornContainers[slot] = (byte)(at?.Container ?? FfxiContainer.Inventory);
+            wornSlots[slot] = at?.Slot ?? FfxiEquipment.Empty;
+        }
+
+        _world.ShowEquipment(wornContainers, wornSlots);
 
         // Names and icons, once each. Opened on first use rather than in the
         // constructor: a session that never opens its bags never reads a file.
@@ -240,6 +293,12 @@ public sealed class WorldLoop
             {
                 _inventoryDirty = false;
                 ShowInventory();
+            }
+
+            if (_statsDirty)
+            {
+                _statsDirty = false;
+                ShowStats();
             }
 
             // What was clicked in the bags. Nothing is applied locally: the

@@ -834,18 +834,30 @@ int volumeStep(float volume)
 /// Four samples to a pixel: a cog's teeth alias badly at this size, and the
 /// difference between a soft edge and a jagged one is most of whether a
 /// generated icon looks deliberate.
-std::vector<uint8_t> drawToolbarIcon(bool cog)
+std::vector<uint8_t> drawToolbarIcon(int which)
 {
     constexpr int kSide = 32;
     std::vector<uint8_t> pixels(static_cast<size_t>(kSide) * kSide * 4, 0);
 
-    const auto coverage = [cog](float x, float y)
+    const auto coverage = [which](float x, float y)
     {
         const float dx = x - 15.5f;
         const float dy = y - 15.5f;
         const float radius = std::sqrt(dx * dx + dy * dy);
 
-        if (cog)
+        if (which == 2)
+        {
+            // A heater shield: flat across the top, curving to a point.
+            const float down = (y - 5.0f) / 22.0f;
+            if (down < 0.0f || down > 1.0f)
+            {
+                return 0.0f;
+            }
+            const float halfWidth = 11.0f * (1.0f - std::pow(down, 2.3f));
+            return std::fabs(dx) <= halfWidth ? 1.0f : 0.0f;
+        }
+
+        if (which == 1)
         {
             // A ring with eight teeth and a hole: inside the body, or inside a
             // tooth, and outside the middle.
@@ -2210,6 +2222,35 @@ void mh::ViewerLink::setInventory(const InventorySlot* slots, int count, const u
     // Bumped last, so a panel that sees a new number is looking at a whole
     // set of bags rather than half of one.
     inventoryRevision_.fetch_add(1);
+}
+
+void mh::ViewerLink::setCharacterStats(CharacterStats stats)
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+    characterStats_ = stats;
+}
+
+mh::ViewerLink::CharacterStats mh::ViewerLink::characterStats() const
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+    return characterStats_;
+}
+
+void mh::ViewerLink::setEquipment(const uint8_t* containers, const uint8_t* slots, int count)
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+    for (size_t i = 0; i < equipment_.size(); ++i)
+    {
+        equipment_[i] = i < static_cast<size_t>(count)
+                            ? std::pair<uint8_t, uint8_t>{containers[i], slots[i]}
+                            : std::pair<uint8_t, uint8_t>{0, 255};
+    }
+}
+
+std::array<std::pair<uint8_t, uint8_t>, 16> mh::ViewerLink::equipment() const
+{
+    const std::lock_guard<std::mutex> guard{mutex_};
+    return equipment_;
 }
 
 std::vector<mh::ViewerLink::InventorySlot> mh::ViewerLink::inventory() const
@@ -4180,13 +4221,14 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // has no bag and no cog anywhere in its menu DAT. Items start after them.
     constexpr int kBagIconCell = 0;
     constexpr int kCogIconCell = 1;
-    int nextIconCell = 2;
+    constexpr int kShieldIconCell = 2;
+    int nextIconCell = 3;
 
     if (iconAtlas)
     {
-        for (int cell : {kBagIconCell, kCogIconCell})
+        for (int cell : {kBagIconCell, kCogIconCell, kShieldIconCell})
         {
-            const std::vector<uint8_t> drawn = drawToolbarIcon(cell == kCogIconCell);
+            const std::vector<uint8_t> drawn = drawToolbarIcon(cell);
             wgpu::TexelCopyTextureInfo target{
                 .texture = iconAtlas,
                 .origin = {static_cast<uint32_t>((cell % mh::kIconAtlasCells) * mh::kIconSize),
@@ -5419,6 +5461,11 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     int contextContainer = 0;
     bool contextConfirmDrop = false;
 
+    // The equipment screen: its own panel, and which of the sixteen slots is
+    // being filled. -1 lists everything that can be worn at all.
+    bool equipmentOpen = std::getenv("MOGHOUSE_EQUIPMENT") != nullptr;
+    int equipmentSlot = -1;
+
     /// What order the grid is shown in.
     ///
     /// A view, not a change: the server owns which slot a thing is in, and
@@ -6549,6 +6596,11 @@ constexpr float kGravity = 26.0f;
             {
                 inventoryOpen = !inventoryOpen;
                 inventoryPage = 0;
+                contextSlot = -1;
+            }
+            else if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_E && !typing)
+            {
+                equipmentOpen = !equipmentOpen;
             }
             else if (event.type == SDL_EVENT_KEY_DOWN && inventoryOpen && !typing &&
                      (event.key.key == SDLK_LEFT || event.key.key == SDLK_RIGHT ||
@@ -7278,6 +7330,32 @@ constexpr float kGravity = 26.0f;
                         {
                             contextSlot = -1;
                             contextConfirmDrop = false;
+                        }
+                        else if (hit.kind == 9)
+                        {
+                            equipmentOpen = !equipmentOpen;
+                        }
+                        else if (hit.kind == 10)
+                        {
+                            equipmentSlot = equipmentSlot == hit.value ? -1 : hit.value;
+                        }
+                        else if (hit.kind == 11 && link && equipmentSlot >= 0)
+                        {
+                            // The value carries both halves of where the item
+                            // is, because a hit has only the one number.
+                            link->requestInventoryAction(
+                                {mh::ViewerLink::InventoryAction::Kind::Equip,
+                                 static_cast<uint8_t>((hit.value >> 8) & 0xFF),
+                                 static_cast<uint8_t>(hit.value & 0xFF),
+                                 static_cast<uint8_t>(equipmentSlot), 0});
+                        }
+                        else if (hit.kind == 12 && link)
+                        {
+                            // Taking something off is the same packet with the
+                            // slot set to the server's own "no slot".
+                            link->requestInventoryAction(
+                                {mh::ViewerLink::InventoryAction::Kind::Equip, 0, 255,
+                                 static_cast<uint8_t>(hit.value), 0});
                         }
                         else if (hit.kind == 8)
                         {
@@ -10171,6 +10249,8 @@ constexpr float kGravity = 26.0f;
                 tool(kCogIconCell, toolPen, optionsOpen, 4);
                 toolPen -= toolWide + toolGap;
                 tool(kBagIconCell, toolPen, inventoryOpen, 3);
+                toolPen -= toolWide + toolGap;
+                tool(kShieldIconCell, toolPen, equipmentOpen, 9);
 
                 if (inventoryOpen)
                 {
@@ -10583,6 +10663,261 @@ constexpr float kGravity = 26.0f;
                         }
                     }
 
+                }
+
+
+                // The equipment screen. Its own panel, not a wing of the bags:
+                // what it is for is deciding what to wear, and a grid of
+                // everything you own is the wrong thing to be looking at while
+                // doing it.
+                if (equipmentOpen)
+                {
+                    static const char* kSlotNames[16] = {"Main", "Sub",  "Range", "Ammo", "Head", "Body",
+                                                         "Hands", "Legs", "Feet",  "Neck", "Waist", "Ear",
+                                                         "Ear",  "Ring", "Ring",  "Back"};
+
+                    // 1 to 15, so index 0 is nobody.
+                    static const char* kJobNames[16] = {"---", "WAR", "MNK", "WHM", "BLM", "RDM",
+                                                        "THF", "PLD", "DRK", "BST", "BRD", "RNG",
+                                                        "SAM", "NIN", "DRG", "SMN"};
+                    static const char* kStatNames[7] = {"STR", "DEX", "VIT", "AGI", "INT", "MND", "CHR"};
+
+                    const float eqSlot = 0.095f;
+                    const float eqSlotWide = eqSlot / windowAspect;
+                    const float eqGap = eqSlot * 0.16f;
+                    const float eqText = std::clamp(eqSlot * 0.30f, 0.024f, 0.038f);
+                    const float cellHigh = eqSlot + eqText * 1.15f;
+                    const float gridWide = 4.0f * eqSlotWide + 3.0f * eqGap;
+                    const float gridHigh = 4.0f * cellHigh + 3.0f * eqGap;
+
+                    // Widths, so divided by the aspect: eqText is a height,
+                    // and a unit of NDC x is not a unit of NDC y. A column
+                    // built out of undivided text heights is right on one
+                    // monitor and wrong on the next.
+                    const float statsWide = eqText * 8.0f / windowAspect;
+                    const float listWide = eqText * 11.0f / windowAspect;
+                    const float padX = eqText * 0.8f / windowAspect;
+                    const float panelWide = padX * 4.0f + statsWide + gridWide + listWide;
+                    const float panelHigh = gridHigh + eqText * 5.2f;
+                    const float panelLeft = -panelWide * 0.5f;
+                    const float panelBottom = -panelHigh * 0.5f;
+
+                    static const float kPanel[3] = {0.05f, 0.06f, 0.12f};
+                    static const float kFrame[3] = {0.20f, 0.22f, 0.34f};
+                    static const float kFrameLit[3] = {0.36f, 0.40f, 0.58f};
+                    static const float kChosen[3] = {0.42f, 0.48f, 0.70f};
+
+                    quad(panelLeft, panelBottom, panelWide, panelHigh, 0, 0, kPanel, 0.92f);
+
+                    const float topY = panelBottom + panelHigh - eqText * 1.7f;
+
+                    // What is worn is a place, not a thing, so every slot is
+                    // resolved through the bags. Built once rather than
+                    // searched sixteen times.
+                    std::map<std::pair<int, int>, mh::ViewerLink::InventorySlot> byPlace;
+                    for (const mh::ViewerLink::InventorySlot& entry : link->inventory())
+                    {
+                        byPlace[{entry.container, entry.slot}] = entry;
+                    }
+                    const std::array<std::pair<uint8_t, uint8_t>, 16> worn = link->equipment();
+
+                    // --- the stats column -------------------------------
+                    const mh::ViewerLink::CharacterStats stats = link->characterStats();
+                    const mh::ViewerLink::Vitals vitals = link->vitals();
+
+                    float statY = topY;
+                    const float statLeft = panelLeft + padX;
+                    write(link->playerName().empty() ? std::string{"Equipment"} : link->playerName(),
+                          statLeft, statY, eqText, kHudBright, 1.0f);
+                    statY -= eqText * 1.6f;
+
+                    if (stats.known)
+                    {
+                        write("Lv" + std::to_string(stats.mainLevel) + " " +
+                                  kJobNames[stats.mainJob < 16 ? stats.mainJob : 0],
+                              statLeft, statY, eqText, kHudBright, 1.0f);
+                        statY -= eqText * 1.3f;
+
+                        if (stats.subJob > 0 && stats.subJob < 16)
+                        {
+                            write("Lv" + std::to_string(stats.subLevel) + " " + kJobNames[stats.subJob],
+                                  statLeft, statY, eqText * 0.9f, kHudDim, 1.0f);
+                        }
+                        statY -= eqText * 1.5f;
+                    }
+
+                    if (vitals.known)
+                    {
+                        write("HP " + std::to_string(vitals.hp) + " / " + std::to_string(stats.maxHp),
+                              statLeft, statY, eqText * 0.9f, kHudDim, 1.0f);
+                        statY -= eqText * 1.2f;
+                        write("MP " + std::to_string(vitals.mp) + " / " + std::to_string(stats.maxMp),
+                              statLeft, statY, eqText * 0.9f, kHudDim, 1.0f);
+                        statY -= eqText * 1.2f;
+                        write("TP " + std::to_string(vitals.tp), statLeft, statY, eqText * 0.9f, kHudDim,
+                              1.0f);
+                        statY -= eqText * 1.6f;
+                    }
+
+                    // Base and what the gear adds, kept apart the way the game
+                    // shows them: the second number is the whole reason to be
+                    // looking at this screen.
+                    if (stats.known)
+                    {
+                        for (int i = 0; i < 7; ++i)
+                        {
+                            const std::string line =
+                                std::string{kStatNames[i]} + " " + std::to_string(stats.base[i]);
+                            write(line, statLeft, statY, eqText * 0.9f, kHudDim, 1.0f);
+                            if (stats.modifier[i] != 0)
+                            {
+                                const std::string bonus =
+                                    (stats.modifier[i] > 0 ? "+" : "") + std::to_string(stats.modifier[i]);
+                                write(bonus, statLeft + eqText * 4.4f / windowAspect, statY, eqText * 0.9f,
+                                      stats.modifier[i] > 0 ? kHudBright : kHudDim, 1.0f);
+                            }
+                            statY -= eqText * 1.2f;
+                        }
+                    }
+
+                    // --- the sixteen slots ------------------------------
+                    const float gridLeft = panelLeft + padX * 2.0f + statsWide;
+                    const float gridTop = panelBottom + panelHigh - eqText * 3.0f;
+
+                    for (int slot = 0; slot < 16; ++slot)
+                    {
+                        const int col = slot % 4;
+                        const int row = slot / 4;
+                        const float left = gridLeft + static_cast<float>(col) * (eqSlotWide + eqGap);
+                        const float bottom =
+                            gridTop - eqSlot - static_cast<float>(row) * (cellHigh + eqGap);
+
+                        const bool under = havePointer && pointerX >= left && pointerX < left + eqSlotWide &&
+                                           pointerY >= bottom && pointerY < bottom + eqSlot;
+                        const bool chosen = slot == equipmentSlot;
+                        quad(left, bottom, eqSlotWide, eqSlot, 0, 0,
+                             chosen ? kChosen : (under ? kFrameLit : kFrame), 0.88f);
+                        inventoryHits.push_back(InventoryHit{left, bottom, eqSlotWide, eqSlot, 10, slot});
+
+                        const auto place = worn[static_cast<size_t>(slot)];
+                        if (place.second != 255)
+                        {
+                            const auto found = byPlace.find({place.first, place.second});
+                            if (found != byPlace.end())
+                            {
+                                const auto facing = itemFacing.find(found->second.itemId);
+                                if (facing != itemFacing.end() && facing->second.cell >= 0)
+                                {
+                                    const float inset = eqSlot * 0.08f;
+                                    quad(left + inset / windowAspect, bottom + inset,
+                                         eqSlotWide - inset * 2.0f / windowAspect, eqSlot - inset * 2.0f,
+                                         1, facing->second.cell, kHudBright, 1.0f);
+                                }
+                            }
+                        }
+
+                        write(kSlotNames[slot], left, bottom - eqText * 1.0f, eqText * 0.75f,
+                              chosen ? kHudBright : kHudDim, 1.0f);
+                    }
+
+                    // --- what will fit the chosen slot ------------------
+                    const float listLeft = gridLeft + gridWide + padX;
+                    float listY = topY;
+
+                    if (equipmentSlot < 0)
+                    {
+                        write("Pick a slot", listLeft, listY, eqText, kHudBright, 1.0f);
+                        listY -= eqText * 1.4f;
+                        write("Only gear that fits it is listed.", listLeft, listY, eqText * 0.8f, kHint,
+                              1.0f);
+                    }
+                    else
+                    {
+                        write(std::string{kSlotNames[equipmentSlot]}, listLeft, listY, eqText, kHudBright,
+                              1.0f);
+
+                        // Taking it off is offered where there is something on.
+                        if (worn[static_cast<size_t>(equipmentSlot)].second != 255)
+                        {
+                            button("Remove", listLeft + eqText * 4.0f / windowAspect, listY, eqText * 0.85f, false, 12,
+                                   equipmentSlot);
+                        }
+                        listY -= eqText * 1.7f;
+
+                        // Only what can be worn, and only out of the bags the
+                        // server will equip from: it refuses a satchel unless
+                        // it has been configured otherwise, and offering one
+                        // would be offering a failure.
+                        static const int kEquippableFrom[] = {0, 8, 10, 11, 12, 13, 14, 15, 16};
+
+                        int listed = 0;
+                        const int room = static_cast<int>(gridHigh / (eqText * 1.5f));
+                        for (const mh::ViewerLink::InventorySlot& entry : link->inventory())
+                        {
+                            if (listed >= room)
+                            {
+                                write("...", listLeft, listY, eqText * 0.8f, kHudDim, 1.0f);
+                                break;
+                            }
+
+                            if (std::find(std::begin(kEquippableFrom), std::end(kEquippableFrom),
+                                          static_cast<int>(entry.container)) == std::end(kEquippableFrom))
+                            {
+                                continue;
+                            }
+
+                            const auto facing = itemFacing.find(entry.itemId);
+                            if (facing == itemFacing.end() ||
+                                (facing->second.slots & (1 << equipmentSlot)) == 0)
+                            {
+                                continue;
+                            }
+
+                            const float rowHigh = eqText * 1.4f;
+                            const float rowBottom = listY - eqText * 0.2f;
+                            const bool under = havePointer && pointerX >= listLeft &&
+                                               pointerX < listLeft + listWide && pointerY >= rowBottom &&
+                                               pointerY < rowBottom + rowHigh;
+                            if (under)
+                            {
+                                quad(listLeft - eqText * 0.2f / windowAspect, rowBottom, listWide, rowHigh,
+                                     0, 0, kFrameLit, 0.55f);
+                            }
+
+                            if (facing->second.cell >= 0)
+                            {
+                                quad(listLeft, listY - eqText * 0.1f, eqText * 1.1f / windowAspect,
+                                     eqText * 1.1f, 1, facing->second.cell, kHudBright, 1.0f);
+                            }
+
+                            write(facing->second.name, listLeft + eqText * 1.4f / windowAspect, listY,
+                                  eqText * 0.85f, kHudBright, 1.0f);
+                            if (facing->second.level > 0)
+                            {
+                                write("Lv" + std::to_string(facing->second.level),
+                                      listLeft + listWide - eqText * 2.6f / windowAspect, listY, eqText * 0.8f, kHudDim,
+                                      1.0f);
+                            }
+
+                            // Both halves of where it is, in the one number a
+                            // hit carries.
+                            inventoryHits.push_back(
+                                InventoryHit{listLeft - eqText * 0.2f / windowAspect, rowBottom, listWide,
+                                             rowHigh, 11,
+                                             (static_cast<int>(entry.container) << 8) | entry.slot});
+                            listY -= rowHigh;
+                            ++listed;
+                        }
+
+                        if (listed == 0)
+                        {
+                            write("Nothing you own fits here.", listLeft, listY, eqText * 0.8f, kHudDim,
+                                  1.0f);
+                        }
+                    }
+
+                    write("E to close", panelLeft + padX, panelBottom + eqText * 0.6f, eqText * 0.8f,
+                          kHint, 1.0f);
                 }
 
                 if (quads > 0)

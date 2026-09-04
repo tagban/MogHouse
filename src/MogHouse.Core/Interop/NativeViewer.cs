@@ -25,6 +25,25 @@ public struct NativeZoneLine
 }
 
 /// <summary>
+/// The character's job, level and stats. Matches MhCharacterStats.
+///
+/// Stats are STR, DEX, VIT, AGI, INT, MND, CHR: the base from the job and
+/// level, and what everything worn adds to it.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+public unsafe struct NativeCharacterStats
+{
+    public byte MainJob;
+    public byte SubJob;
+    public byte MainLevel;
+    public byte SubLevel;
+    public int MaxHp;
+    public int MaxMp;
+    public fixed ushort BaseStats[7];
+    public fixed short StatModifiers[7];
+}
+
+/// <summary>
 /// One slot the player holds. Matches MhInventorySlot.
 ///
 /// Container and slot are the server's own numbering, so the pair identifies
@@ -487,6 +506,34 @@ public sealed partial class NativeViewer : IDisposable
         }
         mh_viewer_set_inventory(_handle, slots, slots.Length, sizes, sizes.Length);
     }
+
+    /// <summary>The character's job, level and stats, for the equipment screen.</summary>
+    public void SetCharacterStats(NativeCharacterStats stats)
+    {
+        if (!_disposed && _handle != IntPtr.Zero)
+        {
+            mh_viewer_set_character_stats(_handle, in stats);
+        }
+    }
+
+    [LibraryImport(LibraryName)]
+    private static partial void mh_viewer_set_character_stats(IntPtr viewer,
+        in NativeCharacterStats stats);
+
+    /// <summary>
+    /// Where each of the sixteen equipment slots is wearing something from.
+    /// </summary>
+    public void SetEquipment(ReadOnlySpan<byte> containers, ReadOnlySpan<byte> slots)
+    {
+        if (!_disposed && _handle != IntPtr.Zero)
+        {
+            mh_viewer_set_equipment(_handle, containers, slots, slots.Length);
+        }
+    }
+
+    [LibraryImport(LibraryName)]
+    private static partial void mh_viewer_set_equipment(IntPtr viewer, ReadOnlySpan<byte> containers,
+        ReadOnlySpan<byte> slots, int count);
 
     /// <summary>
     /// Tells the renderer what an item is called and what it looks like.

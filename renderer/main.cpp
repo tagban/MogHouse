@@ -209,6 +209,39 @@ void fillDemoBags(mh::ViewerLink& link)
 
     link.setInventory(slots.data(), static_cast<int>(slots.size()), kSizes, 18);
 
+    // Something worn, so the equipment screen has slots to fill and slots to
+    // leave empty. Every entry points at a bag slot, as the server's does.
+    uint8_t wornContainers[16] = {};
+    uint8_t wornSlots[16];
+    for (int i = 0; i < 16; ++i)
+    {
+        wornSlots[i] = 255;
+    }
+    wornSlots[0] = 3;    // main hand
+    wornSlots[5] = 6;    // body
+    wornSlots[6] = 9;    // hands
+    wornSlots[13] = 12;  // a ring
+    link.setEquipment(wornContainers, wornSlots, 16);
+
+    mh::ViewerLink::CharacterStats stats;
+    stats.mainJob = 1;
+    stats.subJob = 2;
+    stats.mainLevel = 42;
+    stats.subLevel = 21;
+    stats.maxHp = 812;
+    stats.maxMp = 140;
+    const uint16_t base[7] = {48, 41, 46, 38, 24, 30, 27};
+    const int16_t bonus[7] = {12, 8, 15, 0, -3, 4, 0};
+    for (int i = 0; i < 7; ++i)
+    {
+        stats.base[i] = base[i];
+        stats.modifier[i] = bonus[i];
+    }
+    stats.known = true;
+    link.setCharacterStats(stats);
+    link.setVitals(640, 90, 1200, 78, 64);
+    link.setPlayerName("Caulifla");
+
     static const char* kNames[] = {"Ice Crystal", "Wind Crystal", "Scorpion Harness", "Ochiudo's Kote",
                                    "Kraken Club", "Meat Mithkabob", "Bronze Sword",   "Chocobo Bedding",
                                    "Okadomatsu",  "Simple Bed",     "Kraken Club +1", "Leather Vest"};

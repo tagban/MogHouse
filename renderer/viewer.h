@@ -553,6 +553,33 @@ public:
     /// so a client that drew eighty would be offering places to put things
     /// that do not exist.
     void setInventory(const InventorySlot* slots, int count, const uint16_t* sizes, int sizeCount);
+
+    /// Where each of the sixteen equipment slots is wearing something from.
+    ///
+    /// A pair per slot - the container and the slot inside it - because that
+    /// is all the server sends. What is actually worn is whatever is in that
+    /// place, so the bags have to have arrived for this to mean anything. 255
+    /// as the slot means nothing is worn there.
+    /// The character's job, level and stats. Stats are STR through CHR: the
+    /// base from the job, and what everything worn adds to it.
+    struct CharacterStats
+    {
+        uint8_t mainJob{};
+        uint8_t subJob{};
+        uint8_t mainLevel{};
+        uint8_t subLevel{};
+        int32_t maxHp{};
+        int32_t maxMp{};
+        uint16_t base[7]{};
+        int16_t modifier[7]{};
+        bool known{false};
+    };
+
+    void setCharacterStats(CharacterStats stats);
+    CharacterStats characterStats() const;
+
+    void setEquipment(const uint8_t* containers, const uint8_t* slots, int count);
+    std::array<std::pair<uint8_t, uint8_t>, 16> equipment() const;
     std::vector<InventorySlot> inventory() const;
     std::array<uint16_t, 18> containerSizes() const;
 
@@ -863,6 +890,8 @@ private:
     std::atomic<uint64_t> inventoryRevision_{0};
     std::vector<ItemFace> itemFaces_;
     std::deque<InventoryAction> inventoryActions_;
+    std::array<std::pair<uint8_t, uint8_t>, 16> equipment_{};
+    CharacterStats characterStats_{};
 
     // Two flags rather than one guarded pair: a raise only means anything
     // while the character is down, so the two being read a moment apart says

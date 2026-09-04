@@ -65,6 +65,18 @@ public sealed class FfxiGameSession : IDisposable
     public FfxiInventoryTracker Inventory { get; } = new();
 
     /// <summary>
+    /// Our job, level and stats, as the server last sent them.
+    ///
+    /// Arrives in the batch the server withholds until the zone-in handshake
+    /// finishes, and again whenever the numbers change - which gear does, so
+    /// this is what an equipment screen reads its columns from.
+    /// </summary>
+    public FfxiJobInfo? Job { get; private set; }
+
+    /// <summary>Raised when <see cref="Job"/> changes.</summary>
+    public event Action? JobChanged;
+
+    /// <summary>
     /// Whether the character is dead. Movement is refused while it is true:
     /// the server will not accept it, and walking a corpse around is the
     /// most obvious way for a client to be lying to the person using it.
@@ -1132,6 +1144,14 @@ public sealed class FfxiGameSession : IDisposable
             if (FfxiEquipment.TryParse(reply.Plaintext.AsSpan(offset, size)) is { } worn)
             {
                 Inventory.Apply(worn);
+            }
+
+            // Our job, level and stats. Sent with the zone-in batch and
+            // again whenever a piece of gear changes what they are.
+            if (FfxiJobInfo.TryParse(reply.Plaintext.AsSpan(offset, size)) is { } job)
+            {
+                Job = job;
+                JobChanged?.Invoke();
             }
 
             // Somebody has cast Raise. Nothing about the corpse says so.

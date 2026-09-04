@@ -379,6 +379,38 @@ int32_t mh_viewer_take_inventory_action(MhViewerHandle viewer, int32_t* kind, in
     return 1;
 }
 
+void mh_viewer_set_character_stats(MhViewerHandle viewer, const MhCharacterStats* stats)
+{
+    if (!viewer || !stats)
+    {
+        return;
+    }
+
+    mh::ViewerLink::CharacterStats held;
+    held.mainJob = stats->main_job;
+    held.subJob = stats->sub_job;
+    held.mainLevel = stats->main_level;
+    held.subLevel = stats->sub_level;
+    held.maxHp = stats->max_hp;
+    held.maxMp = stats->max_mp;
+    for (int i = 0; i < 7; ++i)
+    {
+        held.base[i] = stats->base_stats[i];
+        held.modifier[i] = stats->stat_modifiers[i];
+    }
+    held.known = true;
+    viewer->link.setCharacterStats(held);
+}
+
+void mh_viewer_set_equipment(MhViewerHandle viewer, const uint8_t* containers, const uint8_t* slots,
+                            int32_t count)
+{
+    if (viewer && containers && slots)
+    {
+        viewer->link.setEquipment(containers, slots, count);
+    }
+}
+
 void mh_viewer_push_item(MhViewerHandle viewer, uint16_t item_id, const char* name,
                          const char* description, uint16_t type, uint16_t level, uint16_t slots,
                          const uint8_t* rgba, int32_t width, int32_t height)

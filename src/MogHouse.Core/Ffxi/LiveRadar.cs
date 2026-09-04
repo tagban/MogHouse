@@ -462,6 +462,24 @@ public sealed class LiveRadar : IDisposable
         }
     }
 
+    /// <summary>The character's job, level and stats.</summary>
+    public void ShowCharacterStats(NativeCharacterStats stats)
+    {
+        if (!_closed)
+        {
+            _viewer.SetCharacterStats(stats);
+        }
+    }
+
+    /// <summary>Where each equipment slot is wearing something from.</summary>
+    public void ShowEquipment(ReadOnlySpan<byte> containers, ReadOnlySpan<byte> slots)
+    {
+        if (!_closed)
+        {
+            _viewer.SetEquipment(containers, slots);
+        }
+    }
+
     /// <summary>What the player asked to do with one inventory slot, or null.</summary>
     public (int Kind, byte Container, byte Slot, byte EquipSlot, uint Count)? TakeInventoryAction() =>
         _closed ? null : _viewer.TakeInventoryAction();

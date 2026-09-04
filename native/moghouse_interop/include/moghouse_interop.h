@@ -207,6 +207,32 @@ MH_API void mh_viewer_set_inventory(MhViewerHandle viewer,
                                     const MhInventorySlot* slots, int32_t count,
                                     const uint16_t* sizes, int32_t size_count);
 
+/// The character's job, level and stats, for the equipment screen.
+///
+/// Stats are STR, DEX, VIT, AGI, INT, MND, CHR in that order: the base from
+/// the job and level, and the modifier everything worn adds to it.
+typedef struct MhCharacterStats
+{
+    uint8_t main_job;
+    uint8_t sub_job;
+    uint8_t main_level;
+    uint8_t sub_level;
+    int32_t max_hp;
+    int32_t max_mp;
+    uint16_t base_stats[7];
+    int16_t stat_modifiers[7];
+} MhCharacterStats;
+
+MH_API void mh_viewer_set_character_stats(MhViewerHandle viewer, const MhCharacterStats* stats);
+
+/// Where each of the sixteen equipment slots is wearing something from.
+///
+/// A container and a slot per equipment slot, because that is all the server
+/// sends: what is worn is whatever is in that place. 255 as the slot means
+/// nothing is worn there.
+MH_API void mh_viewer_set_equipment(MhViewerHandle viewer, const uint8_t* containers,
+                                    const uint8_t* slots, int32_t count);
+
 /// What an item is called and what it looks like.
 ///
 /// Sent once per distinct item, not once per slot: a stack of ninety-nine
