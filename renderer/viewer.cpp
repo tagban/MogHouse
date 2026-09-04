@@ -7376,17 +7376,15 @@ constexpr float kGravity = 26.0f;
                         {
                             equipmentSlot = equipmentSlot == hit.value ? -1 : hit.value;
                         }
-                        else if (hit.kind == 11 && link && equipmentSlot >= 0)
+                        else if (hit.kind == 11 && link)
                         {
                             std::printf("equip: container %d slot %d into equipment slot %d\n",
-                                        (hit.value >> 8) & 0xFF, hit.value & 0xFF, equipmentSlot);
-                            // The value carries both halves of where the item
-                            // is, because a hit has only the one number.
+                                        (hit.value >> 8) & 0xFF, hit.value & 0xFF, (hit.value >> 16) & 0xFF);
                             link->requestInventoryAction(
                                 {mh::ViewerLink::InventoryAction::Kind::Equip,
                                  static_cast<uint8_t>((hit.value >> 8) & 0xFF),
                                  static_cast<uint8_t>(hit.value & 0xFF),
-                                 static_cast<uint8_t>(equipmentSlot), 0});
+                                 static_cast<uint8_t>((hit.value >> 16) & 0xFF), 0});
                         }
                         else if (hit.kind == 12 && link)
                         {
@@ -10891,20 +10889,18 @@ constexpr float kGravity = 26.0f;
                     const float listLeft = gridLeft + gridWide + padX;
                     float listY = topY;
 
-                    if (equipmentSlot < 0)
                     {
-                        write("Pick a slot", listLeft, listY, eqText, kHudBright, 1.0f);
-                        listY -= eqText * 1.4f;
-                        write("Only gear that fits it is listed.", listLeft, listY, eqText * 0.8f, kHint,
-                              1.0f);
-                    }
-                    else
-                    {
-                        write(std::string{kSlotNames[equipmentSlot]}, listLeft, listY, eqText, kHudBright,
-                              1.0f);
+                        // With no slot picked this lists everything wearable
+                        // and each row goes where its own item belongs; with
+                        // one picked it narrows to that slot. Picking first was
+                        // a step nobody wanted for the common case, which is
+                        // "put this on".
+                        write(equipmentSlot < 0 ? std::string{"Gear"}
+                                                : std::string{kSlotNames[equipmentSlot]},
+                              listLeft, listY, eqText, kHudBright, 1.0f);
 
                         // Taking it off is offered where there is something on.
-                        if (worn[static_cast<size_t>(equipmentSlot)].second != 255)
+                        if (equipmentSlot >= 0 && worn[static_cast<size_t>(equipmentSlot)].second != 255)
                         {
                             button("Remove", listLeft + eqText * 4.0f / windowAspect, listY, eqText * 0.85f, false, 12,
                                    equipmentSlot);
@@ -10934,8 +10930,25 @@ constexpr float kGravity = 26.0f;
                             }
 
                             const auto facing = itemFacing.find(entry.itemId);
-                            if (facing == itemFacing.end() ||
-                                (facing->second.slots & (1 << equipmentSlot)) == 0)
+                            if (facing == itemFacing.end() || facing->second.slots == 0)
+                            {
+                                continue;
+                            }
+
+                            // Where this row would go. The chosen slot when
+                            // there is one, otherwise the lowest the item
+                            // names - a ring names two and either will do,
+                            // and the server decides whether one is free.
+                            int goesTo = equipmentSlot;
+                            if (goesTo < 0)
+                            {
+                                goesTo = 0;
+                                while (goesTo < 16 && (facing->second.slots & (1 << goesTo)) == 0)
+                                {
+                                    ++goesTo;
+                                }
+                            }
+                            else if ((facing->second.slots & (1 << equipmentSlot)) == 0)
                             {
                                 continue;
                             }
@@ -10968,18 +10981,22 @@ constexpr float kGravity = 26.0f;
 
                             // Both halves of where it is, in the one number a
                             // hit carries.
+                            // Three numbers in the one a hit carries: where
+                            // it goes, and both halves of where it is now.
                             inventoryHits.push_back(
                                 InventoryHit{listLeft - eqText * 0.2f / windowAspect, rowBottom, listWide,
                                              rowHigh, 11,
-                                             (static_cast<int>(entry.container) << 8) | entry.slot});
+                                             (goesTo << 16) | (static_cast<int>(entry.container) << 8) |
+                                                 entry.slot});
                             listY -= rowHigh;
                             ++listed;
                         }
 
                         if (listed == 0)
                         {
-                            write("Nothing you own fits here.", listLeft, listY, eqText * 0.8f, kHudDim,
-                                  1.0f);
+                            write(equipmentSlot < 0 ? "Nothing you own can be worn."
+                                                    : "Nothing you own fits here.",
+                                  listLeft, listY, eqText * 0.8f, kHudDim, 1.0f);
                         }
                     }
 

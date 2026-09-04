@@ -450,6 +450,8 @@ public sealed class FfxiGameSession : IDisposable
 
         foreach ((ushort id, int offset, int size) in FfxiZonePacket.EnumerateSubPackets(reply.Plaintext))
         {
+            AdoptBags(reply.Plaintext.AsSpan(offset, size));
+
             if (id == FfxiZoneLoginReply.PacketId && size == FfxiZoneLoginReply.PacketSize)
             {
                 ZoneState = FfxiZoneLoginReply.Parse(reply.Plaintext.AsSpan(offset, size));
@@ -800,6 +802,8 @@ public sealed class FfxiGameSession : IDisposable
 
         foreach ((ushort id, int offset, int size) in FfxiZonePacket.EnumerateSubPackets(reply.Plaintext))
         {
+            AdoptBags(reply.Plaintext.AsSpan(offset, size));
+
             if (id == FfxiZoneLoginReply.PacketId && size == FfxiZoneLoginReply.PacketSize)
             {
                 ZoneState = FfxiZoneLoginReply.Parse(reply.Plaintext.AsSpan(offset, size));
@@ -843,6 +847,66 @@ public sealed class FfxiGameSession : IDisposable
     private readonly System.Text.StringBuilder _serverMessage = new();
 
     private uint? _zoneLineRequested;
+
+    /// <summary>
+    /// The bags, what is worn out of them, and the numbers they change.
+    ///
+    /// <para>
+    /// Its own method because more than one loop reads packets. The zone login
+    /// reply is walked where it arrives, looking only for the login packet
+    /// itself, and everything after it is walked by the heartbeat. The
+    /// equipment list is sent exactly once, in the login burst, so a handler
+    /// that only ran in the second loop never saw it - the bags filled from
+    /// the packets that kept coming and the equipment stayed empty, which
+    /// looked like an equip that did nothing.
+    /// </para>
+    ///
+    /// <para>
+    /// The server sends the bags one slot at a time with no count in front, so
+    /// the tracker keeps the running picture and 0x01D says when it is
+    /// complete.
+    /// </para>
+    /// </summary>
+    private void AdoptBags(ReadOnlySpan<byte> subPacket)
+    {
+        if (FfxiContainerSizes.TryParse(subPacket) is { } sizes)
+        {
+            Inventory.Apply(sizes);
+        }
+
+        if (FfxiInventoryItem.TryParse(subPacket) is { } carried)
+        {
+            Inventory.Apply(carried);
+        }
+
+        if (FfxiInventoryItemDetail.TryParse(subPacket) is { } detailed)
+        {
+            Inventory.Apply(detailed);
+        }
+
+        if (FfxiInventoryCount.TryParse(subPacket) is { } counted)
+        {
+            Inventory.Apply(counted);
+        }
+
+        if (FfxiInventoryReady.TryParse(subPacket) is { } ready)
+        {
+            Inventory.Apply(ready);
+        }
+
+        if (FfxiEquipment.TryParse(subPacket) is { } worn)
+        {
+            Inventory.Apply(worn);
+        }
+
+        // Our job, level and stats. Sent with the zone-in batch, and again
+        // whenever a piece of gear changes what they are.
+        if (FfxiJobInfo.TryParse(subPacket) is { } job)
+        {
+            Job = job;
+            JobChanged?.Invoke();
+        }
+    }
 
     private void TryLoadZoneLines()
     {
@@ -1120,46 +1184,7 @@ public sealed class FfxiGameSession : IDisposable
                 }
             }
 
-            // The bags, and what is worn out of them. The server sends these
-            // one slot at a time with no count in front, so the tracker keeps
-            // the running picture and 0x01D says when it is complete.
-            if (FfxiContainerSizes.TryParse(reply.Plaintext.AsSpan(offset, size)) is { } sizes)
-            {
-                Inventory.Apply(sizes);
-            }
-
-            if (FfxiInventoryItem.TryParse(reply.Plaintext.AsSpan(offset, size)) is { } carried)
-            {
-                Inventory.Apply(carried);
-            }
-
-            if (FfxiInventoryItemDetail.TryParse(reply.Plaintext.AsSpan(offset, size)) is { } detailed)
-            {
-                Inventory.Apply(detailed);
-            }
-
-            if (FfxiInventoryCount.TryParse(reply.Plaintext.AsSpan(offset, size)) is { } counted)
-            {
-                Inventory.Apply(counted);
-            }
-
-            if (FfxiInventoryReady.TryParse(reply.Plaintext.AsSpan(offset, size)) is { } ready)
-            {
-                Inventory.Apply(ready);
-            }
-
-            if (FfxiEquipment.TryParse(reply.Plaintext.AsSpan(offset, size)) is { } worn)
-            {
-                Inventory.Apply(worn);
-            }
-
-            // Our job, level and stats. Sent with the zone-in batch and
-            // again whenever a piece of gear changes what they are.
-            if (FfxiJobInfo.TryParse(reply.Plaintext.AsSpan(offset, size)) is { } job)
-            {
-                Job = job;
-                JobChanged?.Invoke();
-            }
+            AdoptBags(reply.Plaintext.AsSpan(offset, size));
 
             // Somebody has cast Raise. Nothing about the corpse says so.
             FfxiRaiseOffer? offer = FfxiRaiseOffer.TryParse(reply.Plaintext.AsSpan(offset, size));
