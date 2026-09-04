@@ -73,6 +73,7 @@ endif()
 # in tools/ that was validated across every zone in ROM/1.
 add_library(ffxi-dat STATIC
     ffxi/bgw.cpp
+    ffxi/spw.cpp
     ffxi/dat.cpp
     ffxi/d3m.cpp
     ffxi/filetable.cpp
@@ -97,6 +98,11 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../native/moghouse_interop moghouse
 
 add_executable(ffxi-datdump ffxi/datdump_main.cpp)
 target_link_libraries(ffxi-datdump PRIVATE ffxi-dat)
+
+# Decoding a sound needs no GPU either, and "it parsed" is not evidence that
+# the format was read correctly - see the autocorrelation check inside.
+add_executable(ffxi-sounddump ffxi/sounddump_main.cpp)
+target_link_libraries(ffxi-sounddump PRIVATE ffxi-dat)
 
 # Skinning a character needs no GPU, so it gets its own CLI and can be checked
 # the same way the zone readers were.
