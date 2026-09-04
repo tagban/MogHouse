@@ -59,6 +59,9 @@ switch (args[0])
     case "items":
         return Items(ParseFlags(args));
 
+    case "events":
+        return Events(ParseFlags(args));
+
     default:
         PrintUsage();
         return 1;
@@ -81,6 +84,7 @@ static void PrintUsage()
           items --id <n> [--icon <out.png>] [--japanese]
           items --find <substring> [--japanese]
           items --export <directory> [--japanese]
+          events --zone <id> [--entity <id>] [--dump <file>]
           create-account --host <host> --username <user> --password <pass> [--auth-port <port>]
           create-account --credentials-file <path.json>
 
@@ -1704,6 +1708,73 @@ static int Text(Dictionary<string, string> flags)
     for (int i = first; i < first + count && i < lines.Count; i++)
     {
         Console.WriteLine($"  [{i}] {Flat(lines.Line(i))}");
+    }
+
+    return 0;
+}
+
+static int Events(Dictionary<string, string> flags)
+{
+    if (!flags.TryGetValue("zone", out string? zoneText) || !int.TryParse(zoneText, out int zone))
+    {
+        Console.WriteLine("events --zone <id> [--entity <hex or decimal id>] [--dump <file>]");
+        return 2;
+    }
+
+    FfxiFileTable? files = OpenFileTable();
+    if (files is null)
+    {
+        return 1;
+    }
+
+    FfxiEventTable events = FfxiEventTable.Load(files, zone);
+    Console.WriteLine($"zone {zone}: {events.Count} entities with scripts " +
+                      $"(file id {FfxiEventTable.FileIdOffset + zone})");
+
+    if (flags.TryGetValue("entity", out string? idText) && idText.Length > 0)
+    {
+        uint wanted = idText.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            ? Convert.ToUInt32(idText[2..], 16)
+            : uint.Parse(idText);
+
+        if (events.For(wanted) is not { } scripts)
+        {
+            Console.WriteLine($"no scripts for {wanted:X8}");
+            return 1;
+        }
+
+        Console.WriteLine($"{scripts.EntityId:X8}{(scripts.IsZoneItself ? " (the zone itself)" : "")}: " +
+                          $"{scripts.Script.Length} bytes");
+
+        if (flags.TryGetValue("dump", out string? into) && into.Length > 0)
+        {
+            File.WriteAllBytes(into, scripts.Script);
+            Console.WriteLine($"written to {into}");
+        }
+        else
+        {
+            for (int off = 0; off < Math.Min(scripts.Script.Length, 128); off += 16)
+            {
+                byte[] row = scripts.Script[off..Math.Min(off + 16, scripts.Script.Length)];
+                Console.WriteLine($"  {off:X4}  {Convert.ToHexString(row).ToLowerInvariant()}");
+            }
+        }
+
+        return 0;
+    }
+
+    int shown = 0;
+    foreach (uint id in events.Entities)
+    {
+        if (shown++ >= 20)
+        {
+            Console.WriteLine($"  ... and {events.Count - 20} more");
+            break;
+        }
+
+        FfxiEventScripts? scripts = events.For(id);
+        Console.WriteLine($"  {id:X8}  {scripts?.Script.Length ?? 0,7} bytes" +
+                          (scripts?.IsZoneItself == true ? "   (the zone itself)" : ""));
     }
 
     return 0;

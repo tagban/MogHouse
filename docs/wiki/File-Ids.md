@@ -15,6 +15,7 @@ The ids themselves, though, are often arithmetic.
 | dialogue, English | `6420 + zone` | see [Dialogue](Dialogue) |
 | dialogue, Japanese | `6120 + zone` | the same format and the same entry count |
 | entity names | `6720 + zone` | who is in the zone, and their ids |
+| event scripts | `5820 + zone` | cutscenes, per entity - see [Events](Events) |
 | building interiors | listed in [Object mapping](Object-Mapping) | a city is a shell plus separate files |
 
 `6120` and `6420` are the same table twice, once per language - Southern San
