@@ -791,6 +791,47 @@ bool isMarkerOnlyDirectory(const std::string& directory)
 /// `!weather <n>` on a LandSandBoat server sets it, which makes that a quick
 /// thing to settle one row at a time. Kept as one table so correcting a row
 /// costs nothing.
+/// Volume as eleven steps, because the form has a dropdown and no slider.
+/// Coarse on purpose: the difference between 45 and 50 per cent is not worth a
+/// row of the menu, and eleven options fit on one screen where a hundred do not.
+const std::vector<std::string>& volumeSteps()
+{
+    static const std::vector<std::string> steps = [] {
+        std::vector<std::string> made;
+        for (int i = 0; i <= 10; ++i)
+        {
+            made.push_back(std::to_string(i * 10) + "%");
+        }
+        return made;
+    }();
+    return steps;
+}
+
+int volumeStep(float volume)
+{
+    return std::clamp(static_cast<int>(std::lround(volume * 10.0f)), 0, 10);
+}
+
+/// The options menu.
+///
+/// Built here rather than by the client, unlike every other form: these are the
+/// renderer's own levels, and sending a volume across the boundary and waiting
+/// for it to come back would put a round trip between the key and the sound.
+/// The client keeps what it is told, through the settings it already carries.
+mh::Form optionsMenu(float musicVolume, float soundVolume)
+{
+    mh::Form form;
+    form.title = "OPTIONS";
+    form.rows.push_back(mh::FormRow{mh::FormRowKind::Choice, "MUSIC",
+                                    choiceValue(volumeStep(musicVolume), volumeSteps()), true});
+    form.rows.push_back(mh::FormRow{mh::FormRowKind::Choice, "SOUND",
+                                    choiceValue(volumeStep(soundVolume), volumeSteps()), true});
+    form.rows.push_back(mh::FormRow{mh::FormRowKind::Label,
+                                    "Ambience follows Sound.", "", true});
+    form.rows.push_back(mh::FormRow{mh::FormRowKind::Button, "CLOSE", "", true});
+    return form;
+}
+
 const char* skyForWeather(int weather)
 {
     switch (weather)
@@ -4953,6 +4994,39 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         return entity.hasLook() ? modelFor(entity.look) : nullptr;
     };
 
+    /// Kept here as well as in the device so the keys have something to step,
+    /// and declared this early because the ambience below scales off it - it
+    /// used to sit further down, out of reach of the lambda that plays sound,
+    /// which is why the volume keys moved the music and left the ambience
+    /// where it was.
+    ///
+    /// Starts low: music you have to turn down is worse than music you have to
+    /// turn up, and this one starts the moment you log in.
+    float musicVolume = 0.5f;
+    if (const char* volume = std::getenv("MOGHOUSE_MUSIC_VOLUME"))
+    {
+        musicVolume = std::clamp(static_cast<float>(std::atof(volume)), 0.0f, 1.0f);
+    }
+
+    /// And a separate one for everything that is not music, the way retail has
+    /// a Sound slider beside its Music slider. Effects play at this; ambience
+    /// plays at a fraction of it, since it is meant to sit under everything
+    /// else rather than beside it.
+    float soundVolume = 0.5f;
+    if (const char* volume = std::getenv("MOGHOUSE_SOUND_VOLUME"))
+    {
+        soundVolume = std::clamp(static_cast<float>(std::atof(volume)), 0.0f, 1.0f);
+    }
+
+    /// Whether the options menu is up, and where its button sits so a click can
+    /// find it. The rect is written while drawing and read by the events of the
+    /// next frame, which is a frame behind and does not matter for a button
+    /// that does not move.
+    /// MOGHOUSE_OPTIONS=1 starts with it open, which is how it is looked at
+    /// without a keyboard - a screenshot run presses nothing.
+    bool optionsOpen = std::getenv("MOGHOUSE_OPTIONS") != nullptr;
+    float optionsButton[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+
     auto writeCharacterInstance = [&]() {
         if (!characterInstanceBuffer)
         {
@@ -5028,6 +5102,27 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                 const char* set = std::getenv("MOGHOUSE_AMBIENCE_REACH");
                 return set != nullptr ? static_cast<float>(std::atof(set)) : 30.0f;
             }();
+
+            // Ambience sits well under the music and moves with it. The first
+            // version of this did neither: it played at full scale against the
+            // music's 0.35 and buried it, and the volume keys could not touch
+            // it. Southern San d'Oria was the case that showed it - four
+            // fountains and a wind, all looping, all at 1.0, which together
+            // sound like a storm rather than a town.
+            //
+            // A fraction of the sound level rather than a level of its own, so
+            // the Sound control moves it and the balance holds wherever that is
+            // left. At the default 0.5 sound this is 0.15 ambience.
+            static const float ambienceRatio = [] {
+                const char* set = std::getenv("MOGHOUSE_AMBIENCE_VOLUME");
+                return set != nullptr ? std::clamp(static_cast<float>(std::atof(set)), 0.0f, 1.0f) : 0.3f;
+            }();
+            const float ambienceGain = soundVolume * ambienceRatio;
+
+            // And only a few at a time. The files carry their own loudness -
+            // these five peak anywhere from 9% to 37% of full scale - so a
+            // gain alone does not stop six of them adding up.
+            static const size_t kNearestAmbience = 3;
             static const std::filesystem::path soundRoot = [] {
                 const std::filesystem::path root = ffxi::defaultInstallRoot();
                 return root.empty() ? root : root / "sound" / "win";
@@ -5050,6 +5145,16 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                     }
                 }
 
+                // Ranked before anything is played, so that only the few
+                // closest positional sounds are heard at once.
+                struct Candidate
+                {
+                    uint32_t sound;
+                    float distance;
+                    bool everywhere;
+                };
+                std::vector<Candidate> candidates;
+                candidates.reserve(nearest.size());
                 for (const auto& [sound, distance] : nearest)
                 {
                     const std::filesystem::path file =
@@ -5061,13 +5166,27 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                     // generators, which are nowhere in particular, so taking
                     // its distance seriously would have it fade as you walked.
                     // Mono is the positional kind and does fall off.
-                    const bool everywhere = sounds.channels(file) > 1;
+                    candidates.push_back(Candidate{sound, distance, sounds.channels(file) > 1});
+                }
+                std::sort(candidates.begin(), candidates.end(),
+                          [](const Candidate& a, const Candidate& b) { return a.distance < b.distance; });
+
+                size_t positional = 0;
+                for (const auto& [sound, distance, everywhere] : candidates)
+                {
+                    const std::filesystem::path file =
+                        soundRoot / ffxi::SoundRef{std::string{}, sound, std::string{}}.file();
 
                     // Squared falloff, as the lamps use: linear is too loud too
                     // far out, and a waterfall audible across half a zone is
                     // worse than one that fades a little early.
                     const float reach = 1.0f - std::sqrt(distance) / ambienceReach;
-                    const float volume = everywhere ? 1.0f : (reach > 0.0f ? reach * reach : 0.0f);
+                    float volume = everywhere ? ambienceGain
+                                              : (reach > 0.0f ? reach * reach * ambienceGain : 0.0f);
+                    if (!everywhere && volume > 0.0f && ++positional > kNearestAmbience)
+                    {
+                        volume = 0.0f;
+                    }
 
                     const auto voice = ambienceVoices.find(sound);
                     if (volume <= 0.0f)
@@ -5189,7 +5308,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                 static std::set<uint32_t> sounded;
                 if (sounded.insert(entity.id).second)
                 {
-                    const bool played = sounds.play(emergeSound);
+                    const bool played = sounds.play(emergeSound, soundVolume);
                     if (watchSpawns)
                     {
                         std::printf("  emerge sound: %s (%zu voices)\n",
@@ -5345,14 +5464,6 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     // that cannot make a sound still draws.
     mh::Music music;
 
-    /// Kept here as well as in the device so the keys have something to step.
-    /// Starts low: music you have to turn down is worse than music you have to
-    /// turn up, and this one starts the moment you log in.
-    float musicVolume = 0.35f;
-    if (const char* volume = std::getenv("MOGHOUSE_MUSIC_VOLUME"))
-    {
-        musicVolume = std::clamp(static_cast<float>(std::atof(volume)), 0.0f, 1.0f);
-    }
     music.setVolume(musicVolume);
 
     bool dragging = false;
@@ -5819,7 +5930,11 @@ constexpr float kGravity = 26.0f;
         // further down lays it out. Two reads of a form the client can replace
         // between them would let a click land on a button that is no longer
         // there.
-        const mh::Form activeForm = link           ? link->form()
+        // The options menu wins over whatever the client is showing. It is the
+        // renderer's own, so it does not go through the link at all - see
+        // optionsMenu.
+        const mh::Form activeForm = optionsOpen ? optionsMenu(musicVolume, soundVolume)
+                                    : link      ? link->form()
                                     : options.testForm ? demoForm()
                                                        : mh::Form{};
 
@@ -5856,7 +5971,33 @@ constexpr float kGravity = 26.0f;
             const int count = static_cast<int>(options.size());
             const int chosen = ((option % count) + count) % count;
             value = choiceValue(chosen, options);
-            link->submitForm(row, formValues);
+
+            // The options menu is answered here rather than sent anywhere. Its
+            // rows are volumes this loop owns, and the form is rebuilt from
+            // them next frame, so setting them is the whole of applying it.
+            if (optionsOpen)
+            {
+                const float level = static_cast<float>(chosen) / 10.0f;
+                if (row == 0)
+                {
+                    musicVolume = level;
+                    music.setVolume(musicVolume);
+                    if (link)
+                    {
+                        link->noteSettings({musicVolume, radarTurns});
+                    }
+                }
+                else if (row == 1)
+                {
+                    soundVolume = level;
+                }
+                return;
+            }
+
+            if (link)
+            {
+                link->submitForm(row, formValues);
+            }
         };
         const auto stepChoice = [&](int row, int step) {
             if (!formChoiceAt(row) || static_cast<size_t>(row) >= formValues.size())
@@ -5880,6 +6021,12 @@ constexpr float kGravity = 26.0f;
                      static_cast<size_t>(formFocus) < formValues.size() && formTypable(formFocus))
             {
                 formValues[static_cast<size_t>(formFocus)] += event.text.text;
+            }
+            // Before the form, because the form is what this opens: handled
+            // after it, the menu could be opened and never shut.
+            else if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_KP_MINUS)
+            {
+                optionsOpen = !optionsOpen;
             }
             else if (event.type == SDL_EVENT_KEY_DOWN && formShown)
             {
@@ -6000,7 +6147,11 @@ constexpr float kGravity = 26.0f;
                         }
                     }
 
-                    if (pressing >= 0 && link)
+                    if (pressing >= 0 && optionsOpen)
+                    {
+                        optionsOpen = false;
+                    }
+                    else if (pressing >= 0 && link)
                     {
                         link->submitForm(pressing, formValues);
                     }
@@ -6171,15 +6322,26 @@ constexpr float kGravity = 26.0f;
                          event.key.key == SDLK_PLUS)
                 {
                     // Minus and equals, because equals is the unshifted plus
-                    // and nobody holds shift to turn music up.
+                    // and nobody holds shift to turn music up. Shift *is* the
+                    // sound control, though - two levels, one pair of keys,
+                    // until there is an options menu to put them in.
                     const float step = event.key.key == SDLK_MINUS ? -0.05f : 0.05f;
-                    musicVolume = std::clamp(musicVolume + step, 0.0f, 1.0f);
-                    music.setVolume(musicVolume);
-                    if (link)
+                    if ((SDL_GetModState() & SDL_KMOD_SHIFT) != 0)
                     {
-                        link->noteSettings({musicVolume, radarTurns});
+                        soundVolume = std::clamp(soundVolume + step, 0.0f, 1.0f);
+                        std::printf("sound volume %.0f%% (ambience %.0f%%)\n", soundVolume * 100.0f,
+                                    soundVolume * 30.0f);
                     }
-                    std::printf("music volume %.0f%%\n", musicVolume * 100.0f);
+                    else
+                    {
+                        musicVolume = std::clamp(musicVolume + step, 0.0f, 1.0f);
+                        music.setVolume(musicVolume);
+                        if (link)
+                        {
+                            link->noteSettings({musicVolume, radarTurns});
+                        }
+                        std::printf("music volume %.0f%%\n", musicVolume * 100.0f);
+                    }
                 }
                 else if (event.key.key == SDLK_M)
                 {
@@ -6323,8 +6485,10 @@ constexpr float kGravity = 26.0f;
                         link->requestTalk(chosen);
                     }
                 }
-                else if (event.key.key == SDLK_KP_MINUS)
+                else if (event.key.key == SDLK_KP_MULTIPLY)
                 {
+                    // Moved off the numpad minus, which retail uses to open its
+                    // menu and which now does that here.
                     walkByDefault = !walkByDefault;
                     std::printf("%s\n", walkByDefault ? "walking" : "running");
                 }
@@ -6458,7 +6622,15 @@ constexpr float kGravity = 26.0f;
                 // cursor happened to land on.
                 float upX = 0.0f;
                 float upY = 0.0f;
-                if (!dragMoved && link && pointerNdc(event.button.x, event.button.y, upX, upY))
+                if (!dragMoved && pointerNdc(event.button.x, event.button.y, upX, upY) &&
+                    optionsButton[2] > 0.0f && upX >= optionsButton[0] &&
+                    upX < optionsButton[0] + optionsButton[2] && upY >= optionsButton[1] &&
+                    upY < optionsButton[1] + optionsButton[3])
+                {
+                    optionsOpen = !optionsOpen;
+                    dragging = false;
+                }
+                else if (!dragMoved && link && pointerNdc(event.button.x, event.button.y, upX, upY))
                 {
                     for (const CornerLink& chip : cornerLinks)
                     {
@@ -8480,6 +8652,30 @@ constexpr float kGravity = 26.0f;
 
                         cornerX += width + gap * 2.0f;
                     }
+                }
+
+                // The way into the options, at the bottom right - left of the
+                // vitals, which already hold the corner itself. Retail opens
+                // the same menu with the numpad minus, and so does this.
+                //
+                // Lettered rather than a gear: the atlas is a typeface, and a
+                // gear is a picture. One can be added, but a button labelled
+                // with a wrong-looking glyph is worse than one that says what
+                // it does.
+                {
+                    constexpr float kOptionsScale = 0.7f;
+                    const std::string caption = "OPTIONS";
+                    const float width = measure(caption, kOptionsScale);
+                    const float high = line * kOptionsScale + gap * 0.6f;
+                    const float left = 0.63f - gap * 2.0f - width;
+                    const float bottom = -0.95f;
+                    place(caption, left, bottom, kOptionsScale, optionsOpen ? kHudBright : kHudDim, 0.55f,
+                          false);
+
+                    optionsButton[0] = left;
+                    optionsButton[1] = bottom;
+                    optionsButton[2] = width;
+                    optionsButton[3] = high;
                 }
 
                 // HP, MP and TP as three bars in the bottom right corner,

@@ -539,7 +539,7 @@ public:
     /// changed and the managed side is what has a file.
     struct Settings
     {
-        float musicVolume{0.35f};
+        float musicVolume{0.5f};
         bool radarTurns{true};
     };
 

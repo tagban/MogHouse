@@ -19,7 +19,7 @@ public sealed class MogHouseSettings
 {
     /// <summary>0 silent, 1 as recorded.</summary>
     [JsonPropertyName("musicVolume")]
-    public float MusicVolume { get; set; } = 0.35f;
+    public float MusicVolume { get; set; } = 0.5f;
 
     /// <summary>Whether the minimap turns with the player or holds north up.</summary>
     [JsonPropertyName("radarTurnsWithPlayer")]

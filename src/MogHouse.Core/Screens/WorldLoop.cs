@@ -30,6 +30,9 @@ public sealed class WorldLoop
     private uint _openZone;
     private bool _leaving;
 
+    /// Whether the welcome popup is still up and waiting to be dismissed.
+    private bool _welcoming;
+
     /// <param name="tracker">
     /// What the renderer draws entities from. Handed in rather than made here
     /// because whoever zoned in has already been feeding it.
@@ -70,6 +73,7 @@ public sealed class WorldLoop
         _world.ShowZoneLines(_session.ZoneLines);
         _world.ShowWeather(_session.CurrentWeather);
         PlayMusic(_session.CurrentTrack);
+        Welcome();
 
         try
         {
@@ -106,10 +110,32 @@ public sealed class WorldLoop
     }
 
     /// <summary>The loop proper, until the window goes.</summary>
+    /// <summary>
+    /// A word to testers as they arrive, because a reporting tool nobody knows
+    /// about collects nothing. Shown as a popup rather than said into chat: the
+    /// first thing on screen at zone-in is a burst of the server's own
+    /// messages, and a line about /bug would scroll past behind them.
+    /// </summary>
+    private void Welcome()
+    {
+        _world.ShowForm("MOGHOUSE XI",
+                        "If you find a bug, face it, and type /bug <insert context here> and hit enter.",
+                        new[] { NativeFormRow.Button("Got it") });
+        _welcoming = true;
+    }
+
     private void Pump()
     {
         while (!_world.Closed && !_leaving)
         {
+            // Dismissed. Only while the welcome is up, so this does not eat the
+            // result of any other form the world puts on screen later.
+            if (_welcoming && _world.TakeFormResult() is not null)
+            {
+                _welcoming = false;
+                _world.HideForm();
+            }
+
             // Not while a zone is being read. Until it finishes the window is
             // still holding the position it had in the zone being left, and
             // telling the server that is how one zone change becomes several -
