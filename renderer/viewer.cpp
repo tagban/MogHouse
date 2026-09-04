@@ -6320,6 +6320,16 @@ constexpr float kGravity = 26.0f;
     uint32_t targetId = 0;
     uint32_t hoverId = 0;
 
+    /// What the target looked like last frame, so a body that will not hold
+    /// still can be caught saying so.
+    ///
+    /// An NPC was reported changing form while being watched, and nothing in
+    /// the tracker's own log agreed: no look changed, no model rebuilt. So the
+    /// change is happening between the look arriving and the body being drawn,
+    /// and this is the only place left to look from.
+    std::array<uint16_t, 7> targetWas{};
+    bool targetWasKnown = false;
+
     /// Whether the character is walking after whatever is targeted.
     ///
     /// Tab steps through what is near, nearest first, and V follows it. The
@@ -8562,6 +8572,34 @@ constexpr float kGravity = 26.0f;
                 continue;
             }
             ++posedCount;
+
+            // A body that will not hold still, caught saying so.
+            //
+            // An NPC was reported flickering between other people's
+            // appearances, and nothing in the tracker agreed: no look changed,
+            // no model rebuilt. So whatever changes happens between the look
+            // arriving and the body being drawn, and this is the last place to
+            // watch from.
+            if (entity.id == targetId && targetId != 0)
+            {
+                std::array<uint16_t, 7> now{};
+                now[0] = entity.hasModel() ? 0xFFFFu : entity.look[0];
+                now[1] = entity.hasModel() ? entity.modelId : entity.look[1];
+                for (int slot = 2; slot < 7; ++slot)
+                {
+                    now[static_cast<size_t>(slot)] = entity.hasModel() ? 0 : entity.look[slot];
+                }
+
+                if (targetWasKnown && now != targetWas)
+                {
+                    std::printf("target %08X changed: %u,%u %u/%u/%u/%u/%u -> %u,%u %u/%u/%u/%u/%u\n",
+                                entity.id, targetWas[0], targetWas[1], targetWas[2], targetWas[3],
+                                targetWas[4], targetWas[5], targetWas[6], now[0], now[1], now[2],
+                                now[3], now[4], now[5], now[6]);
+                }
+                targetWas = now;
+                targetWasKnown = true;
+            }
 
             const DrawableCharacter* model = modelForEntity(entity);
             if (!model || model->loaded.animations.empty())
