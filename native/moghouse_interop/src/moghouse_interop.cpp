@@ -586,7 +586,30 @@ int32_t mh_pick_folder(const char* default_location, char* out, int32_t out_size
     }
 
     FolderChoice choice;
-    SDL_ShowOpenFolderDialog(onFolderChosen, &choice, nullptr, default_location, false);
+
+    // Titled, because this is the very first thing a new player sees and the
+    // bare chooser says only "Select Folder". What to pick was written to the
+    // log instead, where nobody looks - the first tester to meet it asked what
+    // it wanted. The accept button says so too, for the platforms that use it.
+    // Properties are best-effort per platform; if any are refused the dialog
+    // still opens, which is why nothing here is checked for failure.
+    SDL_PropertiesID props = SDL_CreateProperties();
+    if (props)
+    {
+        SDL_SetStringProperty(props, SDL_PROP_FILE_DIALOG_TITLE_STRING,
+                              "MogHouse XI - where is Final Fantasy XI? Pick the folder holding FTABLE.DAT and ROM");
+        SDL_SetStringProperty(props, SDL_PROP_FILE_DIALOG_ACCEPT_STRING, "Use this folder");
+        if (default_location != nullptr)
+        {
+            SDL_SetStringProperty(props, SDL_PROP_FILE_DIALOG_LOCATION_STRING, default_location);
+        }
+        SDL_ShowFileDialogWithProperties(SDL_FILEDIALOG_OPENFOLDER, onFolderChosen, &choice, props);
+        SDL_DestroyProperties(props);
+    }
+    else
+    {
+        SDL_ShowOpenFolderDialog(onFolderChosen, &choice, nullptr, default_location, false);
+    }
 
     // SDL answers through the callback, and on a first run there is no other
     // loop to deliver it - so this one pumps until the answer arrives.

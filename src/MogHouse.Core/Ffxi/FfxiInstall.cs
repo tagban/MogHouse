@@ -187,7 +187,12 @@ public static class FfxiInstall
         {
             say?.Invoke("Where is Final Fantasy XI? Pick the folder holding FTABLE.DAT and ROM.");
 
-            string? picked = MogHouse.Core.Interop.NativeViewer.PickFolder();
+            // Opened at the guess when there is one. Confirmed() deliberately
+            // refuses to act on a guess without being shown it, which is right;
+            // starting the chooser somewhere else as well only makes the person
+            // go and find the folder themselves. On Windows that usually means
+            // the dialog is already on the install and this is one click.
+            string? picked = MogHouse.Core.Interop.NativeViewer.PickFolder(Find());
             if (picked is null)
             {
                 // Cancelled, or no chooser available. Either way there is
