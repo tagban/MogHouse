@@ -5119,9 +5119,24 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         // Taken before the animation loop touches the geometry, so this is the
         // rest pose rather than whatever frame happened to be current.
         mh::reskin(character->geometry, mh::bindPose(character->skeleton), character->meshes);
-        entityVertexBuffer = createBuffer(device, character->geometry.vertices.data(),
-                                          character->geometry.vertices.size() * sizeof(mh::Vertex),
-                                          wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst);
+
+        // Once, and never again. This is the body borrowed by every entity
+        // nothing could be built for, and it used to be rebuilt here on every
+        // character build - which includes every time the player changes gear.
+        // So the pale figure standing in for an NPC was not merely player
+        // shaped, it was wearing what the player was wearing and changed as
+        // they changed: "a ghost of whatever character I'm on".
+        //
+        // Frozen at the first build it is still a body rather than a hole, and
+        // it stops being a portrait of the person looking at it. The right
+        // answer is a neutral figure of its own, which needs a model built
+        // from a fixed look and cannot be reached from here.
+        if (!entityVertexBuffer)
+        {
+            entityVertexBuffer = createBuffer(device, character->geometry.vertices.data(),
+                                              character->geometry.vertices.size() * sizeof(mh::Vertex),
+                                              wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst);
+        }
 
         for (const mh::Batch& batch : character->geometry.batches)
         {
