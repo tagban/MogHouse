@@ -1684,23 +1684,25 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
         // and nmib and on none of the six nmic - where a uv or opacity curve
         // is not: one nmic of the six carries `umcv` and the rest do not.
         //
-        // Off by default, and this is why. Applying op 0x29 as a multiplier on
-        // the placement's z scale makes the strip enormous: nmia measures
-        // 29.70 x 0 x 11.25, its placement scales that by (6, 0, 1), and a
-        // spread of 7.7 takes it to 178 x 87 - a sheet that covers the bay,
-        // where the three shoreline features of one beach sit five to seven
-        // units apart. On screen it filled 428 rows of 1440. Something about
-        // that reading is wrong, and until it is known what, a beach is better
-        // off without it.
+        // Op 0x29's curve is the depth the strip should reach, in the units its
+        // own bounds are in - not a factor to multiply the placement by. nmia
+        // measures 29.70 x 0 x 11.25 and its curve reaches 7.70: multiplied it
+        // gives a strip 87 units deep, covering a bay whose three shoreline
+        // features stand five to seven units apart, and on screen that filled
+        // 428 rows of 1440. Read as a depth it gives 7.70 units.
         //
-        // It is also not the thing retail shows. These models have a y extent
-        // of exactly zero - they are flat sheets, and no scale or uv curve can
-        // give a flat sheet a crest that rises and falls. Whatever makes a
-        // retail wave move up and down is not in the generator opcodes; it is
-        // vertex or keyframe data this does not read yet.
+        // The model's z bounds run 0..11.25 rather than about its middle, so
+        // the strip grows from its own seaward edge: its far edge is a
+        // waterline that runs up the sand and draws back. That is the motion,
+        // and it is real geometry moving rather than a texture sliding under a
+        // fixed edge. What these cannot do is rise and fall - the y extent is
+        // exactly zero, and no curve here gives a flat sheet a crest.
         //
-        // MOGHOUSE_WAVES=1 turns it on to keep looking at it.
-        static const bool wavesEnabled = std::getenv("MOGHOUSE_WAVES") != nullptr;
+        // MOGHOUSE_WAVES=0 turns them off.
+        static const bool wavesEnabled = [] {
+            const char* set = std::getenv("MOGHOUSE_WAVES");
+            return set == nullptr || std::strtol(set, nullptr, 10) != 0;
+        }();
         const bool wave = wavesEnabled && water && !effect.scaleZCurve.empty();
         if (wave)
         {
@@ -1787,6 +1789,8 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
                 params.wave.opacity = effect.opacityCurve;
                 params.wave.u = effect.uCurve;
                 params.wave.v = effect.vCurve;
+                const float zExtent = model->second.boundsMax[2] - model->second.boundsMin[2];
+                params.wave.spreadPerUnit = zExtent > 0.01f ? 1.0f / zExtent : 1.0f;
                 ++generatedWaves;
             }
             // A flame from the shared file adds to what is behind it; a
@@ -7970,9 +7974,10 @@ const float kWavePeriod = [] {
                     if (nowMs - lastTick >= 1000)
                     {
                         lastTick = nowMs;
-                        std::printf("wave %zu at %6.2fs phase %.3f: spread %.2f  v %+.2f  opacity %.3f\n", i,
-                                    static_cast<double>(nowMs) * 0.001, phase, at(draw.wave.scaleZ, 1.0f), wave[1],
-                                    wave[2]);
+                        std::printf("wave %zu at %6.2fs phase %.3f: reaches %.2f units (scale %.2f)  v %+.2f  "
+                                    "opacity %.3f\n",
+                                    i, static_cast<double>(nowMs) * 0.001, phase, at(draw.wave.scaleZ, 1.0f),
+                                    at(draw.wave.scaleZ, 1.0f) * draw.wave.spreadPerUnit, wave[1], wave[2]);
                     }
                     static std::set<size_t> reported;
                     if (reported.insert(i).second)
@@ -7999,7 +8004,9 @@ const float kWavePeriod = [] {
                 {
                     continue;
                 }
-                const float spread = at(draw.wave.scaleZ, 1.0f);
+                // The curve is the depth the strip should reach, in the same
+                // units its own bounds are in - not a factor to multiply by.
+                const float spread = at(draw.wave.scaleZ, 1.0f) * draw.wave.spreadPerUnit;
                 for (uint32_t n = 0; n < draw.instanceCount; ++n)
                 {
                     const size_t at16 = (static_cast<size_t>(draw.instanceOffset) + n) * 16;

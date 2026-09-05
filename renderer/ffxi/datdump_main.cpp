@@ -119,7 +119,9 @@ int main(int argc, char** argv)
                     {
                         if (m.name.rfind(only, 0) == 0)
                         {
-                            std::printf("  %s: %zu meshes\n", m.name.c_str(), m.meshes.size());
+                            std::printf("  %s: %zu meshes   bounds x %.2f..%.2f  y %.2f..%.2f  z %.2f..%.2f\n",
+                                        m.name.c_str(), m.meshes.size(), m.boundsMin[0], m.boundsMax[0],
+                                        m.boundsMin[1], m.boundsMax[1], m.boundsMin[2], m.boundsMax[2]);
                             for (const ffxi::ModelMesh& mesh : m.meshes)
                             {
                                 unsigned long long r = 0, g = 0, b2 = 0, a2 = 0;
