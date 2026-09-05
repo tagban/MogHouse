@@ -9789,6 +9789,26 @@ const float kWavePeriod = [] {
                             continue;
                         }
 
+                        // MOGHOUSE_GHOST_WATCH=1 names whoever ends up here.
+                        // This is the fallback for an entity nothing could be
+                        // built for, and from the zone it reads as a pale
+                        // figure that follows whatever the player is wearing -
+                        // because the shape drawn is the player's batch list.
+                        // Which entity it is, and what it asked for, is the
+                        // thing you cannot see from a chair.
+                        static const bool watchGhosts = std::getenv("MOGHOUSE_GHOST_WATCH") != nullptr;
+                        if (watchGhosts && index < radarEntities.size())
+                        {
+                            static std::set<uint32_t> ghostReported;
+                            const mh::RadarEntity& who = radarEntities[index];
+                            if (ghostReported.insert(who.id).second)
+                            {
+                                std::printf("ghost %08X \"%s\": modelId %u  look %u,%u %u/%u/%u/%u/%u\n",
+                                            who.id, who.name.c_str(), who.modelId, who.look[0], who.look[1],
+                                            who.look[2], who.look[3], who.look[4], who.look[5], who.look[6]);
+                            }
+                        }
+
                         // As a pale blank shape, the way the blank figure at
                         // character select is drawn - not as a copy of the
                         // player. A row of guards whose gear the loader cannot
