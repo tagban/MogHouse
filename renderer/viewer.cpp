@@ -8913,24 +8913,23 @@ const float kWavePeriod = [] {
             // what it is for. It is true now.
             writeCharacterInstance();
 
-            // Nearest first, so the ones that miss out are the ones furthest
-            // away.
+            // The list is not sorted again here, and that is the point.
             //
-            // Bodies are drawn from a fixed pool of instance slots and slots
-            // were handed out in whatever order the server happened to mention
-            // people, so past the cap you did not lose the distant ones - you
-            // lost whoever arrived late, which could be the NPC you were
-            // standing next to. Sorting here rather than at each use keeps the
-            // instance slots, the skinning pass and the nameplates all talking
-            // about the same entity for a given index.
-            std::sort(radarEntities.begin(), radarEntities.end(),
-                      [&](const mh::RadarEntity& a, const mh::RadarEntity& b) {
-                          const float ax = a.x - characterAt.x;
-                          const float az = a.z - characterAt.z;
-                          const float bx = b.x - characterAt.x;
-                          const float bz = b.z - characterAt.z;
-                          return ax * ax + az * az < bx * bx + bz * bz;
-                      });
+            // There used to be a second sort on this line - the same "nearest
+            // first" as the one further up, minus its tie-break - and it ran
+            // *after* the instance transforms had just been written from the
+            // list. So slot i held whoever was i'th before it and the draw
+            // looked up radarEntities[i] after it, and any two entities the
+            // sort chose to reorder were drawn wearing each other. Two bodies
+            // walking near each other have distances that cross constantly and
+            // std::sort is not stable, so they traded models for a frame at a
+            // time, every time they passed: a chocobo wore the NPC beside it
+            // and the NPC wore the chocobo.
+            //
+            // The sort above already does this job and breaks ties on the id
+            // so equal distances cannot flip. It runs before bodiesInRange is
+            // counted and before the transforms are written, which is the
+            // order the whole thing depends on.
 
             // The server moving us, before we report where we think we are -
             // otherwise the position we just posted would win and the move
