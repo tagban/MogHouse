@@ -973,6 +973,65 @@ mh::Form optionsMenu(float musicVolume, float soundVolume, float uiScaleChoice)
     return form;
 }
 
+/// The colour of the orb the weather is shown as, or nullptr for none.
+///
+/// FFXI's twenty weathers come in pairs sharing an element - rain and squall
+/// are water, snow and blizzards ice - and retail shows the element beside the
+/// clock. The first four carry no element at all: no weather, sunshine, clouds
+/// and fog are a sky rather than a strength, so they take the sky's own colour
+/// instead of an elemental one.
+///
+/// The pairing is the game's, and it is the same order the server numbers them
+/// in - see FfxiWeather. Only the colours are chosen here.
+const float* weatherOrb(int weather)
+{
+    static const float kSun[4] = {1.00f, 0.86f, 0.42f, 0.95f};
+    static const float kCloud[4] = {0.72f, 0.74f, 0.78f, 0.95f};
+    static const float kFog[4] = {0.60f, 0.62f, 0.64f, 0.85f};
+    static const float kFire[4] = {0.94f, 0.33f, 0.24f, 0.95f};
+    static const float kEarth[4] = {0.80f, 0.65f, 0.33f, 0.95f};
+    static const float kWater[4] = {0.33f, 0.58f, 0.92f, 0.95f};
+    static const float kWind[4] = {0.42f, 0.80f, 0.50f, 0.95f};
+    static const float kIce[4] = {0.62f, 0.88f, 0.94f, 0.95f};
+    static const float kLightning[4] = {0.72f, 0.48f, 0.90f, 0.95f};
+    static const float kLight[4] = {0.96f, 0.95f, 0.88f, 0.95f};
+    static const float kDark[4] = {0.42f, 0.32f, 0.52f, 0.95f};
+
+    switch (weather)
+    {
+    case 1:  return kSun;
+    case 2:  return kCloud;
+    case 3:  return kFog;
+    case 4:
+    case 5:  return kFire;
+    case 6:
+    case 7:  return kWater;
+    case 8:
+    case 9:  return kEarth;
+    case 10:
+    case 11: return kWind;
+    case 12:
+    case 13: return kIce;
+    case 14:
+    case 15: return kLightning;
+    case 16:
+    case 17: return kLight;
+    case 18:
+    case 19: return kDark;
+    default: return nullptr;
+    }
+}
+
+/// What the weather is called, for the label beside the orb.
+const char* weatherName(int weather)
+{
+    static const char* kNames[20] = {"",         "Sunshine", "Clouds",   "Fog",       "Hot Spell",
+                                     "Heat Wave", "Rain",    "Squall",   "Dust Storm", "Sand Storm",
+                                     "Wind",     "Gales",    "Snow",     "Blizzards", "Thunder",
+                                     "Thunderstorms", "Auroras", "Stellar Glare", "Gloom", "Darkness"};
+    return weather >= 0 && weather < 20 ? kNames[weather] : "";
+}
+
 const char* skyForWeather(int weather)
 {
     switch (weather)
@@ -9951,6 +10010,43 @@ const float kWavePeriod = [] {
                 const float clockBottom = above + gap * 2.0f + line * 1.5f;
                 label(clock, radarCentreX, clockBottom, 0.85f, kHudBright, 0.55f);
 
+                // The weather, as an orb left of the time - which is where
+                // retail keeps it. FFXI's twenty weathers pair off by element
+                // and the orb takes that element's colour; see weatherOrb.
+                //
+                // A coloured orb rather than the game's own icon. The icons are
+                // in the menu DAT and have not been found yet, and the element
+                // colours are at least the right information in the right
+                // place. Hovering is not a thing the HUD does, so the name goes
+                // under the orb rather than into a tooltip.
+                // The same answer the zone load used: what the server said, or
+                // MOGHOUSE_WEATHER when there is no server to ask.
+                static const int forcedWeather = forcedWeatherFromEnvironment();
+                const int shownWeather = link && link->weather() >= 0 ? link->weather() : forcedWeather;
+                if (const float* orb = weatherOrb(shownWeather))
+                {
+                    const float clockWide = measure(clock, 0.85f);
+                    const float high = line * 0.5f;
+                    const float wide = high / windowAspect;
+                    const float left = radarCentreX - clockWide * 0.5f - gap * 2.0f - wide;
+                    const float bottom = clockBottom + line * 0.16f;
+                    for (int bar = 0; bar < mh::kHudBars; ++bar)
+                    {
+                        if (hud.bars[bar][2] <= 0.0f)
+                        {
+                            hud.bars[bar][0] = left;
+                            hud.bars[bar][1] = bottom;
+                            hud.bars[bar][2] = wide;
+                            hud.bars[bar][3] = high;
+                            for (int c = 0; c < 4; ++c)
+                            {
+                                hud.barColours[bar][c] = orb[c];
+                            }
+                            break;
+                        }
+                    }
+                }
+
                 // The way into the options, right of the clock. Three bars
                 // rather than a word: a hamburger is a picture, and the text
                 // atlas is a typeface with no glyph for one - but the HUD can
@@ -9978,6 +10074,14 @@ const float kWavePeriod = [] {
                 {
                     label(kWeekdays[(vanaSeconds / 86400ull) % 8ull], radarCentreX,
                           clockBottom - line * kWeekdayScale - gap * 0.5f, kWeekdayScale, kHudDim, 0.55f);
+                }
+
+                // What the orb means, under the weekday. The HUD has no
+                // hovering, so the name is either shown or it is nowhere.
+                if (const char* named = weatherName(shownWeather); named != nullptr && named[0] != '\0')
+                {
+                    label(named, radarCentreX,
+                          clockBottom - line * kWeekdayScale * 2.0f - gap * 1.6f, kWeekdayScale, kHudDim, 0.55f);
                 }
 
                 // Compass letters around the ring.
