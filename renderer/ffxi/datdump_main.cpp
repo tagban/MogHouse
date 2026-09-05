@@ -143,6 +143,42 @@ int main(int argc, char** argv)
                             }
                         }
                     }
+                    // MOGHOUSE_SHEET_CENSUS=umi0,umi3 counts the meshes wearing
+                    // each named sheet, for finding out which zones a change to
+                    // the water sheet list would touch.
+                    if (const char* wanted = std::getenv("MOGHOUSE_SHEET_CENSUS"))
+                    {
+                        for (const ffxi::ModelMesh& mesh : m.meshes)
+                        {
+                            std::string own = mesh.texture;
+                            while (!own.empty() && (own.back() == ' ' || own.back() == 0))
+                            {
+                                own.pop_back();
+                            }
+                            const size_t space = own.find_last_of(' ');
+                            if (space != std::string::npos)
+                            {
+                                own = own.substr(space + 1);
+                            }
+                            std::string list = wanted;
+                            size_t at = 0;
+                            while (at < list.size())
+                            {
+                                const size_t comma = list.find(',', at);
+                                const std::string one = list.substr(at, comma - at);
+                                if (!one.empty() && own == one)
+                                {
+                                    std::printf("SHEET %s %s %zu\n", one.c_str(), m.name.c_str(),
+                                                mesh.indices.size() / 3);
+                                }
+                                if (comma == std::string::npos)
+                                {
+                                    break;
+                                }
+                                at = comma + 1;
+                            }
+                        }
+                    }
                     meshes += m.meshes.size();
                     verts += m.vertexCount();
                     tris += m.triangleCount();
