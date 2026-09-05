@@ -3351,6 +3351,26 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 
             if (!zone->waterIndices.empty())
             {
+                // How far the ripple sheet has to travel to be seen moving.
+                //
+                // The sheet drifts about 0.011 of a texture a second. Over a
+                // surface whose texture repeats a few times that reads as
+                // ripples; over one where it repeats a hundred times it is
+                // invisible, and the sea looks like a painted floor. The two
+                // kinds of water come from different places - a zone's own
+                // meshes carry the DAT's coordinates, a .water file carries
+                // ones this project generated - so they need not agree.
+                float lowU = 1e9f, highU = -1e9f, lowV = 1e9f, highV = -1e9f;
+                for (const mh::Vertex& vertex : zone->waterVertices)
+                {
+                    lowU = std::min(lowU, vertex.uv[0]);
+                    highU = std::max(highU, vertex.uv[0]);
+                    lowV = std::min(lowV, vertex.uv[1]);
+                    highV = std::max(highV, vertex.uv[1]);
+                }
+                std::printf("water uv: u %.2f..%.2f  v %.2f..%.2f  (%.0f x %.0f repeats)\n",
+                            lowU, highU, lowV, highV, highU - lowU, highV - lowV);
+
                 waterVertexBuffer = createBuffer(device, zone->waterVertices.data(),
                                                  zone->waterVertices.size() * sizeof(mh::Vertex), wgpu::BufferUsage::Vertex);
                 waterIndexBuffer = createBuffer(device, zone->waterIndices.data(),

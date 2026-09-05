@@ -62,8 +62,16 @@ fn fragmentMain(in : WaterOut) -> @location(0) vec4<f32> {
 
     // The ripple sheet, sampled twice drifting at different speeds and angles so
     // it does not read as one sheet sliding.
-    let a = textureSample(waterTexture, waterSampler, in.uv + vec2<f32>(time * 0.011, time * 0.007));
-    let b = textureSample(waterTexture, waterSampler, in.uv * 0.63 + vec2<f32>(time * -0.008, time * 0.013));
+    //
+    // The sea drifts faster than a river, which is backwards from how water
+    // behaves and right for how it looks. What matters is movement against the
+    // texture, and a sea lays that texture out far coarser: Valkurm's repeats
+    // fifteen times across the whole bay, so at a canal's pace one ripple
+    // takes a minute and a half to cross a single tile and the water reads as
+    // painted on. A canal repeats it every few yalms and needs no help.
+    let drift = mix(1.0, 6.0, sea);
+    let a = textureSample(waterTexture, waterSampler, in.uv + vec2<f32>(time * 0.011, time * 0.007) * drift);
+    let b = textureSample(waterTexture, waterSampler, in.uv * 0.63 + vec2<f32>(time * -0.008, time * 0.013) * drift);
     let foam = clamp(a.a * 0.7 + b.a * 0.55, 0.0, 1.0);
 
     // Ambient is clamped: components are scaled 0..128, so it can exceed 1, and
