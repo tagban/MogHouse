@@ -1683,7 +1683,25 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
         // twice. Op 0x29 is uniform here - it is on all three copies of nmia
         // and nmib and on none of the six nmic - where a uv or opacity curve
         // is not: one nmic of the six carries `umcv` and the rest do not.
-        const bool wave = water && !effect.scaleZCurve.empty();
+        //
+        // Off by default, and this is why. Applying op 0x29 as a multiplier on
+        // the placement's z scale makes the strip enormous: nmia measures
+        // 29.70 x 0 x 11.25, its placement scales that by (6, 0, 1), and a
+        // spread of 7.7 takes it to 178 x 87 - a sheet that covers the bay,
+        // where the three shoreline features of one beach sit five to seven
+        // units apart. On screen it filled 428 rows of 1440. Something about
+        // that reading is wrong, and until it is known what, a beach is better
+        // off without it.
+        //
+        // It is also not the thing retail shows. These models have a y extent
+        // of exactly zero - they are flat sheets, and no scale or uv curve can
+        // give a flat sheet a crest that rises and falls. Whatever makes a
+        // retail wave move up and down is not in the generator opcodes; it is
+        // vertex or keyframe data this does not read yet.
+        //
+        // MOGHOUSE_WAVES=1 turns it on to keep looking at it.
+        static const bool wavesEnabled = std::getenv("MOGHOUSE_WAVES") != nullptr;
+        const bool wave = wavesEnabled && water && !effect.scaleZCurve.empty();
         if (wave)
         {
             water = false;
@@ -7943,6 +7961,19 @@ const float kWavePeriod = [] {
                 static const bool watchWaves = std::getenv("MOGHOUSE_WAVE_WATCH") != nullptr;
                 if (watchWaves)
                 {
+                    // Once per draw for what it is, then once a second for
+                    // where it has got to - a wave that is set up correctly and
+                    // never advanced looks, from the beach, exactly like a wave
+                    // that was never set up at all.
+                    static uint64_t lastTick = 0;
+                    const uint64_t nowMs = SDL_GetTicksNS() / 1000000ull;
+                    if (nowMs - lastTick >= 1000)
+                    {
+                        lastTick = nowMs;
+                        std::printf("wave %zu at %6.2fs phase %.3f: spread %.2f  v %+.2f  opacity %.3f\n", i,
+                                    static_cast<double>(nowMs) * 0.001, phase, at(draw.wave.scaleZ, 1.0f), wave[1],
+                                    wave[2]);
+                    }
                     static std::set<size_t> reported;
                     if (reported.insert(i).second)
                     {

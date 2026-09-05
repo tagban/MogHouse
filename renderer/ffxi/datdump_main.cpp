@@ -135,6 +135,17 @@ int main(int argc, char** argv)
                                     lowA = std::min(lowA, av);
                                     highA = std::max(highA, av);
                                 }
+                                float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
+                                for (const ffxi::ModelVertex& v : mesh.vertices)
+                                {
+                                    for (int ax = 0; ax < 3; ++ax)
+                                    {
+                                        lo[ax] = std::min(lo[ax], v.position[ax]);
+                                        hi[ax] = std::max(hi[ax], v.position[ax]);
+                                    }
+                                }
+                                std::printf("      extent  x %.2f  y %.2f  z %.2f\n", hi[0] - lo[0], hi[1] - lo[1],
+                                            hi[2] - lo[2]);
                                 const size_t n = std::max<size_t>(mesh.vertices.size(), 1);
                                 std::printf("      %6zu tris  blend %u  tex [%s]  vertex colour mean "
                                             "%llu %llu %llu a %llu (a %u..%u)\n",
