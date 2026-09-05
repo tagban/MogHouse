@@ -53,6 +53,8 @@ public sealed class FfxiGameSession : IDisposable
     // can see that an NPC spoke but not what it said.
     private readonly FfxiFileTable? _files;
     private FfxiDialogueTable _dialogue = FfxiDialogueTable.Empty;
+    private FfxiEntityNames _entityNames = FfxiEntityNames.Empty;
+    private int _entityNamesZone = -1;
     private uint _dialogueZone = uint.MaxValue;
 
     private FfxiEventTable _events = FfxiEventTable.Empty;
@@ -1575,6 +1577,23 @@ public sealed class FfxiGameSession : IDisposable
             }
         }
 
-        return "";
+        // The server sends most NPCs with an empty name and expects the client
+        // to know it. Without this an NPC spoke into the chat log with nothing
+        // in front of the colon, which reads as the game not knowing who is
+        // talking - and it is the same table the renderer already reads for
+        // nameplates.
+        return EntityNames().Lookup(uniqueNo) ?? "";
+    }
+
+    private FfxiEntityNames EntityNames()
+    {
+        uint zone = ZoneState?.ZoneNo ?? 0;
+        if (_entityNamesZone != (int)zone)
+        {
+            _entityNamesZone = (int)zone;
+            _entityNames = FfxiEntityNames.Load(_files, (int)zone);
+        }
+
+        return _entityNames;
     }
 }

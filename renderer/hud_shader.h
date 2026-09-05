@@ -17,7 +17,13 @@ namespace mh
 inline constexpr int kHudStrings = 24;
 
 /// Characters per label. Long enough for a zone name and a timestamp.
-inline constexpr int kHudChars = 48;
+inline constexpr int kHudChars = 58;
+
+/// The shader below cannot see these constants - it is a string - so it
+/// carries its own copies: `kChars` and the length of `glyphs`. Change one of
+/// the three and this stops the build rather than the HUD quietly reading
+/// past the end of a row.
+static_assert(kHudStrings * kHudChars == 1392, "update glyphs : array<vec4<f32>, N> in the shader below");
 
 /// Filled rectangles drawn under the labels: the HP, MP and TP bars, and
 /// whatever else wants a meter rather than a number.
@@ -39,14 +45,14 @@ struct HudUniforms {
     // Per label: text colour, then a size multiplier on the shared cell size.
     colours : array<vec4<f32>, 24>,
     // Per glyph: atlas cell index, x offset in cells, advance in cells.
-    glyphs : array<vec4<f32>, 1152>,
+    glyphs : array<vec4<f32>, 1392>,
     // Per bar: left, bottom, width, height in NDC. Width zero is no bar.
     bars : array<vec4<f32>, 12>,
     // Per bar: colour, then how opaque it is.
     barColours : array<vec4<f32>, 12>,
 };
 
-const kChars = 48;
+const kChars = 58;
 
 @group(0) @binding(0) var<uniform> hud : HudUniforms;
 @group(0) @binding(1) var fontTexture : texture_2d<f32>;
