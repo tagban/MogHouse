@@ -7969,15 +7969,20 @@ const float kWavePeriod = [] {
                     // where it has got to - a wave that is set up correctly and
                     // never advanced looks, from the beach, exactly like a wave
                     // that was never set up at all.
-                    static uint64_t lastTick = 0;
+                    // Per draw, not shared: with one timer between them only
+                    // the first wave of the frame ever reported, which reads as
+                    // the others being dead.
+                    static std::unordered_map<size_t, uint64_t> lastTick;
                     const uint64_t nowMs = SDL_GetTicksNS() / 1000000ull;
-                    if (nowMs - lastTick >= 1000)
+                    uint64_t& tick = lastTick[i];
+                    if (nowMs - tick >= 2000)
                     {
-                        lastTick = nowMs;
-                        std::printf("wave %zu at %6.2fs phase %.3f: reaches %.2f units (scale %.2f)  v %+.2f  "
-                                    "opacity %.3f\n",
-                                    i, static_cast<double>(nowMs) * 0.001, phase, at(draw.wave.scaleZ, 1.0f),
-                                    at(draw.wave.scaleZ, 1.0f) * draw.wave.spreadPerUnit, wave[1], wave[2]);
+                        tick = nowMs;
+                        std::printf("wave %zu %-16s %2u copies  t %6.1fs phase %.3f  reaches %5.2f units  "
+                                    "v %+5.2f  opacity %.3f\n",
+                                    i, draw.texture.c_str(), draw.instanceCount,
+                                    static_cast<double>(nowMs) * 0.001, phase, at(draw.wave.scaleZ, 1.0f), wave[1],
+                                    wave[2]);
                     }
                     static std::set<size_t> reported;
                     if (reported.insert(i).second)
