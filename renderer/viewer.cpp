@@ -9114,6 +9114,27 @@ const float kWavePeriod = [] {
             }
 
             const DrawableCharacter* model = modelForEntity(entity);
+
+            // MOGHOUSE_LOOK_WATCH=1 reports whenever the model an entity
+            // resolves to changes. A body that flickers to somebody else's
+            // look and back is either the server changing its mind or this
+            // resolving differently on alternate frames, and from a chair the
+            // two are the same picture.
+            static const bool watchLooks = std::getenv("MOGHOUSE_LOOK_WATCH") != nullptr;
+            if (watchLooks)
+            {
+                static std::unordered_map<uint32_t, const DrawableCharacter*> lastModel;
+                auto seen = lastModel.find(entity.id);
+                if (seen != lastModel.end() && seen->second != model)
+                {
+                    std::printf("look change %08X: model %p -> %p   modelId %u  look %u,%u %u/%u/%u/%u/%u\n",
+                                entity.id, static_cast<const void*>(seen->second),
+                                static_cast<const void*>(model), entity.modelId, entity.look[0], entity.look[1],
+                                entity.look[2], entity.look[3], entity.look[4], entity.look[5], entity.look[6]);
+                }
+                lastModel[entity.id] = model;
+            }
+
             if (!model || model->loaded.animations.empty())
             {
                 continue;
