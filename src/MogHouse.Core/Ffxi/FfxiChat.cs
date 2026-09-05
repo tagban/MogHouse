@@ -45,6 +45,40 @@ public enum FfxiChatMessageType : byte
     NoSpeakerLinkshell = 16,
 }
 
+/// <summary>Turning what we asked to say into how it should be shown.</summary>
+public static class FfxiChatEcho
+{
+    /// <summary>
+    /// How a line we just sent should be coloured in our own log.
+    ///
+    /// <para>
+    /// The two enumerations are not the same list and must not be cast between
+    /// - see <see cref="FfxiChatMessageType"/> - so this is written out. Until
+    /// it existed every line a player sent was echoed as Say, which put a
+    /// linkshell message on screen looking exactly like something shouted at
+    /// the street.
+    /// </para>
+    ///
+    /// <para>
+    /// Yell and Unity have no message type of their own; the server's list
+    /// stops before them. Yell reads as a shout, which is what it is, and
+    /// anything else falls back to Say rather than inventing a colour.
+    /// </para>
+    /// </summary>
+    public static FfxiChatMessageType For(FfxiChatKind kind) => kind switch
+    {
+        FfxiChatKind.Say => FfxiChatMessageType.Say,
+        FfxiChatKind.Shout => FfxiChatMessageType.Shout,
+        FfxiChatKind.Yell => FfxiChatMessageType.Shout,
+        FfxiChatKind.Party => FfxiChatMessageType.Party,
+        FfxiChatKind.Linkshell1 => FfxiChatMessageType.Linkshell,
+        FfxiChatKind.Linkshell2 => FfxiChatMessageType.Linkshell,
+        FfxiChatKind.LinkshellPvp => FfxiChatMessageType.Linkshell,
+        FfxiChatKind.Emote => FfxiChatMessageType.Emotion,
+        _ => FfxiChatMessageType.Say,
+    };
+}
+
 /// <summary>
 /// GP_CLI_COMMAND_CHAT_STD (C2S 0x0B5) - sending chat.
 ///

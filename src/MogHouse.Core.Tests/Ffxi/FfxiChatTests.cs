@@ -237,4 +237,35 @@ public class FfxiTwoWordNameTests
         Assert.Equal("Donald Trump", System.Text.Encoding.ASCII.GetString(packet, 6, 12));
         Assert.Equal(0, packet[6 + 12]);
     }
+
+    [Theory]
+    [InlineData(FfxiChatKind.Say, FfxiChatMessageType.Say)]
+    [InlineData(FfxiChatKind.Shout, FfxiChatMessageType.Shout)]
+    [InlineData(FfxiChatKind.Party, FfxiChatMessageType.Party)]
+    [InlineData(FfxiChatKind.Linkshell1, FfxiChatMessageType.Linkshell)]
+    [InlineData(FfxiChatKind.Linkshell2, FfxiChatMessageType.Linkshell)]
+    [InlineData(FfxiChatKind.LinkshellPvp, FfxiChatMessageType.Linkshell)]
+    [InlineData(FfxiChatKind.Emote, FfxiChatMessageType.Emotion)]
+    public void AnEchoTakesItsOwnChannelsColour(FfxiChatKind sent, FfxiChatMessageType shown) =>
+        Assert.Equal(shown, FfxiChatEcho.For(sent));
+
+    [Fact]
+    public void YellReadsAsAShoutBecauseTheServersListHasNoYell()
+    {
+        // The two enumerations are different lists and the message side stops
+        // before Yell and Unity. A shout is what a yell is; anything else
+        // falls back rather than inventing a colour.
+        Assert.Equal(FfxiChatMessageType.Shout, FfxiChatEcho.For(FfxiChatKind.Yell));
+        Assert.Equal(FfxiChatMessageType.Say, FfxiChatEcho.For(FfxiChatKind.Unity));
+    }
+
+    [Fact]
+    public void TheTwoEnumerationsAreNotInterchangeable()
+    {
+        // Linkshell1 is 0x05 on the way out and Linkshell is 5 on the way
+        // back, which is a coincidence; Yell is 0x1A and has no counterpart at
+        // all. Casting between them would be right twice and wrong the rest of
+        // the time, so this guards the one that would look safest.
+        Assert.NotEqual((int)FfxiChatKind.Yell, (int)FfxiChatEcho.For(FfxiChatKind.Yell));
+    }
 }

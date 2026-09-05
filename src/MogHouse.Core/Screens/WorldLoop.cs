@@ -595,7 +595,11 @@ public sealed class WorldLoop
             // Every channel the real client answers to, and the short forms
             // nobody types the long version of: /s /sh /y /p /l /ls /l2 /u /em.
             case FfxiClientCommandKind.Chat:
-                _world.Say(_who, command.Rest);
+                // Echoed in the channel's own colour. Echoing every channel as
+                // Say put a linkshell message on screen looking exactly like
+                // something shouted at the street, which is the one thing the
+                // colour is there to tell you.
+                _world.Say(_who, command.Rest, FfxiChatEcho.For(command.Channel));
                 Wait(_session.SayAsync(command.Rest, command.Channel));
                 return;
 
