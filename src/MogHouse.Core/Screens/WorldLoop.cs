@@ -701,12 +701,34 @@ public sealed class WorldLoop
         // The tracker is what the renderer draws from: it holds what an entity
         // looks like, whether the server means it to be seen, and which fields
         // a partial update may change.
+        //
+        // Anything belonging to another zone is dropped. Zoning clears the
+        // tracker, but packets already on their way arrive after it and put
+        // the old zone straight back: walking from Southern San d'Oria into
+        // Valkurm Dunes brought 76 of San d'Oria's people along, standing in
+        // the sand. An entity id carries the zone it belongs to, so it can be
+        // asked rather than trusted.
+        uint here = _session.ZoneState?.ZoneNo ?? _openZone;
         DateTimeOffset now = DateTimeOffset.UtcNow;
         foreach (FfxiEntityUpdate update in entities)
         {
+            if (ZoneOf(update.UniqueNo) != here)
+            {
+                continue;
+            }
+
             _tracker.Observe(update, now);
         }
     }
+
+    /// <summary>
+    /// Which zone an entity id belongs to.
+    ///
+    /// The server numbers them 0x1000000 | zone &lt;&lt; 12 | index, so the
+    /// zone comes back out with a shift - the same scheme the client's own
+    /// entity name tables are keyed by.
+    /// </summary>
+    private static uint ZoneOf(uint uniqueNo) => (uniqueNo >> 12) - 0x1000;
 
     private void OnDeathChanged(bool dead) => _world.ShowDeath(dead, _session.HasRaiseOffer);
 
