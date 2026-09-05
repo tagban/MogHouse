@@ -1699,10 +1699,22 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
         // exactly zero, and no curve here gives a flat sheet a crest.
         //
         // MOGHOUSE_WAVES=0 turns them off.
-        static const bool wavesEnabled = [] {
-            const char* set = std::getenv("MOGHOUSE_WAVES");
-            return set == nullptr || std::strtol(set, nullptr, 10) != 0;
-        }();
+        // Off, because where they land is wrong and it is not yet known why.
+        //
+        // Valkurm's coast is a curved bay - MOGHOUSE_BEACH_PROBE walks the
+        // ground and finds the waterline at z 262 at x 150, z 152 from x 250 to
+        // 350, z 257 at x 400. The strips are placed at z 237 and 242 and are
+        // 178 units wide, so across the middle of the bay they stand about
+        // ninety yalms out to sea. They sit at the far edge of the decorative
+        // sea panel, which spans z 164..236, rather than at its shoreward edge.
+        //
+        // Retail puts this foam on the sand, so something here is misread: the
+        // placement, or op 0x0f's (6, 0, 1), or the frame. Everything else
+        // checks out - the curves drive it, the loop advances, the strips draw
+        // and spread and fade - which is why it is worth coming back to.
+        //
+        // MOGHOUSE_WAVES=1 turns them on to keep working on it.
+        static const bool wavesEnabled = std::getenv("MOGHOUSE_WAVES") != nullptr;
         const bool wave = wavesEnabled && water && !effect.scaleZCurve.empty();
         if (wave)
         {
@@ -1791,6 +1803,12 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
                 params.wave.v = effect.vCurve;
                 const float zExtent = model->second.boundsMax[2] - model->second.boundsMin[2];
                 params.wave.spreadPerUnit = zExtent > 0.01f ? 1.0f / zExtent : 1.0f;
+                if (std::getenv("MOGHOUSE_WAVE_WATCH"))
+                {
+                    std::printf("wave setup %-4s generator says %8.2f %8.2f %8.2f   model z bounds %.2f..%.2f\n",
+                                modelName.c_str(), effect.translate[0], effect.translate[1], effect.translate[2],
+                                model->second.boundsMin[2], model->second.boundsMax[2]);
+                }
                 ++generatedWaves;
             }
             // A flame from the shared file adds to what is behind it; a
@@ -5125,6 +5143,32 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     };
     findLineupSpot();
 
+    // MOGHOUSE_BEACH_PROBE="x,z0,z1" walks the ground along z at a fixed x and
+    // says where it crosses a waterline, which is the only way to find out
+    // where a zone's shore actually is. The generator-placed sea panels are
+    // decorative and need not end where the terrain does - and if they do not,
+    // foam laid along the panel's edge sits out in open water.
+    if (const char* probe = std::getenv("MOGHOUSE_BEACH_PROBE"))
+    {
+        float px = 0.0f, z0 = 0.0f, z1 = 0.0f;
+        if (std::sscanf(probe, "%f,%f,%f", &px, &z0, &z1) == 3)
+        {
+            std::printf("beach probe at x %.1f, z %.0f..%.0f\n", px, z0, z1);
+            for (float z = z0; z <= z1; z += 2.0f)
+            {
+                if (auto ground = collision.nearestGround(px, z, 60.0f, 400.0f))
+                {
+                    std::printf("   z %7.1f  ground y %7.2f\n", z, ground->y);
+                }
+                else
+                {
+                    std::printf("   z %7.1f  ground y     ---\n", z);
+                }
+            }
+        }
+    }
+
+
     mh::Camera camera;
     camera.target = centre;
     camera.distance = radius * 2.4f;
@@ -8023,9 +8067,31 @@ const float kWavePeriod = [] {
                     std::memcpy(matrix, baseInstances.data() + at16, sizeof(matrix));
                     // Column two is the z axis. Scaling it stretches the strip
                     // across the sand without moving where it sits.
-                    matrix[8] *= spread;
-                    matrix[9] *= spread;
-                    matrix[10] *= spread;
+                    // MOGHOUSE_WAVE_DIR=-1 grows the strip the other way. The
+                    // model's z runs 0..11.25, so its geometry lies to one side
+                    // of its own origin, and the half turn placementTransform
+                    // applies decides which side that is in the world. Growing
+                    // the wrong way puts the whole band out to sea and moves it
+                    // further out as it swells.
+                    static const float dir = [] {
+                        const char* set = std::getenv("MOGHOUSE_WAVE_DIR");
+                        return set ? std::strtof(set, nullptr) : 1.0f;
+                    }();
+                    matrix[8] *= spread * dir;
+                    matrix[9] *= spread * dir;
+                    matrix[10] *= spread * dir;
+                    // MOGHOUSE_WAVE_LIFT raises the strip. It sits at -4.7
+                    // where the sea sheet it washes over is at -3.96, so it is
+                    // three quarters of a unit under the water - and where the
+                    // seabed climbs to meet the shore, the sand cuts the foam
+                    // off before it cuts the water. The foam then survives only
+                    // out where the bottom is deep, which is the opposite of a
+                    // beach.
+                    static const float lift = [] {
+                        const char* set = std::getenv("MOGHOUSE_WAVE_LIFT");
+                        return set ? std::strtof(set, nullptr) : 0.0f;
+                    }();
+                    matrix[13] += lift;
                     queue.WriteBuffer(instanceBuffer, static_cast<uint64_t>(at16) * sizeof(float), matrix,
                                       sizeof(matrix));
                 }
