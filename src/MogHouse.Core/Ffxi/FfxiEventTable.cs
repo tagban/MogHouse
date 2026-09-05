@@ -13,72 +13,119 @@ namespace MogHouse.Core.Ffxi;
 /// <param name="Script">The block as it sits in the file, undecoded.</param>
 public sealed record FfxiEventScripts(uint EntityId, byte[] Script)
 {
+    /// <summary>The index start: the header is the id, the capacity and one word.</summary>
+    private const int IndexAt = 0x0A;
+
     /// <summary>
-    /// Which events this entity has, as the server names them.
+    /// One event: the id the server calls it by, and the code that runs.
+    /// </summary>
+    /// <param name="Id">
+    /// What the server names it. <c>0xFFFF</c> means the slot has no name the
+    /// server can use - it still has code, and is presumably reached from
+    /// another event rather than asked for directly.
+    /// </param>
+    /// <param name="Code">The slot's bytecode, still undecoded.</param>
+    public sealed record Event(ushort Id, byte[] Code);
+
+    /// <summary>
+    /// Every event in the block, in slot order, with the code of each.
     ///
     /// <para>
-    /// The index is <c>capacity * 4</c> bytes of sixteen-bit words, and inside
-    /// it are two runs: where each event begins, then <c>0xFFFF</c>, then the
-    /// ids. The terminator is what separates them, not their lengths - a block
-    /// can have no offsets at all and still have events, which is why reading
-    /// the ids at a fixed distance from the start works for some NPCs and not
-    /// others.
+    /// The index is <c>capacity * 4</c> bytes of sixteen-bit words starting at
+    /// byte ten, and it is exactly:
+    /// </para>
+    ///
+    /// <code>
+    /// capacity - 1  where events 1..n begin, as byte offsets into the code
+    /// 1             0xFFFF
+    /// capacity      the ids the server names them by
+    /// </code>
+    ///
+    /// <para>
+    /// which sums to <c>capacity * 2</c> words. Event zero is not given an
+    /// offset because it always begins at zero, and that off-by-one is the
+    /// whole of why this looked unsolved: read from byte twelve instead of
+    /// ten, the runs come out a word short, the terminator lands at
+    /// <c>capacity - 2</c> in most blocks but not all, and some entities
+    /// appear to have events with no offsets at all. Read from ten the
+    /// terminator is at <c>capacity - 1</c> in every block of every zone
+    /// tried - 502 in Southern San d'Oria, 173 in Valkurm Dunes, 76 in West
+    /// Ronfaure - the offsets always ascend, and every one lands inside the
+    /// code rather than past its end.
     /// </para>
     ///
     /// <para>
     /// The retail files are the source of truth here; LandSandBoat is only how
     /// the reading was checked, because it is the one place that says what
-    /// number a server would actually send. Its DefaultActions.lua names an
-    /// event for 38 of Southern San d'Oria's people and 32 of those are
-    /// exactly where this puts them - Coderiant's 583, Glenne's 520 and 513,
-    /// Ailevia's 655 and 615. Three are not found and three could not be
-    /// matched to a block by name at all; where the two disagree it is not
-    /// settled that the file is the one in the wrong.
-    /// </para>
-    ///
-    /// <para>
-    /// Where each event <i>begins</i> is not solved. The offsets run before
-    /// the terminator and there are fewer of them than there are events -
-    /// Coderiant has one event and no offsets whatever - so they are not
-    /// simply one per event, and guessing at the pairing would be worse than
-    /// admitting it.
+    /// number a server would actually send: Coderiant's 583, Glenne's 520 and
+    /// 513, Ailevia's 655 and 615, and all five of Ambrotien's 2001 and
+    /// 2008-2011 come back from this.
     /// </para>
     /// </summary>
-    public IReadOnlyList<ushort> EventIds
+    public IReadOnlyList<Event> Events
     {
         get
         {
-            if (Script.Length < 12)
+            if (Script.Length < IndexAt + 4)
             {
                 return [];
             }
 
             uint capacity = BinaryPrimitives.ReadUInt32LittleEndian(Script.AsSpan(4));
-            if (capacity == 0 || capacity > 4000 || 0x0C + (capacity * 4) > Script.Length)
+            long indexBytes = (long)capacity * 4;
+            if (capacity == 0 || capacity > 4000 || IndexAt + indexBytes > Script.Length)
             {
                 return [];
             }
 
-            var found = new List<ushort>();
-            bool pastTerminator = false;
-            for (int i = 0; i < capacity * 2; i++)
-            {
-                ushort word = BinaryPrimitives.ReadUInt16LittleEndian(Script.AsSpan(0x0C + (i * 2)));
-                if (!pastTerminator)
-                {
-                    pastTerminator = word == 0xFFFF;
-                    continue;   // still in the offsets
-                }
+            ushort Word(int i) => BinaryPrimitives.ReadUInt16LittleEndian(Script.AsSpan(IndexAt + (i * 2)));
 
-                if (word != 0xFFFF)
+            // The terminator is where it is supposed to be, or this is not the
+            // shape we think and reading on would invent events.
+            if (Word((int)capacity - 1) != 0xFFFF)
+            {
+                return [];
+            }
+
+            int codeAt = IndexAt + (int)indexBytes;
+            int codeLength = Script.Length - codeAt;
+
+            var starts = new int[capacity + 1];
+            starts[0] = 0;
+            for (int i = 1; i < capacity; i++)
+            {
+                starts[i] = Word(i - 1);
+                if (starts[i] < starts[i - 1] || starts[i] > codeLength)
                 {
-                    found.Add(word);
+                    return [];
                 }
+            }
+
+            starts[capacity] = codeLength;
+
+            var found = new List<Event>((int)capacity);
+            for (int i = 0; i < capacity; i++)
+            {
+                ushort id = Word((int)capacity + i);
+                found.Add(new Event(id, Script[(codeAt + starts[i])..(codeAt + starts[i + 1])]));
             }
 
             return found;
         }
     }
+
+    /// <summary>
+    /// Which events this entity has, as the server names them.
+    ///
+    /// Slots the server cannot name - <c>0xFFFF</c> - are left out, so this is
+    /// the list of things that can actually be asked for.
+    /// </summary>
+    public IReadOnlyList<ushort> EventIds =>
+        Events.Where(e => e.Id != 0xFFFF).Select(e => e.Id).ToArray();
+
+    /// <summary>The code for one event, or null if this entity has no such event.</summary>
+    public byte[]? CodeFor(ushort eventId) =>
+        Events.FirstOrDefault(e => e.Id == eventId)?.Code;
 
     /// <summary>Whether the server could ask this entity for that event.</summary>
     public bool Has(ushort eventId) => EventIds.Contains(eventId);

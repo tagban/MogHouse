@@ -47,40 +47,58 @@ San d'Oria 913KB against Port San d'Oria's 321KB.
 
 ```
 uint32   entity id
-uint32   capacity
-uint16   two unread words
-         capacity * 2 words of index:
-           where each event begins
-           0xFFFF
-           the ids the server names them by
-         then the bytecode
+uint32   capacity - how many events
+uint16   one unread word
+         capacity - 1  where events 1..n begin, byte offsets into the code
+         1             0xFFFF
+         capacity      the ids the server names them by
+         then the code
 ```
 
-**The terminator separates the two runs, not their lengths.** That is the part
-that took three attempts. A block can have no offsets at all and still have
-events - Coderiant has one event and no offsets whatever - so reading the ids
-at a fixed distance from the start works for some people and not others.
+The index starts at **byte ten**, and that is the whole of why this looked
+unsolved for so long. Read from byte twelve the runs come out a word short:
+the terminator lands at `capacity - 2` in most blocks but not all, the offsets
+are one fewer than they should be, and some entities appear to have events
+with no offsets at all - which is exactly what was written here before.
 
-The retail files are the source of truth. LandSandBoat is how the reading was
+Read from ten, in every block of every zone tried - 502 in Southern San
+d'Oria, 308 in Northern San d'Oria, 173 in Valkurm Dunes, 76 in West Ronfaure -
+
+- the terminator is at `capacity - 1`, without exception
+- the offsets ascend, without exception
+- every offset lands inside the code rather than past its end
+
+**Event zero has no offset because it always begins at zero.** That is the
+off-by-one: `capacity - 1` offsets for `capacity` events is not a shortage, it
+is the first one being free.
+
+### Which id goes with which event
+
+In order: the *n*th id names the *n*th slot. The other reading - that the runs
+are opposite ways round - was tried and is decisively worse. Ambrotien's five
+events, the ones LandSandBoat says a server would call, come out at 657, 220,
+210, 191 and 1 bytes in order, and at 4, 4, 4, 4 and 9 reversed.
+
+The first slot is nearly always a single byte - 482 of 502 blocks in Southern
+San d'Oria, 76 of 76 in West Ronfaure - and the last is never one. So an
+entity's first event is usually a do-nothing default and the substance is
+further in.
+
+The retail files are the source of truth; LandSandBoat is how the reading was
 *checked*, because it is the one place that says what number a server would
 actually send:
 
-| NPC | LSB says | in the block |
+| NPC | LSB says | code found |
 |---|---|---|
-| Coderiant | 583 | yes |
-| Glenne | 520, 513 | yes |
-| Ailevia | 655, 615 | yes |
-| Ambrotien | 2001, 2008, 2009, 2010, 2011 | all five |
+| Glenne | 520, 513 | 154 and 49 bytes |
+| Ailevia | 655, 615 | 31 and 82 bytes |
+| Ambrotien | 2001, 2008, 2009, 2010, 2011 | 657, 220, 210, 191, 1 bytes |
+| Coderiant | 583 | 1 byte |
 
-Across a whole zone, `DefaultActions.lua` names an event for 38 of Southern San
-d'Oria's people and **32 are exactly where this puts them**. Three are not
-found and three could not be matched to a block by name. Where the two
-disagree it is not settled that the file is the one in the wrong: the DAT is
-retail's own and a private server implements what it has got to.
-
-**Where each event begins is not solved.** The offsets run before the
-terminator and there are fewer of them than there are events, so they are not
-one per event, and guessing at the pairing would be worse than admitting it.
+Coderiant is the honest exception and is left in rather than explained away.
+His named event holds a single byte, and the 413 bytes in his block sit under
+event 19. Either his event really does nothing beyond the default - he is a
+simple NPC - or something about him is still misread.
 
 ## What is inside one
 

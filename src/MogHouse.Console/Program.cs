@@ -1746,6 +1746,11 @@ static int Events(Dictionary<string, string> flags)
         Console.WriteLine($"{scripts.EntityId:X8}{(scripts.IsZoneItself ? " (the zone itself)" : "")}: " +
                           $"{scripts.Script.Length} bytes");
         Console.WriteLine($"  events: {string.Join(", ", scripts.EventIds)}");
+        foreach (FfxiEventScripts.Event one in scripts.Events)
+        {
+            string named = one.Id == 0xFFFF ? "(unnamed)" : one.Id.ToString();
+            Console.WriteLine($"    {named,9}  {one.Code.Length,6} bytes");
+        }
 
         if (flags.TryGetValue("dump", out string? into) && into.Length > 0)
         {
