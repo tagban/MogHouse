@@ -8876,7 +8876,16 @@ constexpr float kGravity = 26.0f;
             uniforms.eye[1] = eyePoint.y;
             uniforms.eye[2] = eyePoint.z;
             // Seconds since start, for the water surface.
-            uniforms.eye[3] = animationSeconds;
+            //
+            // Its own clock, not the character's. animationSeconds counts from
+            // animationOffset, which is reset every time a clip starts - so
+            // the sea's time was tied to what the character happened to be
+            // doing, and jumped backwards on every step taken, jump landed or
+            // model rebuilt. A pinned frame or a capture sequence still pins
+            // this too, because a screenshot has to be reproducible.
+            uniforms.eye[3] = (sequenceCount > 0 || pinnedFrame >= 0.0f)
+                                  ? animationSeconds
+                                  : static_cast<float>(SDL_GetTicksNS() / 1000000ull) / 1000.0f;
 
             // The torches near enough to matter. There are more in a zone than
             // will fit in the block - West Ronfaure has forty-two - and a lamp
