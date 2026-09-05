@@ -55,6 +55,9 @@ public sealed class FfxiGameSession : IDisposable
     private FfxiDialogueTable _dialogue = FfxiDialogueTable.Empty;
     private uint _dialogueZone = uint.MaxValue;
 
+    private FfxiEventTable _events = FfxiEventTable.Empty;
+    private uint _eventZone = uint.MaxValue;
+
     /// <summary>Our own health, as the server last reported it.</summary>
     public FfxiCharacterHealth? Health { get; private set; }
 
@@ -1076,18 +1079,27 @@ public sealed class FfxiGameSession : IDisposable
                     _zone.SendEventEndAsync(_zoneEndpoint, started.UniqueNo, started.ActIndex, started.ZoneNo,
                                             started.EventId).GetAwaiter().GetResult();
 
-                    // Say that it happened.
+                    // Say that it happened, and say what was found.
                     //
-                    // The script that would play this cutscene is in the
-                    // client's own DATs and we cannot read it yet, so all we
-                    // can do is end it - but ending it without a word is
-                    // indistinguishable from nothing having happened, and the
-                    // player is left wondering why an NPC ignored them.
+                    // The script is in the client's own DATs and can now be
+                    // located: 5820 + zone, the block whose first word is this
+                    // entity, and the offset the index gives for this id. What
+                    // cannot be done yet is run it, so the event is still
+                    // ended - but ending it silently is indistinguishable from
+                    // an NPC ignoring you.
+                    string found = "not in this zone's scripts";
+                    if (Events().For(started.UniqueNo) is { } scripts)
+                    {
+                        found = scripts.Start((ushort)started.EventId) is { } at
+                            ? $"script found, {scripts.Script.Length} bytes, starts at 0x{at:X4}"
+                            : $"entity has {scripts.Events.Count} events but not this one";
+                    }
+
                     ChatReceived?.Invoke(new FfxiChatLine(
                         DateTimeOffset.Now,
                         FfxiChatMessageType.System1,
                         Speaker(started.UniqueNo),
-                        $"[cutscene {started.EventId} skipped - this client cannot play them yet]"));
+                        $"[cutscene {started.EventId}: {found}]"));
                 }
             }
 
@@ -1522,6 +1534,24 @@ public sealed class FfxiGameSession : IDisposable
     /// Each zone has its own dialogue file and its own numbering, so line
     /// 4133 is a shopkeeper here and something unrelated one zone over.
     /// </summary>
+    /// <summary>
+    /// The current zone's event scripts, loaded once per zone.
+    ///
+    /// Numbered per zone the same way the dialogue is: event 7 here is a
+    /// different cutscene one zone over.
+    /// </summary>
+    private FfxiEventTable Events()
+    {
+        uint zone = ZoneState?.ZoneNo ?? uint.MaxValue;
+        if (_files is not null && zone != _eventZone)
+        {
+            _events = FfxiEventTable.Load(_files, (int)zone);
+            _eventZone = zone;
+        }
+
+        return _events;
+    }
+
     private FfxiDialogueTable Dialogue()
     {
         uint zone = ZoneState?.ZoneNo ?? uint.MaxValue;
