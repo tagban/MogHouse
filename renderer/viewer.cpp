@@ -9430,9 +9430,33 @@ const float kWavePeriod = [] {
                     }
                     // The generator's own curve says whether this is lit at
                     // this hour - the jets by day, the flames by night.
+                    //
+                    // Southern San d'Oria's fountain is the case that makes
+                    // this worth doubting. Its jets - sfn4 to sfn7, and the awa
+                    // bubbles - carry real scroll rates (-0.030, -0.027,
+                    // +0.021, -0.023), so they are not missing their motion.
+                    // They also name `tmfs` here, which is zero until 0.28 of
+                    // the day and after 0.80 - dawn and dusk - so between dusk
+                    // and dawn the whole fountain is dropped and the basin
+                    // stands dry. That is the "fountain audio plays but no
+                    // water movement" report, filed at 00:00.
+                    //
+                    // What argues the reading is wrong: the sound emitters
+                    // beside them, se02 and se03, carry no such curve and play
+                    // all night. A fountain that is heard and not seen is not
+                    // something retail would ship.
+                    //
+                    // MOGHOUSE_EFFECT_GATE=0 ignores the day curves entirely,
+                    // which is the way to see which reading matches retail
+                    // without rebuilding.
+                    static const bool gateOnCurves = [] {
+                        const char* set = std::getenv("MOGHOUSE_EFFECT_GATE");
+                        return set == nullptr || std::strtol(set, nullptr, 10) != 0;
+                    }();
                     auto curve = draw.curve.empty() ? curves.end() : curves.find(draw.curve);
                     const bool shown =
-                        curve != curves.end() ? curve->second.at(dayFraction) > 0.05f : !(draw.nightOnly && !night);
+                        !gateOnCurves ||
+                        (curve != curves.end() ? curve->second.at(dayFraction) > 0.05f : !(draw.nightOnly && !night));
                     if (!shown)
                     {
                         continue;
@@ -10722,8 +10746,24 @@ const float kWavePeriod = [] {
                     // table, and the game shows the name only on target.
                     // Drawing them all labels a city with things nobody asked
                     // about.
+                    // MOGHOUSE_PLATE_WATCH=1 says, once per entity, why a
+                    // nameplate was not drawn. Three separate rules drop one -
+                    // the server's hide flag, having no model to stand it over,
+                    // and having no name from either source - and from inside
+                    // the zone all three look identical.
+                    static const bool watchPlates = std::getenv("MOGHOUSE_PLATE_WATCH") != nullptr;
+                    static std::set<uint32_t> plateReported;
+                    const auto sayWhy = [&](const char* why) {
+                        if (watchPlates && plateReported.insert(entity.id).second)
+                        {
+                            std::printf("no plate for %08X: %s (server name %s)\n", entity.id, why,
+                                        entity.name.empty() ? "empty" : entity.name.c_str());
+                        }
+                    };
+
                     if (entity.nameHidden)
                     {
+                        sayWhy("the server says hide the name");
                         continue;
                     }
 
@@ -10734,6 +10774,7 @@ const float kWavePeriod = [] {
                     // because these are the client's own internal names.
                     if (!modelForEntity(entity))
                     {
+                        sayWhy("no model to stand it over");
                         continue;
                     }
 
@@ -10741,6 +10782,8 @@ const float kWavePeriod = [] {
                         entity.name.empty() ? entityNames.lookup(entity.id) : entity.name;
                     if (shown.empty())
                     {
+                        sayWhy(entityNames.empty() ? "the zone's name table did not load"
+                                                   : "not in the zone's name table either");
                         continue;
                     }
 
