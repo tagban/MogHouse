@@ -47,6 +47,55 @@ struct EffectPlacement
     /// house floor. Read as "not drawn directly" - a reflection or water-table
     /// plane - until the opcode is understood.
     bool hidden{};
+    /// The curves a generator names for its own animation, each the
+    /// four-character id of a 0x19 chunk (parseIntensityCurves). Empty when
+    /// the generator names none, which is most of them.
+    ///
+    /// Ops 0x21..0x2f are one contiguous block, one opcode per animatable
+    /// channel, and the artists named every curve after the channel it drives.
+    /// Across twenty zone DATs, section 1, the last characters of the ids:
+    ///
+    ///   0x21 px   0x22 py   0x23 pz      position
+    ///   0x24 rx   0x25 --   0x26 rz      rotation
+    ///   0x27 sx   0x28 sy   0x29 sz      scale
+    ///   0x2d a                           opacity
+    ///   0x2e u    0x2f v                 texture offset
+    ///
+    /// with 0x60/0x61/0x62 ending r/g/b and 0x63 the alpha beside them. The
+    /// suffixes are the file's own; nothing states the meanings, but 152 of
+    /// the 0x2d curves end in "a" and none of the 0x2e/0x2f ones do.
+    ///
+    /// Note 0x2e and 0x2f are an offset in uv, not a rate: they are a
+    /// position on the sheet and can run forward and back. Ops 0x27 and 0x28
+    /// mean something else in section 2, where they carry an immediate float
+    /// rather than a curve id - that is the scroll rate `scroll` holds.
+    ///
+    /// Valkurm Dunes' beach is where these were read. It is five models: the
+    /// sea body umi0/umif/ukro on the dark sheet "umi0", a shallow shimmer
+    /// nmic on the caustic net "umi1", and two thin strips scaled (6, 0, 1) -
+    /// nmia on the blobby foam "umi3", nmib on the fine froth "umi2" - which
+    /// carry, between them:
+    ///
+    ///   0x29  `uasz`  0 -> 7.70   -> 5.00     spread, times the placement's z
+    ///   0x2d  `umaa`  0 -> 0.10   -> 0        fade up and back out
+    ///   0x2f  `uzv1`  0 -> 6.04   -> 0        six repeats of the sheet, and back
+    ///
+    /// Together, over a loop: a strip that spreads out of nothing, washes six
+    /// sheet-lengths up the sand, draws back and fades where it lies. Both
+    /// strips name the same `uzv1`, so the two layers of one wave move
+    /// together.
+    std::string rotateXCurve; ///< op 0x24
+    std::string scaleZCurve;  ///< op 0x29
+    std::string opacityCurve; ///< op 0x2d
+    std::string uCurve;       ///< op 0x2e
+    std::string vCurve;       ///< op 0x2f
+    /// Op 0x30, one float, unread. 10256.0 and 10248.0 on the two strips that
+    /// make one wave, 6000.0 on another beach's, 280.0 and 278.0 on the
+    /// shimmer sheets, 8290.0 on the open sea. Kept because the loop's period
+    /// has to come from somewhere and this is the only per-generator number
+    /// left that could carry it - until it is understood the period is a
+    /// setting, not a reading. See kWavePeriod in viewer.cpp.
+    float timing{};
     /// Op 0x48: four distances. Fades in between the first two and out
     /// between the last two, so a lamp's big soft halo (`lglt`: 10, 50, 100,
     /// 150; the fountain's `llit`: 50, 70, 150, 180) shows only from afar

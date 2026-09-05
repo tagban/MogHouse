@@ -63,6 +63,13 @@ constexpr uint8_t kOpNightOnly = 0x0d;
 constexpr uint8_t kOpScroll = 0x28;
 constexpr uint8_t kOpHidden = 0x27;
 constexpr uint8_t kOpDistanceFade = 0x48;
+// The shoreline animation. See EffectPlacement's curve fields.
+constexpr uint8_t kOpRotateXCurve = 0x24;
+constexpr uint8_t kOpScaleZCurve = 0x29;
+constexpr uint8_t kOpOpacityCurve = 0x2d;
+constexpr uint8_t kOpUCurve = 0x2e;
+constexpr uint8_t kOpVCurve = 0x2f;
+constexpr uint8_t kOpTiming = 0x30;
 } // namespace
 
 std::vector<EffectPlacement> parseGenerators(const DatFile& dat)
@@ -175,6 +182,35 @@ std::vector<EffectPlacement> parseGenerators(const DatFile& dat)
                     if (length >= 12 && placement.textureAnimation.empty())
                     {
                         placement.textureAnimation = fourChars(data, payload + 4);
+                    }
+                    break;
+                // Each names a 0x19 curve in the same shape op 0x63 does:
+                // four bytes, then the id. Section-blind, as the rest of this
+                // walk is: 0x27 and 0x28 mean scale in section 1 and a scroll
+                // rate in section 2, and are told apart by their length -
+                // twelve bytes or more carries an id, eight an immediate.
+                case kOpRotateXCurve:
+                case kOpScaleZCurve:
+                case kOpOpacityCurve:
+                case kOpUCurve:
+                case kOpVCurve:
+                    if (length >= 12)
+                    {
+                        std::string& field = op == kOpRotateXCurve   ? placement.rotateXCurve
+                                             : op == kOpScaleZCurve  ? placement.scaleZCurve
+                                             : op == kOpOpacityCurve ? placement.opacityCurve
+                                             : op == kOpUCurve       ? placement.uCurve
+                                                                     : placement.vCurve;
+                        if (field.empty())
+                        {
+                            field = fourChars(data, payload + 4);
+                        }
+                    }
+                    break;
+                case kOpTiming:
+                    if (length >= 8)
+                    {
+                        readAt(data, payload, placement.timing);
                     }
                     break;
                 case kOpNightOnly:

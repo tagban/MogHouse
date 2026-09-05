@@ -1540,6 +1540,7 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
     curves = ffxi::parseIntensityCurves(dat);
     static const bool everyGenerator = std::getenv("MOGHOUSE_ALL_GENERATORS") != nullptr;
     std::vector<ffxi::Placement> effectPlacements;
+    size_t generatedWaves = 0;
     std::unordered_map<std::string, mh::EffectParams> effectParams;
     size_t generatedWater = 0;
     size_t generatedEffects = 0;
@@ -1659,6 +1660,18 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
                 break;
             }
         }
+        // A water sheet whose generator animates it is a wave, not a
+        // surface. Valkurm Dunes' beach is three of them - nmia, nmib, nmic -
+        // over a sea body that really is a surface. The water pass bakes its
+        // geometry flat into one world-space buffer, which is right for a
+        // canal and no use for something that has to spread, wash up the sand
+        // and fade; so these go to the effect pass, which already scrolls a
+        // texture and can now offset and fade one.
+        const bool wave = water && (!effect.opacityCurve.empty() || !effect.vCurve.empty());
+        if (wave)
+        {
+            water = false;
+        }
         // A model with a texture animation is a visible effect - the
         // fountain's jets and flames, a waterfall's sheet - and is placed
         // and scrolled. Anything else a generator places is a particle
@@ -1696,7 +1709,7 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
             }
             continue;
         }
-        const bool animated = !water && inEffects && !effect.textureAnimation.empty();
+        const bool animated = wave || (!water && inEffects && !effect.textureAnimation.empty());
         if (!water && !animated && !everyGenerator && modelName.rfind("effect:", 0) != 0)
         {
             continue;
@@ -1730,6 +1743,18 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
             // can animate properly.
             const float perSecond = effect.scroll * 30.0f;
             mh::EffectParams params{0.0f, perSecond, effect.nightOnly, effect.textureAnimation};
+            if (wave)
+            {
+                // The day curve is a visibility gate and a wave is not gated;
+                // ours run on the loop clock instead.
+                params.curve.clear();
+                params.foam = true;
+                params.wave.scaleZ = effect.scaleZCurve;
+                params.wave.opacity = effect.opacityCurve;
+                params.wave.u = effect.uCurve;
+                params.wave.v = effect.vCurve;
+                ++generatedWaves;
+            }
             // A flame from the shared file adds to what is behind it; a
             // zone's own jets and waterfalls blend.
             params.additive = sharedEffect;
@@ -1750,8 +1775,9 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
     if (!generated.empty())
     {
         std::printf("sprites: %zu placed from %zu animations\n", spriteInstances.size(), sprites.size());
-        std::printf("generators: %zu, %zu placing water models, %zu animated effect models, %zu sky objects%s\n",
-                    generated.size(), generatedWater, generatedEffects, skyZone.placements.size(),
+        std::printf("generators: %zu, %zu placing water models, %zu waves, %zu animated effect models, "
+                    "%zu sky objects%s\n",
+                    generated.size(), generatedWater, generatedWaves, generatedEffects, skyZone.placements.size(),
                     everyGenerator ? " (all placed)" : "");
     }
     skyObjects = mh::Scene{};
@@ -2901,6 +2927,13 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
     wgpu::RenderPipeline effectAdditivePipeline;
     wgpu::BindGroupLayout effectBindGroupLayout;
     std::vector<wgpu::BindGroup> effectBindGroups;
+    /// Parallel to effectBindGroups - effectBuffers is not, since it only
+    /// grows for draws that are effects and then takes the sky's and the
+    /// sprites' too. A wave rewrites its own uniform every frame and has to
+    /// be able to find it by draw index.
+    std::vector<wgpu::Buffer> effectWaveBuffers;
+    /// The placement matrices as built, before any wave rescaled them.
+    std::vector<float> baseInstances;
     std::vector<wgpu::Buffer> effectBuffers;
     // The sky objects - cloud dome, star field - as their own little scene
     // with their own buffers, drawn camera-relative by the effect pipeline
@@ -3026,6 +3059,7 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
         batchTextures.clear();
         batchBindGroups.clear();
         effectBindGroups.clear();
+        effectWaveBuffers.clear();
         effectBuffers.clear();
         skyObjectBindGroups.clear();
         spriteBatches.clear();
@@ -3129,6 +3163,9 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             // transforms in here every frame it moves.
             instanceBuffer = createBuffer(device, zone->instances.data(), zone->instances.size() * sizeof(float),
                                           wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst);
+            // A wave rescales its own matrices every frame, so it needs the
+            // ones it started with. Scaling in place would compound.
+            baseInstances = zone->instances;
             indexCount = static_cast<uint32_t>(zone->indices.size());
             std::printf("buffers created\n");
 
@@ -3623,8 +3660,12 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                     // Flames and glows are self-lit; a waterfall's sheet is
                     // lit like the rock behind it. Told apart by the clock
                     // gate for now, which is what the flames carry.
-                    const float params[4] = {batch.scroll[0], batch.scroll[1], batch.nightOnly ? 0.0f : 0.7f, 0.0f};
-                    effectBuffers.push_back(createBuffer(device, params, sizeof(params), wgpu::BufferUsage::Uniform));
+                    const float params[8] = {batch.scroll[0], batch.scroll[1], batch.nightOnly ? 0.0f : 0.7f, 0.0f,
+                                             // The wave, rewritten every frame when the
+                                             // draw carries curves; inert otherwise.
+                                             0.0f, 0.0f, 1.0f, 0.0f};
+                    effectBuffers.push_back(createBuffer(device, params, sizeof(params),
+                                                         wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst));
                     wgpu::BindGroupEntry effectEntries[4] = {entries[0], entries[1], entries[2], {}};
                     effectEntries[3].binding = 3;
                     effectEntries[3].buffer = effectBuffers.back();
@@ -3632,10 +3673,12 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                     wgpu::BindGroupDescriptor effectGroupDescriptor{
                         .layout = effectBindGroupLayout, .entryCount = 4, .entries = effectEntries};
                     effectBindGroups.push_back(device.CreateBindGroup(&effectGroupDescriptor));
+                    effectWaveBuffers.push_back(effectBuffers.back());
                 }
                 else
                 {
                     effectBindGroups.push_back(nullptr);
+                    effectWaveBuffers.push_back(nullptr);
                 }
             }
             if (!skyObjects.indices.empty() && effectBindGroupLayout)
@@ -3666,7 +3709,8 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                     // scroll u, v; lighting; camera-relative and unfogged.
                     // The clouds take the zone's light so they darken with
                     // the night; the stars are their own light.
-                    const float params[4] = {draw.scroll[0], draw.scroll[1], draw.nightOnly ? 0.0f : 1.0f, 1.0f};
+                    const float params[8] = {draw.scroll[0], draw.scroll[1], draw.nightOnly ? 0.0f : 1.0f, 1.0f,
+                                             0.0f, 0.0f, 1.0f, 0.0f};
                     effectBuffers.push_back(createBuffer(device, params, sizeof(params), wgpu::BufferUsage::Uniform));
                     wgpu::BindGroupEntry skyEntries[4] = {};
                     skyEntries[0].binding = 0;
@@ -3732,8 +3776,9 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                         if (wgpu::Texture gpu = mh::uploadTexture(device, found->second))
                         {
                             batchTextures.push_back(gpu);
-                            // no scroll, self-lit, world space
-                            const float params[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                            // no scroll, self-lit, world space, and no wave -
+                            // opacity 1 or the sprite would not be drawn at all.
+                            const float params[8] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f};
                             effectBuffers.push_back(createBuffer(device, params, sizeof(params), wgpu::BufferUsage::Uniform));
                             wgpu::BindGroupEntry spriteEntries[4] = {};
                             spriteEntries[0].binding = 0;
@@ -6218,6 +6263,25 @@ constexpr float kGravity = 26.0f;
     /// How far down to look for the floor while falling.
     constexpr float kFallReach = 500.0f;
 
+/// How long one shoreline wave takes, in seconds.
+///
+/// A setting, not a reading. The curves say the shape of a wave exactly and
+/// say nothing about its length; the only per-generator number left that
+/// could carry it is op 0x30, which is unread (see ffxi::EffectPlacement).
+/// Eight seconds is what a beach looks like. MOGHOUSE_WAVE_PERIOD overrides
+/// it, for standing on the sand and comparing.
+const float kWavePeriod = [] {
+    if (const char* set = std::getenv("MOGHOUSE_WAVE_PERIOD"))
+    {
+        const float given = std::strtof(set, nullptr);
+        if (given > 0.1f)
+        {
+            return given;
+        }
+    }
+    return 8.0f;
+}();
+
     /// How fast a jump leaves the ground, in yalms a second.
     ///
     /// Against the gravity above this is a rise of about three quarters of a
@@ -7799,6 +7863,116 @@ constexpr float kGravity = 26.0f;
             }
         }
 
+        // The shoreline waves, on a loop of their own.
+        //
+        // Each is a thin strip laid along the waterline that spreads out of
+        // nothing, washes its foam sheet up the sand and fades where it lies:
+        // op 0x29 scales it along z, op 0x2f slides the texture, op 0x2d fades
+        // it. See ffxi::EffectPlacement for how those were read.
+        //
+        // The scale goes through the placement matrix and the other two through
+        // the effect uniform, which is why this cannot ride in the water pass -
+        // that bakes its geometry flat into one world-space buffer and has
+        // nowhere to put either.
+        if (zone && !baseInstances.empty())
+        {
+            // MOGHOUSE_WAVE_PHASE pins where in the loop every wave is. A
+            // screenshot is taken seconds after startup, which is phase zero -
+            // and phase zero is the moment a wave is deliberately not there at
+            // all, so without this a still of a working beach and a still of a
+            // broken one look identical.
+            static const float pinnedPhase = [] {
+                const char* set = std::getenv("MOGHOUSE_WAVE_PHASE");
+                return set ? std::strtof(set, nullptr) : -1.0f;
+            }();
+            const float phase =
+                pinnedPhase >= 0.0f
+                    ? pinnedPhase
+                    : std::fmod(static_cast<float>(SDL_GetTicksNS() / 1000000ull) * 0.001f / kWavePeriod, 1.0f);
+            for (size_t i = 0; i < zone->draws.size() && i < effectWaveBuffers.size(); ++i)
+            {
+                const mh::InstancedDraw& draw = zone->draws[i];
+                if (!draw.wave.any() || !effectWaveBuffers[i])
+                {
+                    continue;
+                }
+                const auto at = [&](const std::string& id, float fallback) {
+                    auto found = id.empty() ? curves.end() : curves.find(id);
+                    return found == curves.end() ? fallback : found->second.at(phase);
+                };
+                // Opacity is scaled, not literal. FFXI keeps alpha at quarter
+                // scale - 0.25 means fully opaque, which is why the shader
+                // multiplies vertex alpha by four - and op 0x2d looks the same:
+                // across the twenty-nine curves it names in this zone the
+                // ceiling is 0.502, and every one of them sits at or under it.
+                // Taken literally a wave peaks at a tenth opaque and the foam
+                // is not there; at quarter scale it peaks at four tenths.
+                //
+                // Four is the convention rather than a measurement. If the
+                // beach reads too strong or too weak, MOGHOUSE_WAVE_GAIN is
+                // the knob and this is the number to correct.
+                // MOGHOUSE_WAVE_GAIN multiplies the opacity, for finding out
+                // whether a wave that cannot be seen is absent or just faint.
+                static const float gain = [] {
+                    const char* set = std::getenv("MOGHOUSE_WAVE_GAIN");
+                    return set ? std::strtof(set, nullptr) : 1.0f;
+                }();
+                const float wave[4] = {at(draw.wave.u, 0.0f), at(draw.wave.v, 0.0f),
+                                       std::min(at(draw.wave.opacity, 0.25f) * 4.0f * gain, 1.0f),
+                                       // Marks this draw a wave for the shader.
+                                       1.0f};
+                // MOGHOUSE_WAVE_WATCH=1 says, once, what each wave draw is and
+                // where its copies stand. A wave that is not on screen and a
+                // wave that is not being drawn look the same from the beach.
+                static const bool watchWaves = std::getenv("MOGHOUSE_WAVE_WATCH") != nullptr;
+                if (watchWaves)
+                {
+                    static std::set<size_t> reported;
+                    if (reported.insert(i).second)
+                    {
+                        std::printf("wave draw %zu: tex %-16s %u copies, curves sz=%s a=%s u=%s v=%s\n", i,
+                                    draw.texture.c_str(), draw.instanceCount, draw.wave.scaleZ.c_str(),
+                                    draw.wave.opacity.c_str(), draw.wave.u.c_str(), draw.wave.v.c_str());
+                        std::printf("   at phase %.2f: spread %.2f  uv %+.2f %+.2f  opacity %.3f\n", phase,
+                                    at(draw.wave.scaleZ, 1.0f), wave[0], wave[1], wave[2]);
+                        for (uint32_t n = 0; n < draw.instanceCount; ++n)
+                        {
+                            const size_t base = (static_cast<size_t>(draw.instanceOffset) + n) * 16;
+                            if (base + 16 <= baseInstances.size())
+                            {
+                                std::printf("     copy %u at %8.1f %8.1f %8.1f\n", n, baseInstances[base + 12],
+                                            baseInstances[base + 13], baseInstances[base + 14]);
+                            }
+                        }
+                    }
+                }
+                queue.WriteBuffer(effectWaveBuffers[i], 4 * sizeof(float), wave, sizeof(wave));
+
+                if (draw.wave.scaleZ.empty() || !instanceBuffer)
+                {
+                    continue;
+                }
+                const float spread = at(draw.wave.scaleZ, 1.0f);
+                for (uint32_t n = 0; n < draw.instanceCount; ++n)
+                {
+                    const size_t at16 = (static_cast<size_t>(draw.instanceOffset) + n) * 16;
+                    if (at16 + 16 > baseInstances.size())
+                    {
+                        break;
+                    }
+                    float matrix[16];
+                    std::memcpy(matrix, baseInstances.data() + at16, sizeof(matrix));
+                    // Column two is the z axis. Scaling it stretches the strip
+                    // across the sand without moving where it sits.
+                    matrix[8] *= spread;
+                    matrix[9] *= spread;
+                    matrix[10] *= spread;
+                    queue.WriteBuffer(instanceBuffer, static_cast<uint64_t>(at16) * sizeof(float), matrix,
+                                      sizeof(matrix));
+                }
+            }
+        }
+
 
         // A trail to back up along, sampled on a timer. Only recorded when the
         // character has actually moved, so standing still does not fill the
@@ -9029,6 +9203,16 @@ constexpr float kGravity = 26.0f;
                     {
                         continue;
                     }
+                    // A shoreline wave waits for the water. It lies a little
+                    // under the sea sheet - the strips sit at -4.7 where the
+                    // sea is at -3.96 - so drawn here it would be painted over
+                    // by water that is nearly opaque, and the foam that is
+                    // meant to be washing over the sand would be a faint stain
+                    // beneath it.
+                    if (draw.wave.any())
+                    {
+                        continue;
+                    }
                     pass.SetPipeline(draw.additive && effectAdditivePipeline ? effectAdditivePipeline : effectPipeline);
                     pass.SetBindGroup(0, effectBindGroups[i]);
                     pass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
@@ -9436,6 +9620,28 @@ constexpr float kGravity = 26.0f;
                 pass.SetVertexBuffer(0, waterVertexBuffer);
                 pass.SetIndexBuffer(waterIndexBuffer, wgpu::IndexFormat::Uint32);
                 pass.DrawIndexed(waterIndexCount);
+            }
+
+            // The shoreline waves, on top of the sea they wash over. Held back
+            // from the effect pass above for the order alone; everything else
+            // about them is an effect draw. Their motion is set up each frame
+            // beside the monorail's - see MOGHOUSE_WAVE_WATCH.
+            if (effectPipeline && zone)
+            {
+                pass.SetVertexBuffer(0, vertexBuffer);
+                pass.SetVertexBuffer(1, instanceBuffer);
+                pass.SetIndexBuffer(indexBuffer, wgpu::IndexFormat::Uint32);
+                for (size_t i = 0; i < zone->draws.size() && i < effectBindGroups.size(); ++i)
+                {
+                    const mh::InstancedDraw& draw = zone->draws[i];
+                    if (!draw.wave.any() || !draw.effect || !effectBindGroups[i])
+                    {
+                        continue;
+                    }
+                    pass.SetPipeline(effectPipeline);
+                    pass.SetBindGroup(0, effectBindGroups[i]);
+                    pass.DrawIndexed(draw.indexCount, draw.instanceCount, draw.indexOffset, 0, draw.instanceOffset);
+                }
             }
 
             // The game's own furniture, hidden while the client is on its own

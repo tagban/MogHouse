@@ -152,8 +152,14 @@ bool isWaterMesh(const std::string& modelName, const ffxi::ModelMesh& mesh)
     {
         return true;
     }
-    static const char* const kSheets[] = {"kaw1", "kaw2", "umi1", "umi2", "sea01", "ike1",
-                                          "ike2", "umna", "nami", "miz1", "miz2"};
+    // umi0 and umi3 were missing until Valkurm Dunes was looked at: its
+    // shoreline is five models to a beach - the open sea umi0/umif/ukro on
+    // "umi0", the breaking strips nmia on "umi3" and nmib on "umi2", and the
+    // foam sheet nmic on "umi1" - and with two of the four sheets unlisted,
+    // twelve of the twenty-one shoreline surfaces were dropped as "not water
+    // and not an effect". The whole open sea was among them.
+    static const char* const kSheets[] = {"kaw1", "kaw2", "umi0", "umi1", "umi2", "umi3", "sea01",
+                                          "ike1", "ike2", "umna", "nami", "miz1", "miz2"};
     const std::string own = ownTextureName(mesh.texture);
     for (const char* sheet : kSheets)
     {
@@ -260,7 +266,17 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
             // geometry is exactly what the artists placed, under the banks
             // where they tucked it, and the depth test trims it at the
             // shoreline the way the retail client's does.
-            if (isWaterMesh(name, mesh))
+            // An animated shoreline sheet is a wave, not a surface. The
+            // water pass bakes its geometry into one world-space buffer, which
+            // is exactly right for a canal that never moves and no use at all
+            // for a strip that spreads, scrolls and fades on a loop.
+            bool foam = false;
+            if (effects)
+            {
+                auto entry = effects->find(name);
+                foam = entry != effects->end() && entry->second.foam;
+            }
+            if (!foam && isWaterMesh(name, mesh))
             {
                 waterSheets[mesh.texture] += (mesh.indices.size() / 3) * transforms.size();
 
@@ -403,6 +419,7 @@ Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, f
                     placed.nightOnly = effect->second.nightOnly;
                     placed.curve = effect->second.curve;
                     placed.additive = effect->second.additive;
+                    placed.wave = effect->second.wave;
                 }
             }
 

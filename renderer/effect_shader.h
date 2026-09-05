@@ -27,6 +27,11 @@ struct Uniforms {
 // eye rather than the world, and never fogged; 0 for scenery.
 struct Effect {
     scroll : vec4<f32>,
+    // A shoreline wave, from the curves its generator names, evaluated on
+    // this frame. x, y: an offset in uv - a position, not a rate, so it can
+    // run up the sheet and back. z: opacity. w: unused. (0, 0, 1, 0) for
+    // everything that is not a wave.
+    wave : vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> uniforms : Uniforms;
@@ -58,7 +63,7 @@ fn vertexMain(@location(0) position : vec3<f32>,
     out.clipPosition = uniforms.viewProjection * world;
     out.normal = (model * vec4<f32>(normal, 0.0)).xyz;
     // eye.w carries the animation clock, in seconds.
-    out.uv = uv + effect.scroll.xy * uniforms.eye.w;
+    out.uv = uv + effect.scroll.xy * uniforms.eye.w + effect.wave.xy;
     out.worldPosition = world.xyz;
     out.colour = colour;
     return out;
@@ -69,7 +74,7 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
     let lambert = abs(dot(n, normalize(uniforms.lightDirection.xyz)));
     let sampled = textureSample(zoneTexture, zoneSampler, in.uv);
-    let alpha = clamp(4.0 * in.colour.a * sampled.a, 0.0, 1.0);
+    let alpha = clamp(4.0 * in.colour.a * sampled.a, 0.0, 1.0) * effect.wave.z;
 
     let light = uniforms.ambient.rgb + uniforms.sunlight.rgb * lambert;
     // Vertex colour at half scale, 0x80 meaning full - a sprite frame's
@@ -83,6 +88,22 @@ fn fragmentMain(in : VertexOut) -> @location(0) vec4<f32> {
     let fog = clamp((distance - fogStart) / (fogEnd - fogStart), 0.0, 1.0) * (1.0 - effect.scroll.w);
     colour = mix(colour, uniforms.fogColour.rgb, fog);
 
+    // A shoreline wave is a sheet of foam lying flat on the water, and the
+    // lighting above cannot be used on it. Its generator scales the placement
+    // by (6, 0, 1) - the zero flattens the model into a sheet, and it flattens
+    // the normals with it, so `lambert` comes out zero and every term that
+    // depends on it goes to black. Drawn that way the foam darkened the sea
+    // instead of whitening it: measured against the same frame without it, it
+    // took a shoreline from (148, 150, 132) down to (115, 117, 102).
+    //
+    // So the sheet takes the ambient and nothing else, which is what a flat
+    // white surface under an open sky gets anyway.
+    if (effect.wave.w > 0.5) {
+        let ambient = min(uniforms.ambient.rgb, vec3<f32>(1.0, 1.0, 1.0));
+        var foam = sampled.rgb * min(in.colour.rgb * 2.0, vec3<f32>(1.0, 1.0, 1.0)) * (0.45 + 0.55 * ambient);
+        foam = mix(foam, uniforms.fogColour.rgb, fog);
+        return vec4<f32>(foam, alpha);
+    }
     return vec4<f32>(colour, alpha);
 }
 )";

@@ -122,8 +122,24 @@ int main(int argc, char** argv)
                             std::printf("  %s: %zu meshes\n", m.name.c_str(), m.meshes.size());
                             for (const ffxi::ModelMesh& mesh : m.meshes)
                             {
-                                std::printf("      %6zu tris  blend %u  tex [%s]\n",
-                                            mesh.indices.size() / 3, unsigned(mesh.blending), mesh.texture.c_str());
+                                unsigned long long r = 0, g = 0, b2 = 0, a2 = 0;
+                                unsigned lowA = 255, highA = 0;
+                                for (const ffxi::ModelVertex& v : mesh.vertices)
+                                {
+                                    const unsigned c = v.colour;
+                                    r += c & 0xff;
+                                    g += (c >> 8) & 0xff;
+                                    b2 += (c >> 16) & 0xff;
+                                    const unsigned av = (c >> 24) & 0xff;
+                                    a2 += av;
+                                    lowA = std::min(lowA, av);
+                                    highA = std::max(highA, av);
+                                }
+                                const size_t n = std::max<size_t>(mesh.vertices.size(), 1);
+                                std::printf("      %6zu tris  blend %u  tex [%s]  vertex colour mean "
+                                            "%llu %llu %llu a %llu (a %u..%u)\n",
+                                            mesh.indices.size() / 3, unsigned(mesh.blending), mesh.texture.c_str(),
+                                            r / n, g / n, b2 / n, a2 / n, lowA, highA);
                             }
                         }
                     }
@@ -207,6 +223,35 @@ int main(int argc, char** argv)
                     if (texSample.empty())
                     {
                         texSample = t.name + " " + std::to_string(t.width) + "x" + std::to_string(t.height);
+                    }
+                    // MOGHOUSE_DUMP_TEXTURE=umi3 writes the raw blocks beside a
+                    // one-line header, for decoding and looking at outside this.
+                    if (const char* wanted = std::getenv("MOGHOUSE_DUMP_TEXTURE"))
+                    {
+                        std::string own = t.name;
+                        while (!own.empty() && (own.back() == ' ' || own.back() == 0))
+                        {
+                            own.pop_back();
+                        }
+                        const size_t space = own.find_last_of(' ');
+                        if (space != std::string::npos)
+                        {
+                            own = own.substr(space + 1);
+                        }
+                        if (own == wanted)
+                        {
+                            const char* kFormats[] = {"bc1", "bc2", "rgba8"};
+                            std::string out = std::string("/tmp/tex-") + own + ".bin";
+                            if (FILE* f = std::fopen(out.c_str(), "wb"))
+                            {
+                                std::fprintf(f, "%s %u %u\n", kFormats[static_cast<int>(t.format)], t.width, t.height);
+                                std::fwrite(t.pixels.data(), 1, t.pixels.size(), f);
+                                std::fclose(f);
+                                std::printf("dumped %s %s %ux%u %zu bytes -> %s\n", own.c_str(),
+                                            kFormats[static_cast<int>(t.format)], t.width, t.height, t.pixels.size(),
+                                            out.c_str());
+                            }
+                        }
                     }
                 }
                 catch (const std::exception& e)

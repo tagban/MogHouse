@@ -20,6 +20,20 @@
 
 namespace mh
 {
+/// The curves a shoreline generator names for its wave, by 0x19 chunk id.
+///
+/// Unlike the day curves these run over a loop of a few seconds, and they
+/// animate the thing rather than deciding whether it is shown. Valkurm Dunes'
+/// beach is the case they were read from: see ffxi::EffectPlacement.
+struct WaveCurves
+{
+    std::string scaleZ;  ///< op 0x29, multiplying the placement's own z scale
+    std::string opacity; ///< op 0x2d
+    std::string u;       ///< op 0x2e, an offset in uv, not a rate
+    std::string v;       ///< op 0x2f
+    bool any() const { return !scaleZ.empty() || !opacity.empty() || !u.empty() || !v.empty(); }
+};
+
 /// One mesh, drawn once per placement of the model it belongs to.
 struct InstancedDraw
 {
@@ -56,6 +70,8 @@ struct InstancedDraw
     bool nightOnly{};
     std::string curve;
     bool additive{};
+    /// Set for a shoreline wave; evaluated every frame against the loop clock.
+    WaveCurves wave;
 };
 
 struct Scene
@@ -122,6 +138,11 @@ struct EffectParams
     std::string curve;
     /// Added to what is behind it rather than blended over: the flames.
     bool additive{};
+    /// An animated shoreline sheet: a wave, not a water surface. Kept out of
+    /// the water pass, which bakes its geometry flat in world space and could
+    /// neither move nor fade it.
+    bool foam{};
+    WaveCurves wave;
 };
 
 Scene buildScene(const ffxi::Zone& zone, const std::unordered_map<std::string, ffxi::Model>& models,
