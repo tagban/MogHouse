@@ -1775,12 +1775,28 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
         // nmia 226..237, nmib 231..242 - which is the arrangement that should
         // read as a wave rolling in. They overlap in the wrong place.
         //
-        // Not the animation: the curves resolve, the loop advances (phase 0.127
-        // to 0.504, measured live) and the strips draw, spread and fade.
-        // Not the growth direction: the other way is worse. Not the sea panels:
-        // removing them empties the bay. So it is the frame the generators are
-        // placed in, or op 0x0f's (6, 0, 1), and a constant offset is the kind
-        // of fault that has one findable cause.
+        // Ruled out so far, so nobody spends the afternoon again:
+        //
+        //   the animation      the curves resolve, the loop advances (phase
+        //                      0.127 to 0.504 measured live), and the strips
+        //                      draw, spread and fade
+        //   the direction      growing the other way is worse
+        //   the sea panels     removing them empties the bay, so they stay
+        //   a parent frame     the generators sit under directory chunks
+        //                      f_ki/effe/umi1..3, and every one of those
+        //                      chunks is sixteen bytes of zero - there is no
+        //                      transform on a directory to inherit
+        //   the collision      looking straight down at the strips shows open
+        //                      water in the drawn terrain too, so it is not
+        //                      that the server's collision disagrees with what
+        //                      is on screen
+        //
+        // What is left is the frame the generator translations are in, or op
+        // 0x0f's (6, 0, 1). Worth noting: mirroring a strip in z about its own
+        // group's sea panel would land it at the waterline on both beaches -
+        // 242 about 202 gives 162 against a shore at 152, and 202 about 159
+        // gives 116 against a shore at 112 - which is a suspiciously good fit
+        // for two beaches and worth chasing before anything else.
         //
         // MOGHOUSE_WAVES=1 turns them on to keep working on it.
         static const bool wavesEnabled = std::getenv("MOGHOUSE_WAVES") != nullptr;
@@ -8178,6 +8194,13 @@ const float kWavePeriod = [] {
                         return set ? std::strtof(set, nullptr) : 0.0f;
                     }();
                     matrix[13] += lift;
+                    // MOGHOUSE_WAVE_Z slides the strip along z, for finding out
+                    // how far off the shore it is before working out why.
+                    static const float shift = [] {
+                        const char* set = std::getenv("MOGHOUSE_WAVE_Z");
+                        return set ? std::strtof(set, nullptr) : 0.0f;
+                    }();
+                    matrix[14] += shift;
                     queue.WriteBuffer(instanceBuffer, static_cast<uint64_t>(at16) * sizeof(float), matrix,
                                       sizeof(matrix));
                 }
