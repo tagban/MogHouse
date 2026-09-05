@@ -135,6 +135,9 @@ public static class CharacterScreens
     /// Waits for one of the figures to be clicked. Null if the window closes
     /// first, which is the player leaving.
     /// </summary>
+    /// <summary>Escape at the line-up. Matches ViewerLink::kLineupCancelled.</summary>
+    private const uint Cancelled = 0xFFFFFFFFu;
+
     private static Choice? WaitForClick(ScreenHost screens, LiveRadar world,
                                         IReadOnlyList<FfxiCharacter> named)
     {
@@ -143,6 +146,19 @@ public static class CharacterScreens
             // The id is the one handed to ShowLineup, so it says directly which
             // of them was picked.
             uint clicked = world.TakeTalk();
+
+            // Escape, sent through the same channel as a click. Backing out of
+            // here had no route at all - the line-up is figures you click,
+            // there is no panel to put a button on, and the only way this ever
+            // returned empty-handed was the window closing. So an account that
+            // was signed in stayed signed in until the client was killed,
+            // which is also what leaves the login server holding a session
+            // nobody is using.
+            if (clicked == Cancelled)
+            {
+                return null;
+            }
+
             if (clicked == NewCharacterId)
             {
                 return Choice.New;

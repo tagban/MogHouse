@@ -7000,6 +7000,14 @@ const float kWavePeriod = [] {
             {
                 equipmentOpen = !equipmentOpen;
             }
+            else if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE && !typing && link &&
+                     link->lineup())
+            {
+                // Out of character select. Nothing else on this screen answers
+                // escape, and without it the only way back to the sign-in was
+                // to kill the client.
+                link->requestTalk(mh::ViewerLink::kLineupCancelled);
+            }
             else if (event.type == SDL_EVENT_KEY_DOWN && inventoryOpen && !typing &&
                      (event.key.key == SDLK_LEFT || event.key.key == SDLK_RIGHT ||
                       event.key.key == SDLK_PAGEUP || event.key.key == SDLK_PAGEDOWN ||

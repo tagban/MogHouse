@@ -661,6 +661,19 @@ public:
     void requestTalk(uint32_t entityId);
     bool takeTalk(uint32_t& entityId);
 
+    /// The id posted when escape is pressed while the character line-up is up.
+    ///
+    /// Backing out of character select had no route at all: the line-up is
+    /// figures you click, there is no panel to put a button on, and the only
+    /// way Select ever returned empty-handed was the window closing. So an
+    /// account that was signed in stayed signed in until the client was killed
+    /// - which is also the thing that leaves the login server holding a session
+    /// nobody is using.
+    ///
+    /// Sent through the same channel as a click rather than as a new call, so
+    /// the screen polls one thing and the interop keeps its shape.
+    static constexpr uint32_t kLineupCancelled = 0xFFFFFFFFu;
+
 
     /// A line the player typed and pressed return on, taken once.
     ///
