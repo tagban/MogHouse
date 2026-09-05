@@ -1090,9 +1090,9 @@ public sealed class FfxiGameSession : IDisposable
                     string found = "not in this zone's scripts";
                     if (Events().For(started.UniqueNo) is { } scripts)
                     {
-                        found = scripts.Start((ushort)started.EventId) is { } at
-                            ? $"script found, {scripts.Script.Length} bytes, starts at 0x{at:X4}"
-                            : $"entity has {scripts.Events.Count} events but not this one";
+                        found = scripts.Has((ushort)started.EventId)
+                            ? $"script found, {scripts.Script.Length} bytes"
+                            : $"entity has {scripts.EventIds.Count} events, not this one";
                     }
 
                     ChatReceived?.Invoke(new FfxiChatLine(

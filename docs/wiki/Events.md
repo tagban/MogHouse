@@ -43,39 +43,44 @@ Sizes track how much an NPC has to say: 116 bytes for somebody with one line,
 71KB for the busiest in the zone. Zone totals track the same thing — Southern
 San d'Oria 913KB against Port San d'Oria's 321KB.
 
-## Which events an entity has, and where each begins
+## Which events an entity has
 
 ```
 uint32   entity id
 uint32   capacity
 uint16   two unread words
-uint16   where each event starts[capacity]   ends at 0xFFFF
-uint16   the id the server names it by[capacity]
+         capacity * 2 words of index:
+           where each event begins
+           0xFFFF
+           the ids the server names them by
          then the bytecode
 ```
 
-The two tables are parallel. Offsets are from the end of the index, which is
-`0x0C + capacity * 4`.
+**The terminator separates the two runs, not their lengths.** That is the part
+that took three attempts. A block can have no offsets at all and still have
+events - Coderiant has one event and no offsets whatever - so reading the ids
+at a fixed distance from the start works for some people and not others.
 
-**`0xFFFF` in the first table is a terminator, not a hole.** That is the whole
-of why this took two attempts. Read as holes, a third of the blocks pointed
-past their own end - entity `0x010E6004` offering `0x279` for a block 296 bytes
-long. Read as a terminator, **all 1,626 blocks across seven zones resolve with
-nothing left over**.
+The retail files are the source of truth. LandSandBoat is how the reading was
+*checked*, because it is the one place that says what number a server would
+actually send:
 
-An entry whose *id* is `0xFFFF` has somewhere to start and no name to be called
-by: reachable from inside a script rather than from the server.
+| NPC | LSB says | in the block |
+|---|---|---|
+| Coderiant | 583 | yes |
+| Glenne | 520, 513 | yes |
+| Ailevia | 655, 615 | yes |
+| Ambrotien | 2001, 2008, 2009, 2010, 2011 | all five |
 
-Cross-checked against LandSandBoat, which is the only way to be sure a number
-found in a file is a number a server would send:
+Across a whole zone, `DefaultActions.lua` names an event for 38 of Southern San
+d'Oria's people and **32 are exactly where this puts them**. Three are not
+found and three could not be matched to a block by name. Where the two
+disagree it is not settled that the file is the one in the wrong: the DAT is
+retail's own and a private server implements what it has got to.
 
-- **Ambrotien** (`0x010E6062`): his script starts 2001, 2008, 2009, 2010 and
-  2011, and his block holds all five - among thirty more the client knows and
-  the server has not been taught yet.
-- **Ailevia** (`0x010E607E`): her 655 and 615, starting at `0x69` and `0xBB`.
-
-That the client knows more events than the server uses is worth expecting. The
-DAT is retail's; a private server implements what it has got to.
+**Where each event begins is not solved.** The offsets run before the
+terminator and there are fewer of them than there are events, so they are not
+one per event, and guessing at the pairing would be worse than admitting it.
 
 ## What is inside one
 
