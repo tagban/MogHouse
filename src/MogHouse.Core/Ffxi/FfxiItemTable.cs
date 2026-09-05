@@ -35,6 +35,30 @@ public sealed record FfxiItem(
     /// <summary>Whether this goes in an equipment slot rather than a bag.</summary>
     public bool IsEquipment => Slots != 0;
 
+    /// <summary>
+    /// The DAT's type for a linkshell or a linkpearl.
+    ///
+    /// Both Linkshell (513) and Linkpearl (515) carry 6 here, where a crystal
+    /// carries 8 and a weapon its own. The server keeps the same idea as a
+    /// bitmask, ITEM_LINKSHELL = 0x80; the file keeps it as an ordinal.
+    /// </summary>
+    public const ushort LinkshellType = 6;
+
+    /// <summary>
+    /// Whether this is a linkshell, which is worn but has no equipment fields.
+    ///
+    /// A linkshell record stops before the block that holds
+    /// <see cref="Slots"/>, so it reads as Slots 0 and
+    /// <see cref="IsEquipment"/> false - correctly, since it is not equipment
+    /// in the sense the rest of that block describes. It is still worn, in
+    /// <see cref="FfxiEquipSlot.Linkshell"/>, and this is the only thing in
+    /// the record that says so.
+    /// </summary>
+    public bool IsLinkshell => Type == LinkshellType;
+
+    /// <summary>Whether this can be worn at all, by either route.</summary>
+    public bool IsWearable => IsEquipment || IsLinkshell;
+
     /// <summary>Whether a slot number (SLOTTYPE, 0 main to 15 back) can take this.</summary>
     public bool FitsSlot(int slot) => slot is >= 0 and < 16 && (Slots & (1 << slot)) != 0;
 

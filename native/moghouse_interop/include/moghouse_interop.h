@@ -243,9 +243,14 @@ MH_API void mh_viewer_set_equipment(MhViewerHandle viewer, const uint8_t* contai
 /// arrows is one icon. The pixels are RGBA, `width * height * 4` bytes, row
 /// zero at the top. The renderer copies them into its atlas and does not keep
 /// the pointer.
+///
+/// `slots` is thirty-two bits rather than the sixteen the DAT stores, because
+/// a linkshell is worn in slot sixteen and sixteen bits cannot say so. The
+/// file has no room for that bit either - it tells a linkshell apart by item
+/// type - so the client sets it and this carries it.
 MH_API void mh_viewer_push_item(MhViewerHandle viewer, uint16_t item_id,
                                 const char* name, const char* description,
-                                uint16_t type, uint16_t level, uint16_t slots,
+                                uint16_t type, uint16_t level, uint32_t slots,
                                 const uint8_t* rgba, int32_t width, int32_t height);
 
 /// What a dead player pressed in the box the renderer draws them. Matches

@@ -11699,7 +11699,7 @@ const float kWavePeriod = [] {
                             if (goesTo < 0)
                             {
                                 goesTo = 0;
-                                while (goesTo < 16 && (facing->second.slots & (1 << goesTo)) == 0)
+                                while (goesTo < 17 && (facing->second.slots & (1u << goesTo)) == 0)
                                 {
                                     ++goesTo;
                                 }

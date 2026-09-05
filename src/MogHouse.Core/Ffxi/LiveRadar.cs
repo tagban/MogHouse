@@ -503,7 +503,15 @@ public sealed class LiveRadar : IDisposable
     {
         if (!_closed)
         {
-            _viewer.PushItem(item.Id, item.Name, item.Description, item.Type, item.Level, item.Slots,
+            // A linkshell is worn but the DAT's slot field has no bit for it -
+            // that field is sixteen wide and the linkshell is slot sixteen -
+            // so the item type is what says so and the bit is set here. The
+            // renderer's own field is thirty-two bits for exactly this.
+            uint slots = item.IsLinkshell
+                ? item.Slots | (1u << (int)FfxiEquipSlot.Linkshell)
+                : item.Slots;
+
+            _viewer.PushItem(item.Id, item.Name, item.Description, item.Type, item.Level, slots,
                              icon.Rgba, icon.Width, icon.Height);
         }
     }

@@ -74,7 +74,7 @@ public sealed class FfxiInventoryTracker
     /// <summary>Everything worn, in slot order.</summary>
     public IEnumerable<(FfxiEquipSlot Slot, FfxiInventorySlot? Item)> Worn()
     {
-        for (int i = 0; i <= (int)FfxiEquipSlot.Back; i++)
+        for (int i = 0; i <= (int)FfxiEquipSlot.Linkshell2; i++)
         {
             var slot = (FfxiEquipSlot)i;
             yield return (slot, EquippedItem(slot));

@@ -54,6 +54,19 @@ public enum FfxiEquipSlot : byte
     Ring1 = 13,
     Ring2 = 14,
     Back = 15,
+
+    /// <summary>
+    /// The linkshell, which is worn rather than carried.
+    ///
+    /// It is not reachable through <see cref="FfxiItem.Slots"/>: that field is
+    /// sixteen bits wide, so bit sixteen cannot be expressed in it at all, and
+    /// a linkshell is told apart by its item type instead - see
+    /// <see cref="FfxiItem.IsLinkshell"/>. The server numbers it SLOT_LINK1.
+    /// </summary>
+    Linkshell = 16,
+
+    /// <summary>The second linkshell slot, SLOT_LINK2.</summary>
+    Linkshell2 = 17,
 }
 
 /// <summary>

@@ -420,7 +420,7 @@ void mh_viewer_set_equipment(MhViewerHandle viewer, const uint8_t* containers, c
 }
 
 void mh_viewer_push_item(MhViewerHandle viewer, uint16_t item_id, const char* name,
-                         const char* description, uint16_t type, uint16_t level, uint16_t slots,
+                         const char* description, uint16_t type, uint16_t level, uint32_t slots,
                          const uint8_t* rgba, int32_t width, int32_t height)
 {
     if (!viewer || width <= 0 || height <= 0 || !rgba)

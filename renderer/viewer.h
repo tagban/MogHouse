@@ -537,9 +537,15 @@ public:
         uint16_t level{};
 
         /// Which equipment slots will take this, as a bitmask - bit 0 the main
-        /// hand, bit 15 the back. Zero for anything that is not worn at all,
-        /// which is how the menu knows whether to offer to equip it.
-        uint16_t slots{};
+        /// hand, bit 15 the back, bit 16 the linkshell. Zero for anything that
+        /// is not worn at all, which is how the menu knows whether to offer to
+        /// equip it.
+        ///
+        /// Thirty-two bits, not the sixteen the DAT stores. A linkshell is
+        /// worn in slot sixteen and the file's own field has no room to say
+        /// so - it marks a linkshell by item type instead - so the client sets
+        /// that bit on the way through.
+        uint32_t slots{};
 
         int width{};
         int height{};

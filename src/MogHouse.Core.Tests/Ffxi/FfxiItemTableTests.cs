@@ -18,14 +18,15 @@ public class FfxiItemTableTests : IDisposable
     /// and the item asked for, because record 0 is where the real files keep
     /// their placeholder and the reader takes the first id from record 1.
     /// </summary>
-    private FfxiItemTable Build(ushort id, string name, string description, byte[]? icon = null)
+    private FfxiItemTable Build(ushort id, string name, string description, byte[]? icon = null,
+                                ushort type = 1)
     {
         var file = new byte[RecordSize * 2];
         var record = new byte[RecordSize];
 
         BinaryPrimitives.WriteUInt32LittleEndian(record.AsSpan(0, 4), id);
         BinaryPrimitives.WriteUInt16LittleEndian(record.AsSpan(0x06, 2), 12);   // stack size
-        BinaryPrimitives.WriteUInt16LittleEndian(record.AsSpan(0x08, 2), 1);    // type
+        BinaryPrimitives.WriteUInt16LittleEndian(record.AsSpan(0x08, 2), type);
         BinaryPrimitives.WriteUInt32LittleEndian(record.AsSpan(TableOffset, 4), 5);
 
         // Five strings: the name, a blank, two log forms, the description.
@@ -169,4 +170,29 @@ public class FfxiItemTableTests : IDisposable
     }
 
     public void Dispose() => Directory.Delete(_root, recursive: true);
+
+    [Fact]
+    public void ALinkshellIsWearableEvenThoughItHasNoSlots()
+    {
+        // Both Linkshell (513) and Linkpearl (515) carry type 6 in the DAT,
+        // and their records stop before the block holding the slot mask - so
+        // Slots is zero and IsEquipment is false, correctly. They are still
+        // worn, and the type is the only thing in the record that says so.
+        FfxiItemTable table = Build(513, "Linkshell", "A shell.", type: FfxiItem.LinkshellType);
+        FfxiItem item = table.Item(513)!;
+
+        Assert.True(item.IsLinkshell);
+        Assert.False(item.IsEquipment);
+        Assert.Equal(0, item.Slots);
+        Assert.True(item.IsWearable);
+    }
+
+    [Fact]
+    public void AnOrdinaryItemIsNotALinkshell()
+    {
+        FfxiItemTable table = Build(4096, "Fire Crystal", "A crystal.", type: 8);
+
+        Assert.False(table.Item(4096)!.IsLinkshell);
+        Assert.False(table.Item(4096)!.IsWearable);
+    }
 }

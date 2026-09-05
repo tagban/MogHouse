@@ -554,7 +554,7 @@ public sealed partial class NativeViewer : IDisposable
     /// before this returns, so the caller can reuse the buffer.
     /// </summary>
     public void PushItem(ushort itemId, string name, string description, ushort type, ushort level,
-                         ushort slots, ReadOnlySpan<byte> rgba, int width, int height)
+                         uint slots, ReadOnlySpan<byte> rgba, int width, int height)
     {
         if (_disposed || rgba.IsEmpty)
         {
@@ -1048,7 +1048,7 @@ public sealed partial class NativeViewer : IDisposable
 
     [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
     private static partial void mh_viewer_push_item(IntPtr viewer, ushort itemId, string name,
-        string description, ushort type, ushort level, ushort slots, ReadOnlySpan<byte> rgba,
+        string description, ushort type, ushort level, uint slots, ReadOnlySpan<byte> rgba,
         int width, int height);
 
     [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
