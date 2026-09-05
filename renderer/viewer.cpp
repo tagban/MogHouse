@@ -1667,7 +1667,23 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
         // canal and no use for something that has to spread, wash up the sand
         // and fade; so these go to the effect pass, which already scrolls a
         // texture and can now offset and fade one.
-        const bool wave = water && (!effect.opacityCurve.empty() || !effect.vCurve.empty());
+        // Motion is what makes a wave, not a fade. Valkurm's nmic is six 6x6
+        // sheets of the caustic net "umi1" carrying an opacity curve and
+        // nothing else - no spread, no uv, and a scroll rate slow enough to
+        // take a minute for one repeat. Counted as waves they came out of the
+        // water pass as a wide sheet of foam sitting perfectly still, which is
+        // both wrong and the most visible thing on the beach. umi1 is a
+        // caustic net like kaw1 and ike1: it belongs to the water, which
+        // drifts it in two layers.
+        //
+        // The spread is the test, and it has to be a test every placement of a
+        // model agrees on: the effect parameters are keyed by model, so one
+        // placement calling itself a wave takes all of them out of the water
+        // pass with it, and a model split between the two passes is drawn
+        // twice. Op 0x29 is uniform here - it is on all three copies of nmia
+        // and nmib and on none of the six nmic - where a uv or opacity curve
+        // is not: one nmic of the six carries `umcv` and the rest do not.
+        const bool wave = water && !effect.scaleZCurve.empty();
         if (wave)
         {
             water = false;
