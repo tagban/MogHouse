@@ -317,4 +317,27 @@ public class FfxiEntityUpdateAppearanceTests
         Assert.Null(update.BattleFlags);
         Assert.Equal(FfxiEntityKind.Npc, update.Kind);
     }
+
+    [Fact]
+    public void AnUpdateWithNoNamevisDoesNotHideTheName()
+    {
+        // C# lifts != over nullables, and a lifted != against null is true. So
+        // "(NameVis & flag) != 0" reported "hide the name" for every update
+        // that carried no namevis byte at all, which is most of them.
+        var update = new FfxiEntityUpdate(PacketId: 0x00D, UniqueNo: 1, ActIndex: 1, Direction: 0, X: 0, Vertical: 0, Depth: 0);
+
+        Assert.Null(update.NameVis);
+        Assert.False(update.IsNameHidden);
+    }
+
+    [Fact]
+    public void ANamevisWithoutTheBitDoesNotHideTheName()
+    {
+        Assert.False(new FfxiEntityUpdate(PacketId: 0x00D, UniqueNo: 1, ActIndex: 1, Direction: 0, X: 0, Vertical: 0, Depth: 0, NameVis: 0).IsNameHidden);
+        Assert.False(new FfxiEntityUpdate(PacketId: 0x00D, UniqueNo: 1, ActIndex: 1, Direction: 0, X: 0, Vertical: 0, Depth: 0, NameVis: 4).IsNameHidden);
+    }
+
+    [Fact]
+    public void ANamevisCarryingTheBitHidesTheName() =>
+        Assert.True(new FfxiEntityUpdate(PacketId: 0x00D, UniqueNo: 1, ActIndex: 1, Direction: 0, X: 0, Vertical: 0, Depth: 0, NameVis: 0x08).IsNameHidden);
 }

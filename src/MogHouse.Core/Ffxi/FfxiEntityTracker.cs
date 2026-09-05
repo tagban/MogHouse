@@ -238,9 +238,24 @@ public sealed class FfxiEntityTracker
                 // has for it, but a server need not set it - this one leaves it
                 // zero on every entity, doors included. What it does say reliably
                 // is that a door is a door, and scenery is never labelled.
-                NameHidden: update.NameVis is null && update.Look is null
-                    ? known?.NameHidden ?? false
-                    : update.IsNameHidden || (update.Look?.IsScenery ?? false) || (known?.NameHidden ?? false),
+                // Sticky only where there is nothing to go on. A position-only
+                // update carries no namevis byte and must not reveal a door's
+                // name - but where the server has just said what the namevis
+                // is, that is the answer, and carrying the old value forward
+                // made hiding permanent. Holiday decorations are the case that
+                // proves it: they stand in the zone all year and the server
+                // reveals them for a season, so anything hidden has to be able
+                // to stop being hidden.
+                //
+                // Scenery stays sticky. A door does not become a non-door, and
+                // that judgement comes from the look rather than from a flag
+                // the server sets - this one leaves namevis zero on every
+                // entity, doors included.
+                NameHidden: update.NameVis is not null
+                    ? update.IsNameHidden || IsSceneryEver(update, known)
+                    : update.Look is not null
+                        ? IsSceneryEver(update, known) || (known?.NameHidden ?? false)
+                        : known?.NameHidden ?? false,
                 Look: update.Look ?? known?.Look,
                 // Sticky like the rest: an update with no flags word must not
                 // demote a GM back to an ordinary player.
@@ -253,6 +268,16 @@ public sealed class FfxiEntityTracker
                 ModelSize: update.ModelSize ?? known?.ModelSize);
         }
     }
+
+    /// <summary>
+    /// Whether this entity has ever been seen to be scenery.
+    ///
+    /// Scenery is a property of the thing, not of the moment, so once a look
+    /// has said so it holds - unlike the server's hide flag, which is
+    /// something it can change its mind about.
+    /// </summary>
+    private static bool IsSceneryEver(FfxiEntityUpdate update, FfxiTrackedEntity? known) =>
+        (update.Look?.IsScenery ?? false) || (known?.Look?.IsScenery ?? false);
 
     private static bool HiddenAfter(FfxiEntityUpdate update, FfxiTrackedEntity? known)
     {

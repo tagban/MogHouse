@@ -431,7 +431,15 @@ public sealed record FfxiEntityUpdate(
     /// not what arrives, or that bit means something else once it is on the
     /// wire. Parsed and left alone until something can say which.
     /// </summary>
-    public bool IsNameHidden => (NameVis & NameVisHideName) != 0;
+    /// <remarks>
+    /// Written with a pattern rather than a lifted comparison, and that is the
+    /// whole point: <c>NameVis</c> is nullable, and in C# a lifted <c>!=</c>
+    /// against null is <b>true</b>. So <c>(NameVis &amp; flag) != 0</c> said
+    /// "hide the name" for every update that carried no namevis byte at all -
+    /// which is most of them - and the tracker then made that stick. Names
+    /// vanished for good the first time an entity sent a look.
+    /// </remarks>
+    public bool IsNameHidden => NameVis is byte vis && (vis & NameVisHideName) != 0;
 
     /// <summary>
     /// The server says not to draw this at all - a trigger, or something an
