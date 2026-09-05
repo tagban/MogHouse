@@ -10819,8 +10819,33 @@ const float kWavePeriod = [] {
                     // there is. The same wall raycast the camera uses to avoid
                     // orbiting through a house answers it directly instead, and
                     // a handful of entities is a handful of rays.
-                    if (collision.firstSolidAlong(camera.eye(), mh::Vec3{entity.x, headY, entity.z}))
+                    //
+                    // MOGHOUSE_PLATE_OCCLUSION picks how strict that is:
+                    //
+                    //   2  anything solid, floors and ceilings included (the
+                    //      default, and what "not through walls" asked for)
+                    //   1  walls only - a floor or a ceiling between the eye
+                    //      and the name does not hide it
+                    //   0  off, names always shown
+                    //
+                    // The reason for the switch is a chocobo pen. Collision for
+                    // a fence or a railing is usually a full-height box however
+                    // low the rail looks, so the ray is stopped by something
+                    // you can plainly see over, and the names only appear when
+                    // the camera rises above it. No amount of aiming the ray
+                    // higher fixes that; the geometry it is asking about is the
+                    // wrong shape.
+                    static const int occlusion = [] {
+                        const char* set = std::getenv("MOGHOUSE_PLATE_OCCLUSION");
+                        return set ? static_cast<int>(std::strtol(set, nullptr, 10)) : 2;
+                    }();
+                    const mh::Vec3 plateAt{entity.x, headY, entity.z};
+                    const bool blocked = occlusion == 2   ? collision.firstSolidAlong(camera.eye(), plateAt).has_value()
+                                         : occlusion == 1 ? collision.firstWallAlong(camera.eye(), plateAt).has_value()
+                                                          : false;
+                    if (blocked)
                     {
+                        sayWhy("behind something solid");
                         continue;
                     }
 
