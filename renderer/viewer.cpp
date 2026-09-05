@@ -3217,10 +3217,27 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
             // without one. Below zero means nobody has said, which reads as
             // fine - the standalone renderer has no server to ask.
             const int weatherNow = link && link->weather() >= 0 ? link->weather() : forcedWeather;
-            zone = loadZone(currentZonePath.c_str(), keyPath,
-                            options.keyTable2Path.empty() ? nullptr : options.keyTable2Path.c_str(), zoneId, textures,
-                            lighting, collision, interiors, skyObjects, curves, sprites, spriteInstances,
-                            weatherNow, lamps, emitters);
+
+            // A zone whose file cannot be read used to take the process with
+            // it. DatFile throws when it cannot open the path, nothing here
+            // caught it, and the abort landed in the crash log as the renderer
+            // dying for no stated reason - which is what a zone the install
+            // does not hold looked like from the outside. An installation is
+            // allowed to be missing a file; the client is not allowed to die
+            // of it, so this reports the zone and carries on without one.
+            try
+            {
+                zone = loadZone(currentZonePath.c_str(), keyPath,
+                                options.keyTable2Path.empty() ? nullptr : options.keyTable2Path.c_str(), zoneId,
+                                textures, lighting, collision, interiors, skyObjects, curves, sprites, spriteInstances,
+                                weatherNow, lamps, emitters);
+            }
+            catch (const std::exception& e)
+            {
+                std::printf("could not load zone %s from %s: %s\n", zoneId.c_str(), currentZonePath.c_str(),
+                            e.what());
+                zone.reset();
+            }
             // The old zone's waterfall does not follow you into the next one.
             for (const auto& [sound, handle] : ambienceVoices)
             {
