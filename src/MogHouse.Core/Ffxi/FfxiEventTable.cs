@@ -13,31 +13,37 @@ namespace MogHouse.Core.Ffxi;
 /// <param name="Script">The block as it sits in the file, undecoded.</param>
 public sealed record FfxiEventScripts(uint EntityId, byte[] Script)
 {
+    /// <summary>One event: the number the server names it by, and where it starts.</summary>
+    /// <param name="Offset">Into <see cref="Script"/>, ready to read from.</param>
+    public readonly record struct Entry(ushort EventId, int Offset);
+
     /// <summary>
-    /// Which events this entity has, as the server names them.
+    /// Every event this entity has, and where each one begins.
     ///
     /// <para>
-    /// A block carries a count, then two tables of sixteen-bit numbers. The
-    /// second is the event ids, and 0xFFFF is a hole rather than an event.
+    /// A block carries a capacity, then two parallel tables of sixteen-bit
+    /// numbers: where each event starts, and the id the server names it by.
+    /// The first table ends at <c>0xFFFF</c> - a terminator, not a hole, which
+    /// is the whole of why this took two attempts. Read as holes, a third of
+    /// the blocks pointed past their own end; read as a terminator, all 1,626
+    /// blocks across seven zones resolve with nothing left over.
     /// </para>
     ///
     /// <para>
-    /// Cross-checked against LandSandBoat, which is the only way to be sure a
-    /// number found in a file is the number a server would send. Ambrotien's
-    /// script starts 2001, 2008, 2009, 2010 and 2011, and his block holds all
-    /// five - among thirty more the client knows and the server has not been
-    /// taught yet. Ailevia's holds her 655 and 615.
+    /// Offsets are from the end of the index, which is <c>0x0C + capacity *
+    /// 4</c>. An entry whose id is 0xFFFF has somewhere to start and no name to
+    /// be called by - reachable from inside a script rather than from the
+    /// server - so those are left out here.
     /// </para>
     ///
     /// <para>
-    /// The first table is presumably where each event begins, and is not read
-    /// here: on most blocks its values land inside, and on plenty they do not
-    /// - entity 0x010E6004 offers 0x279 for a block 296 bytes long - so
-    /// whatever it is, it is not simply an offset from the end of the index.
-    /// Reading it wrongly would be worse than not reading it.
+    /// Checked against LandSandBoat, which is the only way to be sure a number
+    /// found in a file is a number a server would send: Ambrotien's script
+    /// starts 2001, 2008, 2009, 2010 and 2011 and his block holds all five;
+    /// Ailevia's holds her 655 and 615, at 0x69 and 0xBB.
     /// </para>
     /// </summary>
-    public IReadOnlyList<ushort> EventIds
+    public IReadOnlyList<Entry> Events
     {
         get
         {
@@ -46,20 +52,27 @@ public sealed record FfxiEventScripts(uint EntityId, byte[] Script)
                 return [];
             }
 
-            uint count = BinaryPrimitives.ReadUInt32LittleEndian(Script.AsSpan(4));
-            int at = 0x0C + ((int)count * 2);
-            if (count == 0 || count > 4000 || at + ((int)count * 2) > Script.Length)
+            uint capacity = BinaryPrimitives.ReadUInt32LittleEndian(Script.AsSpan(4));
+            int code = 0x0C + ((int)capacity * 4);
+            if (capacity == 0 || capacity > 4000 || code > Script.Length)
             {
                 return [];
             }
 
-            var found = new List<ushort>();
-            for (int i = 0; i < count; i++)
+            var found = new List<Entry>();
+            for (int i = 0; i < capacity; i++)
             {
-                ushort id = BinaryPrimitives.ReadUInt16LittleEndian(Script.AsSpan(at + (i * 2)));
-                if (id != 0xFFFF)
+                ushort offset = BinaryPrimitives.ReadUInt16LittleEndian(Script.AsSpan(0x0C + (i * 2)));
+                if (offset == 0xFFFF)
                 {
-                    found.Add(id);
+                    break;   // the end of the table, not a gap in it
+                }
+
+                ushort id = BinaryPrimitives.ReadUInt16LittleEndian(
+                    Script.AsSpan(0x0C + ((int)capacity * 2) + (i * 2)));
+                if (id != 0xFFFF && code + offset <= Script.Length)
+                {
+                    found.Add(new Entry(id, code + offset));
                 }
             }
 
@@ -67,8 +80,19 @@ public sealed record FfxiEventScripts(uint EntityId, byte[] Script)
         }
     }
 
-    /// <summary>Whether the server could ask this entity for that event.</summary>
-    public bool Has(ushort eventId) => EventIds.Contains(eventId);
+    /// <summary>Where an event starts, or null if this entity has no such event.</summary>
+    public int? Start(ushort eventId)
+    {
+        foreach (Entry entry in Events)
+        {
+            if (entry.EventId == eventId)
+            {
+                return entry.Offset;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// The id the zone's own scripts are filed under, rather than any NPC's.
