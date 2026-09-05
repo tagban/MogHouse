@@ -139,6 +139,7 @@ public sealed class WorldLoop
         _session.LookChanged += OnLookChanged;
         _session.ChatReceived += OnChat;
         _session.NpcChoiceOffered += OnNpcChoice;
+        _session.ShopOpened += OnShopOpened;
         _session.EntitiesChanged += OnEntities;
         _session.ZoneChanged += OnZoneChanged;
         _session.MusicChanged += PlayMusic;
@@ -157,6 +158,7 @@ public sealed class WorldLoop
         _items = null;
         _session.ChatReceived -= OnChat;
         _session.NpcChoiceOffered -= OnNpcChoice;
+        _session.ShopOpened -= OnShopOpened;
         _session.EntitiesChanged -= OnEntities;
         _session.ZoneChanged -= OnZoneChanged;
         _session.MusicChanged -= PlayMusic;
@@ -399,6 +401,35 @@ public sealed class WorldLoop
 
             _world.ShowItem(item, icon);
         }
+    }
+
+    /// <summary>
+    /// Buys whatever was clicked, or closes the shop.
+    ///
+    /// One at a time: the buy packet carries a quantity, but nothing on screen
+    /// asks for one yet, and quietly buying twelve of something because the
+    /// button was pressed twice would be worse than buying one.
+    /// </summary>
+    private void TakeShopChoice()
+    {
+        if (_world.TakeFormResult() is not { } answered)
+        {
+            return;
+        }
+
+        IReadOnlyList<FfxiShopItem> selling = _selling;
+        _selling = [];
+        _world.HideForm();
+
+        if (answered.Button < 0 || answered.Button >= selling.Count)
+        {
+            return;   // Close, or a button that is not an item
+        }
+
+        FfxiShopItem bought = selling[answered.Button];
+        string name = Items().Item(bought.ItemId)?.Name ?? $"item {bought.ItemId}";
+        _world.Say(null, $"Buying {name} for {bought.Price:N0} gil.");
+        _ = _session.BuyAsync(bought.ShopIndex);
     }
 
     private void Pump()
@@ -702,6 +733,56 @@ public sealed class WorldLoop
     /// <summary>The question an NPC has on screen, or null.</summary>
     private FfxiNpcChoice? _asking;
 
+    /// <summary>What the open shop is selling, in the order its buttons are drawn.</summary>
+    private IReadOnlyList<FfxiShopItem> _selling = [];
+
+    /// <summary>
+    /// Names and icons for items, opened on first use.
+    ///
+    /// A session that never opens its bags and never talks to a shopkeeper
+    /// never reads the file.
+    /// </summary>
+    private FfxiItemTable Items()
+    {
+        if (_items is null)
+        {
+            try
+            {
+                _items = new FfxiItemTable(new FfxiFileTable(FfxiFileTable.DefaultInstallRoot()));
+            }
+            catch (Exception)
+            {
+                _items = FfxiItemTable.Empty;
+            }
+        }
+
+        return _items;
+    }
+
+    /// <summary>
+    /// Puts a shopkeeper's stock on the screen.
+    ///
+    /// The server sends item ids and prices and no names at all - the name is
+    /// the client's own business, out of the item DAT, which is the same place
+    /// the bags get theirs. An id with no entry still gets a row: knowing
+    /// something is for sale at a price is more use than a gap.
+    /// </summary>
+    private void OnShopOpened(FfxiShop shop)
+    {
+        _selling = shop.Items;
+        _asking = null;
+
+        var rows = new List<NativeFormRow>();
+        foreach (FfxiShopItem selling in _selling)
+        {
+            string name = Items().Item(selling.ItemId)?.Name ?? $"item {selling.ItemId}";
+            rows.Add(NativeFormRow.Button($"{name}  -  {selling.Price:N0} gil"));
+        }
+
+        rows.Add(NativeFormRow.Button("Close"));
+        _world.ShowForm("Shop", $"{_selling.Count} for sale. One at a time for now.", rows);
+    }
+
     /// <summary>
     /// Puts an NPC's question on the screen with its answers as buttons.
     ///
@@ -737,6 +818,12 @@ public sealed class WorldLoop
     /// </summary>
     private void TakeNpcAnswer()
     {
+        if (_selling.Count > 0)
+        {
+            TakeShopChoice();
+            return;
+        }
+
         if (_asking is null || _world.TakeFormResult() is not { } answered)
         {
             return;

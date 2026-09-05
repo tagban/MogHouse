@@ -544,6 +544,17 @@ await SendLoginAsync(zoneServer, uniqueNo, characterName, accountName, clientVer
         await SendEncryptedAsync(
             zoneServer, FfxiDropPacket.Build(quantity, container, slot, (ushort)(_ownCounter + 1)), ct);
 
+    /// <summary>
+    /// Buys from an open shop (GP_CLI_COMMAND_SHOP_BUY).
+    ///
+    /// ShopNo is sent as zero: the server reads only the item index, using it
+    /// straight into the container it built when the shop was opened.
+    /// </summary>
+    public async Task SendShopBuyAsync(IPEndPoint zoneServer, uint quantity, ushort shopItemIndex,
+                                       CancellationToken ct = default) =>
+        await SendEncryptedAsync(
+            zoneServer, FfxiShop.BuildBuy(quantity, 0, shopItemIndex, (ushort)(_ownCounter + 1)), ct);
+
     /// <summary>Asks the server to describe an entity again (GP_CLI_COMMAND_CHARREQ).</summary>
     public async Task SendCharacterRequestAsync(IPEndPoint zoneServer, ushort actIndex,
                                                 CancellationToken ct = default) =>

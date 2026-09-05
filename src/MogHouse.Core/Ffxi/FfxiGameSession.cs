@@ -55,6 +55,12 @@ public sealed class FfxiGameSession : IDisposable
     /// <summary>An NPC has asked something with a list of answers under it.</summary>
     public event Action<FfxiNpcChoice>? NpcChoiceOffered;
 
+    /// <summary>A shopkeeper has finished describing what is for sale.</summary>
+    public event Action<FfxiShop>? ShopOpened;
+
+    /// <summary>What the last shopkeeper we spoke to is selling.</summary>
+    public FfxiShop Shop { get; } = new();
+
     private FfxiDialogueTable _dialogue = FfxiDialogueTable.Empty;
     private FfxiEntityNames _entityNames = FfxiEntityNames.Empty;
     private int _entityNamesZone = -1;
@@ -1223,6 +1229,18 @@ public sealed class FfxiGameSession : IDisposable
                 SetRaiseOffer(true);
             }
 
+            // A shop. The count comes first and the stock follows in batches
+            // of up to nineteen, so nothing can be shown until the last one is
+            // in - see FfxiShop.
+            if (Shop.Open(reply.Plaintext.AsSpan(offset, size)) && Shop.Complete)
+            {
+                ShopOpened?.Invoke(Shop);
+            }
+            else if (Shop.AddBatch(reply.Plaintext.AsSpan(offset, size)) && Shop.Complete)
+            {
+                ShopOpened?.Invoke(Shop);
+            }
+
             // What an NPC said, which arrives as a line id to look up.
             FfxiNpcMessage? spoken = FfxiNpcMessage.TryParse(reply.Plaintext.AsSpan(offset, size));
             if (spoken is not null)
@@ -1399,6 +1417,25 @@ public sealed class FfxiGameSession : IDisposable
         }
 
         await _zone.SendEquipAsync(_zoneEndpoint, itemSlot, slot, container);
+    }
+
+    /// <summary>
+    /// Buys from the shop that is open.
+    ///
+    /// The index is the shop's own, which is what the server indexes its
+    /// container by - not the position in whatever packet carried the item.
+    /// Nothing is applied locally: the server answers with the gil and the
+    /// inventory, and a client that added the item itself would be showing a
+    /// purchase that may well be refused.
+    /// </summary>
+    public async Task BuyAsync(byte shopItemIndex, uint quantity = 1)
+    {
+        if (_zone is null || _zoneEndpoint is null || ZoneState is null || quantity == 0)
+        {
+            return;
+        }
+
+        await _zone.SendShopBuyAsync(_zoneEndpoint, quantity, shopItemIndex);
     }
 
     /// <summary>
