@@ -1701,17 +1701,27 @@ std::optional<mh::Scene> loadZone(const char* datPath, const char* keyPath, cons
         // MOGHOUSE_WAVES=0 turns them off.
         // Off, because where they land is wrong and it is not yet known why.
         //
-        // Valkurm's coast is a curved bay - MOGHOUSE_BEACH_PROBE walks the
-        // ground and finds the waterline at z 262 at x 150, z 152 from x 250 to
-        // 350, z 257 at x 400. The strips are placed at z 237 and 242 and are
-        // 178 units wide, so across the middle of the bay they stand about
-        // ninety yalms out to sea. They sit at the far edge of the decorative
-        // sea panel, which spans z 164..236, rather than at its shoreward edge.
+        // The strips land out to sea, by a constant. MOGHOUSE_BEACH_PROBE
+        // walks the collision and reports the waterline; against it,
         //
-        // Retail puts this foam on the sand, so something here is misread: the
-        // placement, or op 0x0f's (6, 0, 1), or the frame. Everything else
-        // checks out - the curves drive it, the loop advances, the strips draw
-        // and spread and fade - which is why it is worth coming back to.
+        //   beach 1, x  299:  strips z 237, 242   waterline z 152   +85, +90
+        //   beach 2, x -180:  strips z 197, 202   waterline z 112   +85, +90
+        //
+        // The same two offsets at two beaches four hundred and eighty yalms
+        // apart, so this is one cause and not scattered misplacement. Looking
+        // straight down at the strips shows open water under them, so the drawn
+        // terrain agrees with the collision.
+        //
+        // The layers do overlap each other - the shimmer nmic spans z 197..263,
+        // nmia 226..237, nmib 231..242 - which is the arrangement that should
+        // read as a wave rolling in. They overlap in the wrong place.
+        //
+        // Not the animation: the curves resolve, the loop advances (phase 0.127
+        // to 0.504, measured live) and the strips draw, spread and fade.
+        // Not the growth direction: the other way is worse. Not the sea panels:
+        // removing them empties the bay. So it is the frame the generators are
+        // placed in, or op 0x0f's (6, 0, 1), and a constant offset is the kind
+        // of fault that has one findable cause.
         //
         // MOGHOUSE_WAVES=1 turns them on to keep working on it.
         static const bool wavesEnabled = std::getenv("MOGHOUSE_WAVES") != nullptr;
