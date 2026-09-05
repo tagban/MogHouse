@@ -52,6 +52,9 @@ public sealed class FfxiGameSession : IDisposable
     // What NPCs say. The server sends line ids, so without the install we
     // can see that an NPC spoke but not what it said.
     private readonly FfxiFileTable? _files;
+    /// <summary>An NPC has asked something with a list of answers under it.</summary>
+    public event Action<FfxiNpcChoice>? NpcChoiceOffered;
+
     private FfxiDialogueTable _dialogue = FfxiDialogueTable.Empty;
     private FfxiEntityNames _entityNames = FfxiEntityNames.Empty;
     private int _entityNamesZone = -1;
@@ -1225,6 +1228,7 @@ public sealed class FfxiGameSession : IDisposable
             if (spoken is not null)
             {
                 string? said = Dialogue().Line(spoken.MessageId);
+                string speaker = spoken.Nameless ? "" : Speaker(spoken.UniqueNo);
 
                 // The server asks for some lines to appear with nobody in
                 // front of them - narration, and anything a player character
@@ -1232,8 +1236,21 @@ public sealed class FfxiGameSession : IDisposable
                 ChatReceived?.Invoke(new FfxiChatLine(
                     DateTimeOffset.Now,
                     FfxiChatMessageType.System1,
-                    spoken.Nameless ? "" : Speaker(spoken.UniqueNo),
+                    speaker,
                     said ?? $"(line {spoken.MessageId})"));
+
+                // A line that carries choices is a question, and a question
+                // belongs on the screen rather than in the log where it
+                // scrolls away. The choices are not held anywhere separate -
+                // 0x0b opens the list inside the line's own text and each 0x07
+                // starts the next one - so the dialogue table has already
+                // pulled them out by the time we get here.
+                IReadOnlyList<string> choices = Dialogue().Options(spoken.MessageId);
+                if (choices.Count > 0 && said is not null)
+                {
+                    NpcChoiceOffered?.Invoke(new FfxiNpcChoice(
+                        spoken.UniqueNo, spoken.MessageId, speaker, said, choices));
+                }
             }
 
             FfxiZoneTransition? transition = FfxiZoneTransition.TryParse(reply.Plaintext.AsSpan(offset, size));

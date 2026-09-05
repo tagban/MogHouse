@@ -138,6 +138,7 @@ public sealed class WorldLoop
         _session.JobChanged += OnJobChanged;
         _session.LookChanged += OnLookChanged;
         _session.ChatReceived += OnChat;
+        _session.NpcChoiceOffered += OnNpcChoice;
         _session.EntitiesChanged += OnEntities;
         _session.ZoneChanged += OnZoneChanged;
         _session.MusicChanged += PlayMusic;
@@ -155,6 +156,7 @@ public sealed class WorldLoop
         _items?.Dispose();
         _items = null;
         _session.ChatReceived -= OnChat;
+        _session.NpcChoiceOffered -= OnNpcChoice;
         _session.EntitiesChanged -= OnEntities;
         _session.ZoneChanged -= OnZoneChanged;
         _session.MusicChanged -= PlayMusic;
@@ -404,6 +406,7 @@ public sealed class WorldLoop
         while (!_world.Closed && !_leaving)
         {
             CountDown();
+            TakeNpcAnswer();
 
             if (_inventoryDirty)
             {
@@ -695,6 +698,62 @@ public sealed class WorldLoop
     }
 
     private void OnChat(FfxiChatLine line) => _world.Say(line.Sender, line.Text, line.Kind);
+
+    /// <summary>The question an NPC has on screen, or null.</summary>
+    private FfxiNpcChoice? _asking;
+
+    /// <summary>
+    /// Puts an NPC's question on the screen with its answers as buttons.
+    ///
+    /// The line is in the chat log either way - a question you have answered
+    /// is still something that was said to you - and this is the copy you can
+    /// act on. Only lines that carry choices get a box: making every remark an
+    /// NPC passes raise a modal would put a wall in front of the world for
+    /// "Good day to you", and retail does not do that either.
+    /// </summary>
+    private void OnNpcChoice(FfxiNpcChoice choice)
+    {
+        _asking = choice;
+
+        var rows = new List<NativeFormRow> { NativeFormRow.Label(choice.Text) };
+        foreach (string answer in choice.Choices)
+        {
+            rows.Add(NativeFormRow.Button(answer));
+        }
+
+        _world.ShowForm(string.IsNullOrEmpty(choice.Speaker) ? "\u2014" : choice.Speaker, "", rows);
+    }
+
+    /// <summary>
+    /// Takes the answer, if one has been pressed.
+    ///
+    /// The answer is not sent anywhere yet. Replying means the event option
+    /// packet, and which option value a choice maps to lives in the event
+    /// bytecode, which this project has not decoded - see docs/wiki/Events.md.
+    /// So the box shows the question, records what you picked, and closes.
+    /// Saying so in the log is deliberate: a button that silently does nothing
+    /// reads as broken, and a button that says it went nowhere reads as
+    /// unfinished, which is what it is.
+    /// </summary>
+    private void TakeNpcAnswer()
+    {
+        if (_asking is null || _world.TakeFormResult() is not { } answered)
+        {
+            return;
+        }
+
+        FfxiNpcChoice asked = _asking;
+        _asking = null;
+        _world.HideForm();
+
+        string picked = answered.Button >= 0 && answered.Button < asked.Choices.Count
+            ? asked.Choices[answered.Button]
+            : "";
+
+        _world.Say(null, picked.Length > 0
+            ? $"You chose \"{picked}\" - answering is not wired to the server yet."
+            : "Closed without answering.");
+    }
 
     private void OnEntities(IReadOnlyList<FfxiEntityUpdate> entities)
     {
