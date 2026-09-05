@@ -6185,8 +6185,11 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 
         // Floored so a line in a doorway barely wider than a character is still
         // visible, and capped so one standing in open country does not become a
-        // wall across the horizon.
-        const float half = std::clamp(narrowest * 0.5f, 1.5f, 10.0f);
+        // wall across the horizon. Then run past each jamb: the span is
+        // measured from the floor, the floor stops before the wall does, and a
+        // band that ends with the floor leaves a gap at both ends of what is
+        // meant to read as a line drawn across the entrance.
+        const float half = std::clamp(narrowest * 0.5f, 1.5f, 10.0f) + mh::kZoneLineOverhang;
         return {axisX, axisZ, half};
     };
 

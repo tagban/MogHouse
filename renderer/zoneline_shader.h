@@ -40,6 +40,15 @@ inline constexpr int kZoneLineSegments = 48;
 /// thigh of a Galka, which reads as a marker to either.
 inline constexpr float kZoneLineHeight = 0.60f;
 
+/// How far past the walkable ground the band runs, at each end, in world units.
+///
+/// The opening is measured from the collision, so it stops exactly where the
+/// floor does - and a band that stops exactly where the floor does leaves a
+/// gap at each jamb, because the wall the doorway is cut through starts a
+/// little further out than the ground you can stand on. Running it past the
+/// edge closes the line across the whole entrance, which is what it is for.
+inline constexpr float kZoneLineOverhang = 1.75f;
+
 inline constexpr const char* kZoneLineShader = R"(
 struct ZoneLineUniforms {
     viewProjection : mat4x4<f32>,
