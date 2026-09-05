@@ -165,6 +165,24 @@ public:
     /// as one seen through a wall, and only this tells them apart.
     std::optional<float> firstSolidAlong(const Vec3& from, const Vec3& to) const;
 
+    /// Builds one from bare world-space triangles, three corners each.
+    ///
+    /// For asking what you can see rather than what you can walk on. The
+    /// collision mesh is a different dataset from the drawn one and knows
+    /// nothing about how anything looks - a fence is a solid box in it, and a
+    /// tree is a solid cylinder - so a sight test against it hides a name
+    /// behind a railing you can plainly see over, and behind leaves.
+    ///
+    /// The drawn geometry does know: a mesh is cutout, blended, or opaque, and
+    /// only the last of those should stop a name. Handing those triangles here
+    /// gets the same grid and the same segment test over the right set. In
+    /// West Ronfaure that is 353,080 triangles against 589,890 left out, which
+    /// is the foliage.
+    ///
+    /// Every triangle counts as a wall, since "can I see through it" has no
+    /// notion of walkable.
+    static Collision fromTriangles(const std::vector<Vec3>& corners);
+
     Vec3 boundsMin() const { return boundsMin_; }
     Vec3 boundsMax() const { return boundsMax_; }
 
@@ -189,6 +207,9 @@ private:
 
     void forEachNear(float minX, float minZ, float maxX, float maxZ,
                      const std::vector<uint32_t>*& single, std::vector<uint32_t>& scratch) const;
+
+    /// Sorts the triangles into cells. Shared by both ways of building one.
+    void buildGrid(const Vec3& lo, const Vec3& hi);
 
     std::vector<Triangle> triangles_;
     std::vector<std::vector<uint32_t>> grid_;

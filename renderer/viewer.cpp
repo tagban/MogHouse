@@ -2844,6 +2844,14 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
 
     // Filled the first time entities arrive - see the nameplate loop, which
     // works out the zone from an entity's own id.
+    /// The drawn world's opaque surfaces, for asking what can be seen.
+    ///
+    /// Not the collision, which is a different dataset and knows nothing about
+    /// how a thing looks - a fence is a solid box in it and a tree a solid
+    /// cylinder, so a name went missing behind a railing you can see over and
+    /// behind leaves.
+    mh::Collision sight;
+
     ffxi::EntityNames entityNames;
     bool triedEntityNames = false;
     std::optional<mh::Scene> zone;
@@ -3302,6 +3310,57 @@ int mh::runViewer(const ViewerOptions& options, ViewerLink* link)
                             currentZoneName->c_str());
             }
             std::printf("collision: %zu triangles, %zu walls\n", collision.triangleCount(), collision.wallCount());
+            {
+                // What a sight test against the drawn world would have to
+                // intersect: the opaque draws only. Foliage and glass are
+                // excluded because they are exactly what should not block a
+                // name - you can see a chocobo through a fence and through
+                // leaves, and not through a trunk.
+                size_t seeThrough = 0;
+                std::vector<mh::Vec3> corners;
+                for (const mh::InstancedDraw& draw : zone->draws)
+                {
+                    const size_t tris = static_cast<size_t>(draw.indexCount / 3) * draw.instanceCount;
+                    if (draw.cutout || draw.blend || draw.water || draw.effect)
+                    {
+                        seeThrough += tris;
+                        continue;
+                    }
+
+                    for (uint32_t n = 0; n < draw.instanceCount; ++n)
+                    {
+                        const size_t at = (static_cast<size_t>(draw.instanceOffset) + n) * 16;
+                        if (at + 16 > zone->instances.size())
+                        {
+                            break;
+                        }
+                        const float* m = zone->instances.data() + at;
+                        const auto place = [&](uint32_t index) {
+                            const mh::Vertex& v = zone->vertices[index];
+                            return mh::Vec3{m[0] * v.position[0] + m[4] * v.position[1] + m[8] * v.position[2] + m[12],
+                                            m[1] * v.position[0] + m[5] * v.position[1] + m[9] * v.position[2] + m[13],
+                                            m[2] * v.position[0] + m[6] * v.position[1] + m[10] * v.position[2] + m[14]};
+                        };
+                        for (uint32_t i = 0; i + 2 < draw.indexCount; i += 3)
+                        {
+                            const uint32_t base = draw.indexOffset + i;
+                            if (base + 2 >= zone->indices.size())
+                            {
+                                break;
+                            }
+                            corners.push_back(place(zone->indices[base]));
+                            corners.push_back(place(zone->indices[base + 1]));
+                            corners.push_back(place(zone->indices[base + 2]));
+                        }
+                    }
+                }
+
+                // What a name can be hidden behind. See Collision::fromTriangles
+                // for why this is not the collision mesh.
+                sight = mh::Collision::fromTriangles(corners);
+                std::printf("sight: %zu opaque triangles drawn, %zu see-through left out\n",
+                            corners.size() / 3, seeThrough);
+            }
             std::printf("zone %s: %zu triangles\n", zoneId.c_str(), zone->indices.size() / 3);
             std::printf("  bounds x %.1f..%.1f  y %.1f..%.1f  z %.1f..%.1f\n", zone->boundsMin.x, zone->boundsMax.x,
                         zone->boundsMin.y, zone->boundsMax.y, zone->boundsMin.z, zone->boundsMax.z);
@@ -6471,11 +6530,29 @@ const float kWavePeriod = [] {
 
     /// How fast a jump leaves the ground, in yalms a second.
     ///
-    /// Against the gravity above this is a rise of about three quarters of a
-    /// yalm over roughly half a second, which is the shape of the animation:
-    /// the clip is what says how high a jump looks, and the arc should not
-    /// finish long before or long after it does.
-    constexpr float kJumpSpeed = 6.2f;
+    /// At 6.2 this rose about three quarters of a yalm over roughly half a
+    /// second, matched to the animation - the clip is what says how high a
+    /// jump looks, and the arc should not finish long before or long after it
+    /// does. But three quarters of a yalm does not clear a barrier of one, and
+    /// what a jump is actually for is getting over things.
+    ///
+    /// 7.5 rises 1.08 yalms in 0.58 seconds. A tenth of a second longer in the
+    /// air than the clip wants, for a third again the height.
+    ///
+    /// MOGHOUSE_JUMP overrides it, since how high is high enough is a thing
+    /// you find by trying it against the barriers that are actually in the way.
+    const float kJumpSpeed = [] {
+        const char* set = std::getenv("MOGHOUSE_JUMP");
+        if (set != nullptr)
+        {
+            const float given = std::strtof(set, nullptr);
+            if (given > 0.1f)
+            {
+                return given;
+            }
+        }
+        return 7.5f;
+    }();
 
     float fallSpeed = 0.0f;
 
@@ -10822,27 +10899,30 @@ const float kWavePeriod = [] {
                     //
                     // MOGHOUSE_PLATE_OCCLUSION picks how strict that is:
                     //
-                    //   2  anything solid, floors and ceilings included (the
-                    //      default, and what "not through walls" asked for)
-                    //   1  walls only - a floor or a ceiling between the eye
-                    //      and the name does not hide it
+                    //   2  the drawn world's opaque surfaces (the default)
+                    //   1  the collision mesh, which is stricter
                     //   0  off, names always shown
                     //
-                    // The reason for the switch is a chocobo pen. Collision for
-                    // a fence or a railing is usually a full-height box however
-                    // low the rail looks, so the ray is stopped by something
-                    // you can plainly see over, and the names only appear when
-                    // the camera rises above it. No amount of aiming the ray
-                    // higher fixes that; the geometry it is asking about is the
-                    // wrong shape.
+                    // A trunk should hide a name and leaves should not, and the
+                    // collision mesh cannot tell you which is which: it is a
+                    // different dataset from the drawn one, where a fence is a
+                    // solid box and a tree a solid cylinder. So the ray was
+                    // stopped by railings you can see over, and names only
+                    // appeared once the camera rose above them.
+                    //
+                    // The drawn geometry does know. A mesh is cutout, blended
+                    // or opaque, and only the last should stop a name - which
+                    // in West Ronfaure leaves out 589,890 triangles of foliage
+                    // and keeps 353,080.
                     static const int occlusion = [] {
                         const char* set = std::getenv("MOGHOUSE_PLATE_OCCLUSION");
                         return set ? static_cast<int>(std::strtol(set, nullptr, 10)) : 2;
                     }();
                     const mh::Vec3 plateAt{entity.x, headY, entity.z};
-                    const bool blocked = occlusion == 2   ? collision.firstSolidAlong(camera.eye(), plateAt).has_value()
-                                         : occlusion == 1 ? collision.firstWallAlong(camera.eye(), plateAt).has_value()
-                                                          : false;
+                    const bool blocked =
+                        occlusion == 2   ? sight.firstSolidAlong(camera.eye(), plateAt).has_value()
+                        : occlusion == 1 ? collision.firstSolidAlong(camera.eye(), plateAt).has_value()
+                                         : false;
                     if (blocked)
                     {
                         sayWhy("behind something solid");

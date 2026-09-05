@@ -152,6 +152,45 @@ Collision::Collision(const std::vector<const ffxi::Zone*>& zones)
     }
     }
 
+    buildGrid(lo, hi);
+}
+
+Collision Collision::fromTriangles(const std::vector<Vec3>& corners)
+{
+    Collision built;
+    Vec3 lo{std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
+    Vec3 hi{std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest(),
+            std::numeric_limits<float>::lowest()};
+
+    built.triangles_.reserve(corners.size() / 3);
+    for (size_t i = 0; i + 2 < corners.size(); i += 3)
+    {
+        Triangle triangle;
+        triangle.a = corners[i];
+        triangle.b = corners[i + 1];
+        triangle.c = corners[i + 2];
+        triangle.normal = normalise(cross(triangle.b - triangle.a, triangle.c - triangle.a));
+
+        // Nothing here is walkable: this is asked "can I see through you",
+        // which a floor answers the same way a wall does.
+        triangle.walkable = false;
+        triangle.hasWater = false;
+        triangle.waterY = 0.0f;
+        built.triangles_.push_back(triangle);
+
+        for (const Vec3& corner : {triangle.a, triangle.b, triangle.c})
+        {
+            lo = {std::min(lo.x, corner.x), std::min(lo.y, corner.y), std::min(lo.z, corner.z)};
+            hi = {std::max(hi.x, corner.x), std::max(hi.y, corner.y), std::max(hi.z, corner.z)};
+        }
+    }
+
+    built.buildGrid(lo, hi);
+    return built;
+}
+
+void Collision::buildGrid(const Vec3& lo, const Vec3& hi)
+{
     if (triangles_.empty())
     {
         return;
